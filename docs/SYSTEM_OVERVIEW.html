@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>System Overview — NEMA-6AXIS-ARM-CONTROLLER</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#0f172a;color:#f8fafc;min-height:100vh;padding:20px;display:flex;flex-direction:column;align-items:center}
+.header{text-align:center;margin-bottom:14px}
+.header h1{font-size:1.5rem;color:#38bdf8}
+.header p{font-size:.85rem;color:#94a3b8;margin-top:4px}
+.badge{padding:3px 10px;border-radius:12px;font-size:.7rem;text-transform:uppercase;font-weight:700;display:inline-block}
+.b-ok{background:#166534;color:#4ade80}.b-info{background:#1e3a8a;color:#93c5fd}.b-warn{background:#78350f;color:#fcd34d}
+.tabs{display:flex;gap:6px;background:#1e293b;padding:6px;border-radius:10px;margin-bottom:16px;flex-wrap:wrap;justify-content:center;width:100%;max-width:1000px}
+.tab-btn{background:transparent;border:none;color:#94a3b8;padding:8px 14px;border-radius:8px;font-size:.85rem;font-weight:600;cursor:pointer}
+.tab-btn.active{background:#38bdf8;color:#0f172a}
+.pane{display:none;width:100%;max-width:1000px}
+.pane.active{display:block}
+.card{background:#1e293b;border-radius:14px;padding:18px;box-shadow:0 8px 20px rgba(0,0,0,.35);margin-bottom:14px}
+.card h2{font-size:1.05rem;color:#38bdf8;margin-bottom:12px;border-bottom:1px solid #334155;padding-bottom:8px}
+.card h3{font-size:.92rem;color:#7dd3fc;margin:12px 0 6px}
+table{width:100%;border-collapse:collapse;font-size:.82rem;margin:8px 0}
+th{background:#0f172a;color:#94a3b8;text-transform:uppercase;font-size:.68rem;letter-spacing:.04em;padding:7px 9px;text-align:left;border:1px solid #334155}
+td{padding:6px 9px;border:1px solid #334155;color:#cbd5e1;vertical-align:top}
+td code,p code,li code{background:#0f172a;color:#7dd3fc;padding:1px 5px;border-radius:4px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.78rem}
+.muted{color:#64748b;font-size:.78rem}
+ul,ol{margin:6px 0 6px 22px;font-size:.85rem;color:#cbd5e1;line-height:1.55}
+p.desc{font-size:.86rem;color:#cbd5e1;line-height:1.55;margin-bottom:8px}
+.mod{background:#0f172a;border:1px solid #334155;border-radius:10px;margin-bottom:8px;overflow:hidden}
+.mod summary{cursor:pointer;padding:11px 14px;font-weight:700;color:#cbd5e1;font-size:.88rem;list-style:none;display:flex;align-items:center;gap:10px}
+.mod summary::-webkit-details-marker{display:none}
+.mod summary::before{content:"+";color:#38bdf8;font-weight:900;width:16px}
+.mod[open] summary::before{content:"−"}
+.mod summary:hover{color:#38bdf8}
+.mod .body{padding:2px 16px 14px;font-size:.84rem;color:#cbd5e1;line-height:1.55}
+.mod .file{margin-left:auto;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.72rem;color:#64748b;font-weight:400}
+.tag{display:inline-block;background:#334155;color:#94a3b8;border-radius:5px;padding:1px 7px;font-size:.68rem;margin-right:4px}
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+.fbox{background:#0f172a;border:1px solid #38bdf8;color:#e2e8f0;border-radius:8px;padding:8px 12px;font-size:.78rem;text-align:center;min-width:110px}
+.fbox.red{border-color:#dc2626}.fbox.green{border-color:#059669}.fbox.amber{border-color:#d97706}
+.farrow{color:#38bdf8;font-size:1.1rem;font-weight:700}
+.svgwrap{background:#0f172a;border:1px solid #334155;border-radius:10px;padding:10px;margin:10px 0;overflow-x:auto}
+.legend{font-size:.72rem;color:#64748b;margin-top:4px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.footer{text-align:center;color:#475569;font-size:.75rem;margin:18px 0 6px}
+.kv{display:flex;gap:8px;font-size:.83rem;margin:3px 0}
+.kv b{color:#7dd3fc;min-width:150px;font-weight:600}
+.warn-box{border-left:3px solid #d97706;background:#1c1917;border-radius:0 8px 8px 0;padding:10px 14px;font-size:.83rem;color:#fcd34d;margin:10px 0;line-height:1.5}
+.ok-box{border-left:3px solid #059669;background:#0c1a17;border-radius:0 8px 8px 0;padding:10px 14px;font-size:.83rem;color:#6ee7b7;margin:10px 0;line-height:1.5}
+@media(max-width:640px){body{padding:10px}.card{padding:14px}}
+.tblwrap{overflow-x:auto}
+tr:hover td{background:#243247}
+#toTop{position:fixed;bottom:18px;left:18px;width:42px;height:42px;border-radius:50%;background:#334155;color:#e2e8f0;border:1px solid #475569;font-size:1.15rem;cursor:pointer;display:none;z-index:60;box-shadow:0 6px 16px rgba(0,0,0,.4)}
+#toTop:hover{background:#475569}
+@media print{
+ body{background:#fff;color:#0f172a;padding:0}
+ .tabs,#toTop{display:none!important}
+ .pane{display:block!important;max-width:none}
+ .card{background:#fff;color:#111;box-shadow:none;border:1px solid #cbd5e1;break-inside:avoid}
+ .card h2{color:#0c4a6e;border-color:#cbd5e1}
+ .card h3{color:#075985}
+ th{background:#f1f5f9;color:#334155}
+ td{color:#1e293b;border-color:#cbd5e1}
+ tr:hover td{background:#fff}
+ td code,p code,li code{background:#f1f5f9;color:#0369a1}
+ .svgwrap{background:#fff;border-color:#cbd5e1}
+ .mod{background:#fff;border-color:#cbd5e1}
+ .mod summary{color:#111}
+ .muted,.legend,.file,.footer{color:#475569}
+ .desc,ul,ol{color:#1e293b}
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>NEMA-6AXIS-ARM-CONTROLLER <span id="fwver" class="badge b-info">v2.5.0-PRO</span></h1>
+  <p>Bản đồ hệ thống sống — ESP32-S3 · PlatformIO · Arduino framework · FreeRTOS
+     &nbsp;·&nbsp; Mục tiêu: Web app (STA+AP) · Homing fusion · Joint jog (FK) · IK vẽ line/circle trên giấy</p>
+</div>
+
+<div class="tabs">
+  <button class="tab-btn active" data-t="ov">Tổng quan</button>
+  <button class="tab-btn" data-t="hw">Phần cứng</button>
+  <button class="tab-btn" data-t="rtos">RTOS &amp; Tasks</button>
+  <button class="tab-btn" data-t="mod">Modules</button>
+  <button class="tab-btn" data-t="fsm">FSM &amp; Luồng dữ liệu</button>
+  <button class="tab-btn" data-t="kin">Kinematics</button>
+  <button class="tab-btn" data-t="api">REST API</button>
+  <button class="tab-btn" data-t="safety">An toàn &amp; TODO</button>
+</div>
+
+<!-- ============ TỔNG QUAN ============ -->
+<div id="ov" class="pane active">
+  <div class="card">
+    <h2>Kiến trúc tổng thể</h2>
+    <p class="desc">Cánh tay robot 6 bậc tự do (6-DOF), điều khiển bởi ESP32-S3 DevKitC-1. Firmware C++17
+    trên Arduino framework + FreeRTOS, build bằng PlatformIO. Bút vẽ gắn đồng trục J6.</p>
+    <div class="flow">
+      <div class="fbox">Trình duyệt<br><span class="muted">polling 300ms</span></div>
+      <span class="farrow">⇄</span>
+      <div class="fbox">WebServer<br>ESP32 port 80</div>
+      <span class="farrow">→</span>
+      <div class="fbox">ArmCommand queue<br><span class="muted">depth 24</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox green">Motion task<br>core 1 @ 100Hz</div>
+      <span class="farrow">→</span>
+      <div class="fbox">Motor step timers<br><span class="muted">S-curve ×6</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox amber">Stepper drivers<br>4×TMC2209 + 2×A4988</div>
+    </div>
+    <div class="grid2">
+      <div>
+        <h3>Quyết định thiết kế đã chốt</h3>
+        <ul>
+          <li>J1–J4: TMC2209 chung UART1, địa chỉ 0b00–0b11, <b>không chân DIR</b> — đảo chiều qua register <code>shaft()</code></li>
+          <li>J5–J6: A4988 STEP+DIR, Vref cứng (không điều khiển dòng qua firmware)</li>
+          <li><b>Không có chân EN</b> — driver luôn enabled (<code>toff(4)</code>)</li>
+          <li>WiFi credentials lưu NVS, cấp phát qua trang provisioning ở chế độ AP — đổi mạng không cần flash lại</li>
+          <li>Vị trí home từng khớp lưu NVS (raw góc AS5600 lúc home) → boot lại <b>không cần home lại</b> nếu encoder còn nguyên</li>
+          <li>Homing: J1/J2 về giữa hành trình, J3/J4 tại min-stop/stall + backoff</li>
+          <li>Vẽ: IK closed-form pen-down (bút thẳng đứng, θ4=θ6=0), nâng bút = nâng Z</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Trạng thái hiện tại</h3>
+        <div class="kv"><b>Build firmware</b><span class="badge b-ok">SUCCESS</span>&nbsp;<span class="muted">RAM 15.0% (49,268 B) · Flash 24.9% (833,077 B)</span></div>
+        <div class="kv"><b>Test kinematics</b><span class="badge b-ok">ALL PASSED</span>&nbsp;<span class="muted">IK roundtrip 3280/3280, sai số ≤ 0.5 mm</span></div>
+        <div class="kv"><b>Hardware</b><span class="badge b-warn">chưa commissioning</span></div>
+        <h3>Tài liệu nguồn chân lý</h3>
+        <ul>
+          <li><code>docs/ARM_GEOMETRY.md</code> — hình học cơ khí, bảng DH (KHÔNG được suy diễn lại)</li>
+          <li><code>docs/IMPLEMENTATION_LOG.md</code> — nhật ký mọi thay đổi</li>
+          <li><code>docs/SYSTEM_OVERVIEW.html</code> — file này (bản đồ hệ thống)</li>
+          <li><code>AGENTS.md</code> — quy tắc bảo trì cho AI agent</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PHẦN CỨNG ============ -->
+<div id="hw" class="pane">
+  <div class="card">
+    <h2>Sơ đồ khối phần cứng</h2>
+    <div class="svgwrap">
+    <svg viewBox="0 0 960 330" width="100%" style="min-width:720px" xmlns="http://www.w3.org/2000/svg">
+      <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#38bdf8"/></marker></defs>
+      <!-- ESP32 -->
+      <rect x="380" y="120" width="200" height="90" rx="12" fill="#1e293b" stroke="#38bdf8" stroke-width="2"/>
+      <text x="480" y="152" text-anchor="middle" fill="#38bdf8" font-size="15" font-weight="bold">ESP32-S3</text>
+      <text x="480" y="172" text-anchor="middle" fill="#94a3b8" font-size="11">DevKitC-1</text>
+      <text x="480" y="192" text-anchor="middle" fill="#64748b" font-size="10">FreeRTOS · WiFi · NVS</text>
+      <!-- UART cluster -->
+      <rect x="40" y="30" width="240" height="70" rx="10" fill="#0f172a" stroke="#334155"/>
+      <text x="160" y="50" text-anchor="middle" fill="#cbd5e1" font-size="12" font-weight="bold">4× TMC2209 (J1–J4)</text>
+      <text x="160" y="68" text-anchor="middle" fill="#94a3b8" font-size="10">UART addr 0b00–0b11 · STEP: 1/2/41/42</text>
+      <text x="160" y="84" text-anchor="middle" fill="#94a3b8" font-size="10">đảo chiều qua shaft() — không DIR pin</text>
+      <!-- A4988 -->
+      <rect x="40" y="230" width="240" height="70" rx="10" fill="#0f172a" stroke="#334155"/>
+      <text x="160" y="250" text-anchor="middle" fill="#cbd5e1" font-size="12" font-weight="bold">2× A4988 (J5–J6)</text>
+      <text x="160" y="268" text-anchor="middle" fill="#94a3b8" font-size="10">STEP: 38/40 · DIR: 39/47</text>
+      <text x="160" y="284" text-anchor="middle" fill="#94a3b8" font-size="10">Vref cứng — firmware không set dòng</text>
+      <!-- UART bus -->
+      <line x1="280" y1="65" x2="420" y2="120" stroke="#38bdf8" stroke-width="1.6" marker-end="url(#ar)"/>
+      <text x="330" y="80" fill="#38bdf8" font-size="10">UART1 RX15/TX16 @115200 (+mutex)</text>
+      <line x1="280" y1="265" x2="420" y2="210" stroke="#38bdf8" stroke-width="1.6" marker-end="url(#ar)"/>
+      <text x="315" y="255" fill="#38bdf8" font-size="10">GPIO xung trực tiếp</text>
+      <!-- I2C chain -->
+      <rect x="680" y="30" width="130" height="56" rx="10" fill="#0f172a" stroke="#334155"/>
+      <text x="745" y="52" text-anchor="middle" fill="#cbd5e1" font-size="12" font-weight="bold">PCA9548A</text>
+      <text x="745" y="70" text-anchor="middle" fill="#94a3b8" font-size="10">mux I2C 0x70</text>
+      <rect x="850" y="18" width="100" height="34" rx="8" fill="#0f172a" stroke="#334155"/><text x="900" y="39" text-anchor="middle" fill="#cbd5e1" font-size="10">AS5600 J1..J3</text>
+      <rect x="850" y="62" width="100" height="34" rx="8" fill="#0f172a" stroke="#334155"/><text x="900" y="83" text-anchor="middle" fill="#cbd5e1" font-size="10">AS5600 J4..J6</text>
+      <line x1="810" y1="58" x2="850" y2="35" stroke="#64748b" stroke-width="1.4" marker-end="url(#ar)"/>
+      <line x1="810" y1="58" x2="850" y2="79" stroke="#64748b" stroke-width="1.4" marker-end="url(#ar)"/>
+      <line x1="680" y1="58" x2="580" y2="120" stroke="#38bdf8" stroke-width="1.6" marker-end="url(#ar)"/>
+      <text x="618" y="80" fill="#38bdf8" font-size="10">I2C SDA8/SCL9 @800kHz</text>
+      <!-- Endstops -->
+      <rect x="680" y="230" width="270" height="70" rx="10" fill="#0f172a" stroke="#dc2626"/>
+      <text x="815" y="250" text-anchor="middle" fill="#fca5a5" font-size="12" font-weight="bold">6× Endstop (J1–J3, MIN+MAX)</text>
+      <text x="815" y="268" text-anchor="middle" fill="#94a3b8" font-size="10">GPIO 5/6 · 7/10 · 11/12 — active LOW pull-up</text>
+      <text x="815" y="284" text-anchor="middle" fill="#94a3b8" font-size="10">ISR FALLING → stop motor ngay + latch</text>
+      <line x1="680" y1="245" x2="580" y2="185" stroke="#dc2626" stroke-width="1.6" marker-end="url(#ar)" opacity=".7"/>
+      <!-- Motors -->
+      <rect x="40" y="130" width="120" height="40" rx="8" fill="#0f172a" stroke="#d97706"/>
+      <text x="100" y="155" text-anchor="middle" fill="#fcd34d" font-size="11">Động cơ NEMA ×6</text>
+      <line x1="160" y1="65" x2="115" y2="128" stroke="#d97706" stroke-width="1.4" marker-end="url(#ar)" opacity=".7"/>
+      <line x1="160" y1="230" x2="115" y2="172" stroke="#d97706" stroke-width="1.4" marker-end="url(#ar)" opacity=".7"/>
+      <text x="122" y="105" fill="#d97706" font-size="9" transform="rotate(-62 122 105)">gear 6/20/20/4/3/3 : 1</text>
+    </svg>
+    </div>
+    <p class="legend">Tỷ số truyền: J1=6:1 · J2=20:1 · J3=20:1 · J4=4:1 · J5=3:1 · J6=3:1 — stepper 1.8° (200 bước/vòng), microstep mặc định 1/16.</p>
+  </div>
+
+  <div class="card">
+    <h2>Bảng phân bổ GPIO (đã chốt 2026-08-26)</h2>
+    <table>
+      <tr><th>Chức năng</th><th>GPIO</th><th>Ghi chú</th></tr>
+      <tr><td>UART1 TMC2209 (RX / TX)</td><td><code>15</code> / <code>16</code></td><td>Chung cho cả 4 driver J1–J4, baud 115200, bảo vệ bằng <code>g_uartMutex</code></td></tr>
+      <tr><td>STEP J1 / J2 / J3 / J4</td><td><code>1</code> / <code>2</code> / <code>41</code> / <code>42</code></td><td>Xung từ esp_timer (write trực tiếp thanh ghi GPIO.out)</td></tr>
+      <tr><td>STEP J5 / DIR J5</td><td><code>38</code> / <code>39</code></td><td>A4988</td></tr>
+      <tr><td>STEP J6 / DIR J6</td><td><code>40</code> / <code>47</code></td><td>A4988</td></tr>
+      <tr><td>I2C SDA / SCL</td><td><code>8</code> / <code>9</code></td><td>800 kHz Fast-Mode Plus, timeout 3ms</td></tr>
+      <tr><td>Endstop J1 MIN/MAX</td><td><code>5</code> / <code>6</code></td><td rowspan="3">INPUT_PULLUP, active LOW, ISR cạnh FALLING, debounce phần mềm 50 ms</td></tr>
+      <tr><td>Endstop J2 MIN/MAX</td><td><code>7</code> / <code>10</code></td></tr>
+      <tr><td>Endstop J3 MIN/MAX</td><td><code>11</code> / <code>12</code></td></tr>
+      <tr><td>Dự phòng còn trống</td><td colspan="2"><code>13</code>, <code>14</code>, <code>17</code>, <code>18</code>, <code>48</code></td></tr>
+      <tr><td>Cấm dùng</td><td colspan="2"><code>4</code> (bootloop) · <code>0/3/45/46</code> (strapping) · <code>19/20</code> (USB-OTG) · <code>26–32</code> (flash nội bộ)</td></tr>
+    </table>
+    <div class="warn-box">Dấu hiệu chiều quay: <code>AXIS_STEP_SIGN</code> và <code>AXIS_ENC_SIGN</code> trong config.h hiện đều +1 — phải hiệu chỉnh thực tế lúc lắp ráp (xem checklist An toàn).</div>
+  </div>
+</div>
+
+<!-- ============ RTOS ============ -->
+<div id="rtos" class="pane">
+  <div class="card">
+    <h2>Các task & ngữ cảnh thực thi</h2>
+    <table>
+      <tr><th>Tên</th><th>Core</th><th>Prio</th><th>Chu kỳ</th><th>Stack</th><th>Trách nhiệm</th></tr>
+      <tr>
+        <td><code>SensorScanTask</code></td><td>0</td><td>4</td><td>5 ms (200 Hz)</td><td>4096 B</td>
+        <td>Quét 6× AS5600 qua PCA9548A: chọn kênh → đọc ANGLE reg → lọc EMA α=0.2, cập nhật accumulated angle + turn count. Đăng ký Task WDT (5 s). Nếu <b>cả 6</b> sensor lỗi → tự phục hồi I2C bus (9 xung SCL) rồi delay 50 ms.</td>
+      </tr>
+      <tr>
+        <td><code>arm_motion</code></td><td>1</td><td>3</td><td>10 ms (100 Hz)</td><td>5120 B</td>
+        <td>Tim chính của hệ: (1) homing FSM tick, (2) planner tick, (3) phát hiện endstop latch ngoài homing → FAULT, (4) drift watchdog mỗi 500 ms, (5) tính lại mode, (6) rút toàn bộ lệnh khỏi queue.</td>
+      </tr>
+      <tr>
+        <td><code>loopTask</code> (Arduino)</td><td>1</td><td>1</td><td>liên tục</td><td>mặc định</td>
+        <td>Chỉ gọi <code>server.handleClient()</code> — xử lý HTTP. <b>Không đụng hardware.</b></td>
+      </tr>
+      <tr>
+        <td><code>motor_step</code> ×6 (esp_timer)</td><td>esp_timer task</td><td>cao</td><td>one-shot tự nối chuỗi</td><td>—</td>
+        <td>Sinh xung STEP: set pin → tính interval kế (S-curve) → <code>esp_timer_start_once</code> → clear pin. Callback IRAM_ATTR, mọi state là atomic. Cập nhật <code>absSteps</code> mỗi xung.</td>
+      </tr>
+      <tr>
+        <td>ISR endstop ×6</td><td>ngắt</td><td>—</td><td>cạnh FALLING</td><td>—</td>
+        <td>Debounce 50 ms (so sánh <code>esp_timer_get_time()</code>), set latch, gọi <code>motor->stopFromISR()</code> ngay lập tức.</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Đồng bộ & chia sẻ dữ liệu</h2>
+    <ul>
+      <li><code>g_uartMutex</code> — mọi giao dịch UART tới TMC2209 (đọc ghi register) phải take/give; timeout ngắn 10–100 ms, fail thì bỏ lệnh (an toàn hơn treo).</li>
+      <li><code>Sensor::dataMutex</code> — bảo vệ mảng góc lọc giữa sensor task (ghi) và các reader.</li>
+      <li><code>Sensor::i2cMutex</code> — bảo vệ bus I2C khi chẩn đoán đọc song song.</li>
+      <li>Command queue — <code>xQueueCreate(24, sizeof(ArmCommand))</code>; Web submit với timeout 10–50 ms, đầy → trả HTTP 503.</li>
+      <li><code>Motor</code> — mọi flag vận hành là <code>std::atomic</code>: chạy/dừng, hướng, interval, steps remaining, absSteps (int64).</li>
+      <li><code>RtosLockGuard</code> (rtos_guard.h) — RAII take/give mutex, hỗ trợ timeout ms.</li>
+    </ul>
+    <h3>Timeline một chu kỳ motion task (10 ms)</h3>
+    <div class="flow">
+      <div class="fbox">hc->tick()<br><span class="muted">homing FSM</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox">pl->tick()<br><span class="muted">planner segment</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox red">endstop check<br><span class="muted">ngoài homing ⇒ FAULT</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox">drift check<br><span class="muted">mỗi 50 tick = 500 ms</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox">mode compute</div>
+      <span class="farrow">→</span>
+      <div class="fbox green">drain queue<br><span class="muted">execute(cmd)</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MODULES ============ -->
+<div id="mod" class="pane">
+  <div class="card">
+    <h2>Bản đồ 13 module (click để mở chi tiết)</h2>
+
+    <details class="mod" open>
+      <summary>config.h — mọi hằng số cấu hình <span class="file">src/config.h</span></summary>
+      <div class="body">
+        Single source of truth firmware-side: pinout, địa chỉ UART, gear ratio, dòng điện homing/normal,
+        tốc độ step (interval µs: default 400 ≈ 2500 step/s, min 120 ≈ 8333/s, max 2500), deadband closed-loop
+        (enter 0.3°/exit 0.8°), ngưỡng drift 5°, tham số DH + offset θ2=−90°, soft limit từng khớp
+        (J1 ±90°, J2 ±90°, J3 [0;90°], J4 ±180°, J5 ±120°, J6 ±360°), tham số vẽ (lift 5 mm, feed 20 mm/s,
+        segment 1 mm, queue 24), cấu hình task, WiFi/AP/mDNS.
+      </div>
+    </details>
+
+    <details class="mod">
+      <summary>motor.* — điều khiển stepper thống nhất TMC2209/A4988 <span class="file">src/motor.h/.cpp</span></summary>
+      <div class="body">
+        Một class cho cả hai loại driver (<code>isTmc()</code> phân biệt).<br>
+        <span class="tag">step engine</span> esp_timer one-shot nối chuỗi; S-curve smoothstep theo vận tốc
+        (v = vStart + s·(vTarget−vStart), s = x²(3−2x)); accel/decel ≤ 100 bước hoặc nửa chừng với move ngắn.<br>
+        <span class="tag">position</span> <code>absSteps</code> atomic int64, tăng/giảm theo hướng mỗi xung — nguồn chân lý vị trí.<br>
+        <span class="tag">direction</span> A4988: chân DIR. TMC2209 không DIR: ghi register <code>shaft()</code> qua UART (cache <code>lastShaftDir</code>, chỉ ghi khi đổi).<br>
+        <span class="tag">config TMC</span> rms_current, microsteps, spreadCycle (+pwm_autoscale off), ihold/iholddelay, toff=4 luôn enable, pdn_disable, mstep_reg_select.<br>
+        <span class="tag">diag</span> <code>testUART()</code> (version phải 0x21), <code>getDriverStatus()</code> parse DRV_STATUS (overtemp/short/openload/cs_actual), <code>getSGResult()</code>.
+      </div>
+    </details>
+
+    <details class="mod">
+      <summary>sensor.* — AS5600 × 6 qua PCA9548A <span class="file">src/sensor.h/.cpp</span></summary>
+      <div class="body">
+        <span class="tag">scan</span> 200 Hz: mux channel i → đọc 2 byte reg 0x0E → <code>filter()</code>.<br>
+        <span class="tag">filter</span> EMA α=0.2 có xử lý wrap 360°; đồng thời delta raw (wrap-corrected) cộng vào
+        <code>accumulated_angles</code> và đếm <code>turn_counts</code> — cho phép theo dõi góc vượt 1 vòng.<br>
+        <span class="tag">CONF</span> hysteresis 2 LSB, slow filter 16x, analog output, PWM off.<br>
+        <span class="tag">health</span> đọc fail liên tiếp &gt; 5 → <code>sensor_error[i]</code>; AGC khoẻ trong [30;225];
+        chẩn đoán đầy đủ STATUS/AGC/MAG/RAW/ANGLE/ZPOS/MPOS/MANG/ZMCO.<br>
+        <span class="tag">recovery</span> tất cả sensor lỗi → <code>recoverI2CBus()</code>: 9 xung SCL + STOP giả, re-init Wire.
+      </div>
+    </details>
+
+    <details class="mod">
+      <summary>endstop.* — công tắc hành trình an toàn <span class="file">src/endstop.h/.cpp</span></summary>
+      <div class="body">
+        6 kênh (J1–J3 × MIN/MAX). ISR FALLING: debounce 50 ms bằng timestamp, set <code>latched</code>,
+        gọi <code>owner[axis]->stopFromISR()</code> — tức thì, không qua queue.<br>
+        FSM homing chủ động <code>consumeLatch()</code> (đọc-và-xoá nguyên tử); motion task kiểm tra
+        <code>anyLatched() && !homing</code> mỗi tick ⇒ FAULT toàn hệ.
+      </div>
+    </details>
+
+    <details class="mod">
+      <summary>joint_model.* — mô hình vị trí khớp tuyệt đối <span class="file">src/joint_model.h/.cpp</span></summary>
+      <div class="body">
+        Quy đổi: <code>stepsPerDegree = 200 × microstep × gear / 360</code>. Góc khớp =
+        <code>AXIS_STEP_SIGN × absSteps / stepsPerDegree</code> (gốc tại home đã calib).<br>
+        <span class="tag">setHomeHere</span> absSteps=0, chụp <code>encZeroRef</code> từ accumulated angle, lưu raw single-turn vào NVS (nếu encoder khoẻ), xoá drift fault.<br>
+        <span class="tag">restoreFromNVS</span> lúc boot: delta = ENC_SIGN × wrap180(raw_now − raw_saved); từ chối nếu |delta| &gt; hành trình lý thuyết + 15° (nam châm trôi); set absSteps theo delta, đánh dấu <code>restored</code>. Giới hạn đúng ±180° của encoder (J6 chỉ mod 360 — vô hại vì roll).<br>
+        <span class="tag">drift watchdog</span> khi idle: |angleFromSteps − angleFromEncoder| &gt; 5° → latch <code>driftFault</code>.
+      </div>
+    </details>
+
+    <details class="mod">
+      <summary>homing.* — FSM homing tuần tự J1→J4 <span class="file">src/homing.h/.cpp</span></summary>
+      <div class="body">
+        Xem sơ đồ FSM ở tab "FSM & Luồng". Fusion phát hiện chạm: endstop latch/pressed <b>HOẶC</b>
+        StallGuard (SG_RESULT &lt; STALL_SG_LEVEL=100 trong 3 poll liên tiếp cách 20 ms — chỉ TMC;
+        SG=1023 khi lỗi UART coi như không stall). Dòng homing giảm mạnh: J1=300/J2=500/J3=450/J4=300 mA,
+        khôi phục 800 mA sau khi xong. Timeout 30 s mỗi phase. J5/J6 bỏ qua — Set-Home thủ công.
+      </div>
+    </details>
+
+    <details class="mod">
+      <summary>planner.* — thực thi chuyển động Cartesian <span class="file">src/planner.h/.cpp</span></summary>
+      <div class="body">
+        Job: POINT (tới điểm, travel-only) / LINE (x1,y1 → x2,y2) / CIRCLE (tâm, r, quét CCW đủ vòng từ góc hiện tại).
+        Sinh waypoint on-the-fly ~1 mm — không buffer lớn.<br>
+        <span class="tag">segment sync</span> IK pen-down → delta 6 trục; trục nhiều bước nhất (dominant) đặt
+        <code>interval = 1e6·segLen/(feed·steps_max)</code>; trục khác scale nghịch đảo để cùng kết thúc đúng lúc.<br>
+        Chuỗi nét vẽ: LIFTING(+5mm Z) → TRAVELING(ngang) → DROPPING(z giấy) → DRAWING(segments) → FINISHED_LIFT.
+        POINT kết thúc tại đích không lift lại.<br>
+        Gate bắt buộc: <code>allPositioningHomed()</code> (J1–J4 đã home); điểm ngoài vùng với → huỷ job + log.
+      </div>
+    </details>
+
+    <details class="mod">
+      <summary>kinematics.* — FK/IK thuần C++ (host-testable) <span class="file">src/kinematics.h/.cpp</span></summary>
+      <div class="body">
+        Không phụ thuộc Arduino — test được bằng g++ trên máy tính. Chi tiết toán học ở tab Kinematics.
+        FK: nhân ma trận Modified DH 6 khớp + Tz(tool). IK: closed-form pen-down, chọn nhánh khuỷu thoả
+        J3 ∈ [0;90] ưu tiên |J3| nhỏ nhất, từ chối ngoài vùng với.
+      </div>
+    </details>
+
+    <details class="mod">
+      <summary>nvs_store.* — lưu trữ bền vững <span class="file">src/nvs_store.h/.cpp</span></summary>
+      <div class="body">
+        Preferences namespace <code>"arm-cfg"</code>. Keys: <code>wf_ssid</code>/<code>wf_pass</code> (WiFi),
+        <code>j{0..5}_valid</code>/<code>j{0..5}_raw</code> (home point: raw góc [0,360) tại thời điểm khớp = 0°).
+        <code>clearJointHome()</code> chỉ đảo cờ valid (không xoá key).
+      </div>
+    </details>
+
+    <details class="mod">
+      <summary>wifi_manager.* — STA → AP fallback <span class="file">src/wifi_manager.h/.cpp</span></summary>
+      <div class="body">
+        Boot: có creds NVS → thử STA tối đa 6 s → thất bại hoặc chưa có creds → AP
+        <code>"6AXIS-CONTROLLER"</code>/<code>"12345678"</code>. <code>provision(ssid,pass)</code> chỉ lưu NVS —
+        caller chịu trách nhiệm restart (web handler restart sau 1 s). mDNS: <code>robot-arm.local</code>.
+      </div>
+    </details>
+
+    <details class="mod">
+      <summary>web_server.* — web app + REST API <span class="file">src/web_server.h/.cpp</span></summary>
+      <div class="body">
+        Trang single-page nhúng PROGMEM (dark UI), tabs: Dashboard | Joints | Homing | WiFi | Cartesian | Draw
+        + nút E-STOP nổi. Polling <code>/api/status</code> mỗi 300 ms. Canvas preview hình vẽ (top view, mm).<br>
+        Front-end: nút hành động (home/move/draw/sethome) tự disable khi arm busy hoặc FAULT; toast phản hồi
+        mỗi lệnh; cảnh báo "MẤT KẾT NỐI" khi poll lỗi ≥3 lần liên tiếp; confirm trước xoá calib; chip J1→J4
+        hiển thị tiến độ homing theo phase.<br>
+        Validation đầu vào: jog |deg| ≤ 45°; move z ∈ [−20;450]; circle r ∈ [5;250]; ssid ≤ 32, pass ≤ 64 ký tự.<br>
+        Toàn bộ handler chỉ tạo <code>ArmCommand</code> và enqueue — trừ <code>/api/clearcalib</code>
+        (gọi trực tiếp forgetHome, an toàn vì chỉ xoá dữ liệu calib) và wifi save (restart).
+      </div>
+    </details>
+
+    <details class="mod">
+      <summary>arm.* — arbiter trung tâm <span class="file">src/arm.h/.cpp</span></summary>
+      <div class="body">
+        Nhận lệnh từ mọi nguồn → queue → motion task thực thi tuần tự. Mode machine 6 trạng thái tính lại mỗi tick.
+        FAULT khi endstop latch ngoài homing (stop hết + cần CLEAR_FAULT). STOP_ALL huỷ homing + planner + dừng motors.
+        <code>statusJson()</code> tổng hợp: fw, mode, busy, wifi, homing, joints, endstops, pose (FK realtime từ absSteps),
+        planner, motors[]. Jog clamp theo soft limit khi đã home; bỏ qua nếu trục đang chạy.
+      </div>
+    </details>
+
+    <details class="mod">
+      <summary>rtos_guard.h — RAII lock guard <span class="file">src/rtos_guard.h</span></summary>
+      <div class="body">
+        <code>RtosLockGuard</code> + helper <code>makeTimedLock(mutex, ms)</code>: tự take khi khởi tạo, tự give khi hủy —
+        chống quên give/leak khi return sớm.
+      </div>
+    </details>
+  </div>
+</div>
+
+<!-- ============ FSM & FLOWS ============ -->
+<div id="fsm" class="pane">
+  <div class="card">
+    <h2>Arm mode machine (tính lại mỗi tick 10 ms)</h2>
+    <div class="flow">
+      <div class="fbox green">IDLE</div>
+      <span class="farrow">⇄</span>
+      <div class="fbox">HOMING<br><span class="muted">hc->isActive()</span></div>
+      <span class="farrow">⇄</span>
+      <div class="fbox">CART<br><span class="muted">pl->isActive()</span></div>
+      <span class="farrow">⇄</span>
+      <div class="fbox">JOG<br><span class="muted">có motor running</span></div>
+    </div>
+    <p class="desc" style="margin-top:8px"><span class="badge" style="background:#7f1d1d;color:#fca5a5">FAULT</span>
+    vào từ: endstop latch ngoài homing (mọi motor bị dừng). Thoát: lệnh <code>CLEAR_FAULT</code> (nút Clear Fault / POST /api/jog fault_clear=1).
+    DRAW là mode dự phòng cho job vẽ — hiện planner chạy mode CART.</p>
+  </div>
+
+  <div class="card">
+    <h2>Homing FSM — mỗi khớp chạy chuỗi sau</h2>
+    <div class="flow">
+      <div class="fbox">APPROACH<br><span class="muted">runContinuous về min,<br>dòng thấp</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox amber">CONTACT<br><span class="muted">endstop HOẶC stallguard</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox">BACKOFF<br><span class="muted">lùi 2° + 0.5° margin</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox">CENTERING?*<br><span class="muted">*chỉ J1/J2:<br>+stroke/2 − backoff</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox green">SETREF<br><span class="muted">setHomeHere + NVS</span></div>
+    </div>
+    <ul>
+      <li><b>J1/J2:</b> home ở GIỮA hành trình (centering). <b>J3/J4:</b> home tại chỗ sau backoff.</li>
+      <li>Nếu endstop đã nhấn trước khi bắt đầu → bỏ qua APPROACH, vào BACKOFF luôn.</li>
+      <li>BACKOFF xong mà vẫn đè công tắc → lùi thêm một nấc nữa.</li>
+      <li>StallGuard: poll SG_RESULT mỗi 20 ms; &lt; 100 trong 3 lần liên tiếp = chạm. Lỗi UART trả SG=1023 (không bao giờ stall).</li>
+      <li>Timeout 30 s/khớp → FAILED, dừng cả chuỗi. Xong khớp → restore dòng 800 mA + tốc độ default, sang khớp kế.</li>
+      <li>Thứ tự cố định J1→J2→J3→J4 (HOME_ALL) hoặc 1 khớp bất kỳ trong 0..3 (HOME_AXIS).</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Planner state machine — chuỗi nét vẽ an toàn</h2>
+    <div class="flow">
+      <div class="fbox">LIFTING<br><span class="muted">Z += 5 mm</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox">TRAVELING<br><span class="muted">ngang tới điểm đầu nét</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox">DROPPING<br><span class="muted">Xuống z giấy</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox green">DRAWING<br><span class="muted">segments ~1 mm<br>IK mỗi segment</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox">FINISHED_LIFT<br><span class="muted">Z += 5 mm</span></div>
+    </div>
+    <p class="desc">POINT đi LIFTING → TRAVELING → DROPPING rồi kết thúc tại đích (không lift lại).
+    Mỗi state chuyển khi mọi trục đã dừng. Segment sinh on-the-fly: LINE theo hướng đơn vị; CIRCLE theo góc
+    <code>ang = startAng + prog/r</code> (CCW). Ngoài vùng với giữa chừng → <code>stop()</code> toàn bộ.</p>
+  </div>
+
+  <div class="card">
+    <h2>Luồng lệnh & luồng trạng thái</h2>
+    <div class="grid2">
+      <div>
+        <h3>Luồng LỆNH (down-link)</h3>
+        <div class="flow">
+          <div class="fbox">Browser<br><span class="muted">fetch POST/GET</span></div>
+          <span class="farrow">→</span>
+          <div class="fbox">HTTP handler<br><span class="muted">validate args</span></div>
+          <span class="farrow">→</span>
+          <div class="fbox">ArmCommand<br><span class="muted">queue depth 24</span></div>
+          <span class="farrow">→</span>
+          <div class="fbox green">motion task<br><span class="muted">execute()</span></div>
+          <span class="farrow">→</span>
+          <div class="fbox">Motor.run()/homing/planner</div>
+        </div>
+        <p class="desc">Handler KHÔNG BAO GIỜ gọi hàm hardware trực tiếp. Queue full/busy → HTTP 503/409.
+        Ngoại lệ có chủ đích: <code>/api/clearcalib</code> (chỉ xoá data) và <code>/api/wifi</code> (lưu NVS + restart).</p>
+      </div>
+      <div>
+        <h3>Luồng TRẠNG THÁI (up-link)</h3>
+        <div class="flow">
+          <div class="fbox">Sensor task<br><span class="muted">encoders 200 Hz</span></div>
+          <span class="farrow">→</span>
+          <div class="fbox">JointModel<br><span class="muted">angleFromSteps/Encoder</span></div>
+          <span class="farrow">→</span>
+          <div class="fbox">statusJson()<br><span class="muted">FK realtime + mọi module</span></div>
+          <span class="farrow">→</span>
+          <div class="fbox">GET /api/status</div>
+          <span class="farrow">→</span>
+          <div class="fbox">updateUI()<br><span class="muted">mỗi 300 ms</span></div>
+        </div>
+        <p class="desc">Pose hiển thị = FK từ absSteps (không phải encoder) — phản ánh đúng những gì firmware tin.</p>
+      </div>
+    </div>
+    <h3>Chuỗi phản ứng an toàn khi đụng endstop (ngoài homing)</h3>
+    <div class="flow">
+      <div class="fbox red">ISR FALLING<br><span class="muted">&lt; 1 ms</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox red">motor.stopFromISR()<br><span class="muted">xung dừng ngay</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox">latch set</div>
+      <span class="farrow">→</span>
+      <div class="fbox red">motion task ≤ 10 ms<br><span class="muted">anyLatched && !homing</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox red">STOP TOÀN BỘ + FAULT</div>
+      <span class="farrow">→</span>
+      <div class="fbox amber">CLEAR_FAULT<br><span class="muted">thủ công từ web</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ KINEMATICS ============ -->
+<div id="kin" class="pane">
+  <div class="card">
+    <h2>Hình học cơ khí tại home (side view, mm)</h2>
+    <div class="svgwrap">
+    <svg viewBox="0 0 760 430" width="100%" style="min-width:640px" xmlns="http://www.w3.org/2000/svg">
+      <defs><marker id="ad" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#fcd34d"/></marker></defs>
+      <!-- scale: 1mm = 0.75px ; origin base at (120, 370) -->
+      <!-- ground -->
+      <line x1="60" y1="372" x2="700" y2="372" stroke="#334155" stroke-width="2"/>
+      <text x="64" y="390" fill="#64748b" font-size="11">GND · trục J1 thẳng đứng (base yaw)</text>
+      <!-- vertical chain -->
+      <line x1="120" y1="370" x2="120" y2="266" stroke="#38bdf8" stroke-width="4"/>
+      <circle cx="120" cy="370" r="7" fill="#38bdf8"/><text x="96" y="366" fill="#38bdf8" font-size="12" font-weight="bold">J1</text>
+      <line x1="112" y1="320" x2="112" y2="276" stroke="#fcd34d" stroke-width="1.4" marker-end="url(#ad)"/>
+      <text x="76" y="300" fill="#fcd34d" font-size="12">139</text>
+      <line x1="120" y1="266" x2="120" y2="162" stroke="#38bdf8" stroke-width="4"/>
+      <circle cx="120" cy="266" r="7" fill="#38bdf8"/><text x="92" y="262" fill="#38bdf8" font-size="12" font-weight="bold">J2</text>
+      <line x1="112" y1="216" x2="112" y2="172" stroke="#fcd34d" stroke-width="1.4" marker-end="url(#ad)"/>
+      <text x="76" y="196" fill="#fcd34d" font-size="12">138</text>
+      <line x1="120" y1="162" x2="120" y2="96" stroke="#38bdf8" stroke-width="4"/>
+      <circle cx="120" cy="162" r="7" fill="#38bdf8"/><text x="92" y="158" fill="#38bdf8" font-size="12" font-weight="bold">J3</text>
+      <line x1="112" y1="132" x2="112" y2="106" stroke="#fcd34d" stroke-width="1.4" marker-end="url(#ad)"/>
+      <text x="76" y="122" fill="#fcd34d" font-size="12">88</text>
+      <!-- horizontal wrist offset -->
+      <line x1="120" y1="96" x2="214" y2="96" stroke="#38bdf8" stroke-width="4"/>
+      <line x1="128" y1="86" x2="204" y2="86" stroke="#fcd34d" stroke-width="1.4" marker-end="url(#ad)"/>
+      <text x="146" y="78" fill="#fcd34d" font-size="12">126 (=16+110)</text>
+      <circle cx="214" cy="96" r="6" fill="#a78bfa"/><text x="188" y="120" fill="#a78bfa" font-size="11">wrist center (126, 0, 365)</text>
+      <!-- pen -->
+      <line x1="214" y1="96" x2="229" y2="96" stroke="#4ade80" stroke-width="4"/>
+      <line x1="216" y1="86" x2="225" y2="86" stroke="#fcd34d" stroke-width="1.2" marker-end="url(#ad)"/>
+      <text x="222" y="74" fill="#fcd34d" font-size="11">20</text>
+      <circle cx="229" cy="96" r="5" fill="#f8fafc"/><text x="240" y="100" fill="#f8fafc" font-size="11" font-weight="bold">TCP (146, 0, 365)</text>
+      <text x="252" y="118" fill="#64748b" font-size="10">tool z-axis nằm ngang +x tại home</text>
+      <!-- note -->
+      <text x="380" y="180" fill="#94a3b8" font-size="12">Tại home: chuỗi 139+138+88 thẳng đứng,</text>
+      <text x="380" y="198" fill="#94a3b8" font-size="12">offset cổ tay 126mm nằm ngang — khớp</text>
+      <text x="380" y="216" fill="#94a3b8" font-size="12">bản vẽ tay gốc (ARM_GEOMETRY.md §1,§5).</text>
+      <text x="380" y="248" fill="#64748b" font-size="11">Fore-arm hiệu dụng: L = √(88² + 126²) = 153.69 mm</text>
+      <text x="380" y="266" fill="#64748b" font-size="11">δ = atan2(126, 88) = 55.06°</text>
+    </svg>
+    </div>
+    <p class="legend">Số liệu đã đối chiếu vật lý — KHÔNG thay đổi nếu thiếu phép đo mới (xem cảnh báo bên dưới).</p>
+  </div>
+
+  <div class="card">
+    <h2>Bảng Modified DH (Craig convention)</h2>
+    <p class="desc">Công thức: <code>T_i = Rx(αᵢ₋₁) · Tx(aᵢ₋₁) · Rz(θᵢ) · Tz(dᵢ)</code> — <b>không phải</b> Standard DH.
+    Port sai convention ⇒ kết quả sai dù bảng giống hệt.</p>
+    <table>
+      <tr><th>i</th><th>aᵢ₋₁ (mm)</th><th>αᵢ₋₁ (°)</th><th>dᵢ (mm)</th><th>θᵢ offset (°)</th><th>Mô tả</th></tr>
+      <tr><td>1</td><td>0</td><td>0</td><td>139</td><td>0</td><td>Base yaw</td></tr>
+      <tr><td>2</td><td>0</td><td>−90</td><td>0</td><td><b>−90</b> ✅ đo đạc</td><td>Shoulder pitch</td></tr>
+      <tr><td>3</td><td>138</td><td>0</td><td>0</td><td>0 ✅</td><td>Elbow pitch</td></tr>
+      <tr><td>4</td><td>88</td><td>−90</td><td><b>126</b> (=16+110)</td><td>0 ⚠️ chưa xác nhận</td><td>Wrist pan</td></tr>
+      <tr><td>5</td><td>0</td><td>+90</td><td>0</td><td>0 ⚠️</td><td>Wrist tilt</td></tr>
+      <tr><td>6</td><td>0</td><td>−90</td><td>0</td><td>0 ⚠️</td><td>Wrist roll (pen đồng trục, dài 20 mm)</td></tr>
+    </table>
+    <p class="desc">Chuyển đổi: <code>theta_DH(i) = theta_encoder(i) + OFFSET(i)</code>. Offset θ4/θ5/θ6 chưa đo thực nghiệm — ưu tiên calib trước khi tin độ chính xác nét vẽ (bút lệch tâm 20 mm khuếch đại sai số 1–2° thành vài mm).</p>
+  </div>
+
+  <div class="card">
+    <h2>IK closed-form pen-down (kin::ikPenDown)</h2>
+    <ol>
+      <li>Wrist center: <code>C = TCP + (0, 0, D_TOOL=20)</code> (bút thẳng đứng ⇒ tâm cổ tay cao hơn TCP đúng 20 mm)</li>
+      <li>Base yaw: <code>t1 = atan2(Cy, Cx)</code></li>
+      <li>Mặt phẳng 2 khâu: <code>(r,h)</code> polar của C quanh vai; kiểm tra reach:
+          <code>|A2 − L_FORE| ≤ dist ≤ A2 + L_FORE</code> với A2=138, L_FORE=153.69</li>
+      <li>Law of cosines: β tại vai; γ = atan2(h,r); nhánh <code>φ₂ = γ ± β</code></li>
+      <li>Fore-arm hiệu dụng: <code>φψ = atan2(h−A2·sinφ₂, r−A2·cosφ₂)</code>;
+          <code>q23 = −φψ − δ</code> (δ=55.06°), <code>t3 = q23 − t2</code></li>
+      <li>Encoder: <code>e1=t1</code>, <code>e2=t2+90°</code> (triệt tiêu offset), <code>e3=t3</code>,
+          <code>e5=−q23</code> (bút thẳng đứng), <code>e4=e6=0</code> (giữ mặt phẳng tay)</li>
+      <li>Lọc nhánh: chấp nhận e2∈[−90;90], e3∈[0;90], e5∈[−120;120]; chọn nghiệm |J3| nhỏ nhất</li>
+    </ol>
+    <div class="ok-box">Kiểm chứng: roundtrip IK→FK 3280/3280 pose random sai số ≤ 0.5 mm (test host
+    <code>test/kinematics/test_kinematics.cpp</code>, runner <code>tools/run_kin_tests.sh</code>).
+    FK home tái tạo đúng wrist (126, 0, 365) và TCP (146, 0, 365). Từ chối đúng các điểm ngoài vùng với.</div>
+    <div class="warn-box"><b>Cảnh báo mô hình:</b> roundtrip chỉ chứng minh closed-form ≡ bảng DH — KHÔNG chứng minh
+    bảng DH ≡ cơ khí thật nếu offset 16 mm không thẳng hàng với 110 mm. Biến thể "gắt L" sai tới ~155 mm.
+    Thí nghiệm phân biệt 1 phép đo: home → jog J3 +30° → so displacement ngang bút thực vs "pose" firmware.
+    Hằng số cũ atan2(110,88)=51.34° thuộc mô hình khác — KHÔNG import lại (chi tiết: IMPLEMENTATION_LOG 2026-08-26).</div>
+    <h3>Workspace & kỳ dị</h3>
+    <ul>
+      <li>Tầm xa nhất 291.7 mm (radial) · cao nhất 430.7 mm · thấp nhất −14.7 mm · góc chết ~90° phía sau (J1 chỉ 270°)</li>
+      <li>Singularity: tool z-axis thẳng đứng ⇒ J1/J6 gần trùng — mất 1 DOF (wrist singularity kinh điển). IK closed-form né bằng cách khóa e4=e6=0.</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============ API ============ -->
+<div id="api" class="pane">
+  <div class="card">
+    <h2>REST API (port 80, mDNS robot-arm.local)</h2>
+    <table>
+      <tr><th>Method</th><th>Endpoint</th><th>Tham số</th><th>Hành động / validation</th></tr>
+      <tr><td>GET</td><td><code>/</code></td><td>—</td><td>Trang web chính (PROGMEM)</td></tr>
+      <tr><td>GET</td><td><code>/api/status</code></td><td>—</td><td>JSON tổng hợp (xem cấu trúc dưới)</td></tr>
+      <tr><td>POST</td><td><code>/api/jog</code></td><td><code>axis</code> 0–5, <code>deg</code> ≠0, |deg|≤45</td><td>JOG_REL tương đối; hoặc <code>fault_clear=1</code> → CLEAR_FAULT</td></tr>
+      <tr><td>GET</td><td><code>/api/stop</code></td><td>—</td><td>STOP_ALL — luôn chấp nhận (wait 50 ms), huỷ homing/planner</td></tr>
+      <tr><td>POST</td><td><code>/api/move</code></td><td><code>x,y,z</code>, <code>feed</code> (default 30)</td><td>MOVE_CART (POINT); z∈[−20;450]; yêu cầu home J1–J4; busy → 409</td></tr>
+      <tr><td>POST</td><td><code>/api/draw</code></td><td>line: <code>x1,y1,x2,y2</code> · circle: <code>cx,cy,r</code> (r∈[5;250]) + <code>z,feed</code></td><td>DRAW_LINE/DRAW_CIRCLE; busy → 409</td></tr>
+      <tr><td>GET</td><td><code>/api/home/all</code></td><td>—</td><td>HOME_ALL chuỗi J1→J4; busy → 409</td></tr>
+      <tr><td>GET</td><td><code>/api/home/axis</code></td><td><code>axis</code> 0–3</td><td>HOME_AXIS 1 khớp (J5/J6 không hỗ trợ auto-home)</td></tr>
+      <tr><td>GET</td><td><code>/api/sethome</code></td><td><code>axis</code> 0–5</td><td>SET_HOME tại chỗ + persist NVS (mọi khớp kể cả J5/J6)</td></tr>
+      <tr><td>GET</td><td><code>/api/clearcalib</code></td><td><code>axis</code> 0–5</td><td>forgetHome: xoá cờ home + NVS</td></tr>
+      <tr><td>POST</td><td><code>/api/wifi</code></td><td><code>ssid</code> ≤32, <code>pass</code> ≤64</td><td>Lưu NVS → delay 1 s → ESP.restart()</td></tr>
+    </table>
+    <h3>Cấu trúc JSON <code>/api/status</code></h3>
+    <ul style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.75rem">
+      <li>fw · mode(idle|homing|jog|cart|draw|fault) · busy</li>
+      <li>wifi{mode(sta|ap|off), ip, ssid, rssi}</li>
+      <li>homing{active, lastOk, axis, phase(idle|approach|backoff|centering|done)}</li>
+      <li>joints[6]{deg, encDeg, homed, restored(nvs), encOK, drift, limitMin, limitMax}</li>
+      <li>endstops[6]{min:{pressed,latched}|null, max:{...}|null} — chỉ J1–J3 có</li>
+      <li>pose{x,y,z} — FK realtime · planner{active, state, segs}</li>
+      <li>motors[6]{running, dir(cw|ccw), stepsRemaining, targetSteps, stepIntervalUs, currentSpeedUs, currentMa, holdScale, spreadCycle, microsteps, uartOk, version, isTMC, absSteps}</li>
+    </ul>
+    <h3>Mã lỗi HTTP</h3>
+    <ul>
+      <li><b>400</b> bad args (ngoài range validation) · <b>409</b> busy (arm đang làm việc khác) · <b>503</b> queue full · <b>500</b> not ready (module null)</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============ SAFETY ============ -->
+<div id="safety" class="pane">
+  <div class="card">
+    <h2>Invariants an toàn (không được phá vỡ khi sửa code)</h2>
+    <ul>
+      <li><b>1.</b> Web handler không đụng hardware — chỉ enqueue <code>ArmCommand</code>.</li>
+      <li><b>2.</b> STOP_ALL luôn được chấp nhận ngay cả khi queue gần đầy (timeout 50 ms).</li>
+      <li><b>3.</b> FAULT là latch: endstop ngoài homing ⇒ dừng tất cả; chỉ CLEAR_FAULT mở khoá.</li>
+      <li><b>4.</b> Cartesian (move/draw) bắt buộc <code>allPositioningHomed()</code> (J1–J4).</li>
+      <li><b>5.</b> Jog clamp theo soft limit khi đã home; bỏ lệnh nếu trục đang chạy.</li>
+      <li><b>6.</b> Homing chạy dòng giảm (300–500 mA), khôi phục 800 mA khi xong/thất bại/hủy.</li>
+      <li><b>7.</b> Drift watchdog 5° (step-count vs encoder) khi idle — báo fault từng khớp.</li>
+      <li><b>8.</b> Restore NVS từ chối delta &gt; hành trình + 15° (nam châm dịch chuyển).</li>
+      <li><b>9.</b> Debounce endstop 50 ms trong ISR; latch chỉ do FSM homing tiêu thụ.</li>
+      <li><b>10.</b> Mọi giao dịch UART TMC qua mutex với timeout ngắn — fail thì skip, không treo.</li>
+      <li><b>11.</b> Driver luôn enabled — không có EN pin; <code>toff=4</code> bình thường, 0 khi disable.</li>
+      <li><b>12.</b> Planner gate: điểm ngoài vùng với ⇒ stop toàn job (kể cả giữa chừng).</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Checklist commissioning (khi có hardware)</h2>
+    <table>
+      <tr><th>#</th><th>Việc</th><th>Trạng thái</th></tr>
+      <tr><td>1</td><td>Jumper MS1/MS2: J1=00, J2=01, J3=10, J4=11 — log <code>[TMC2209 OK] Ver 0x21</code> ×4</td><td>☐</td></tr>
+      <tr><td>2</td><td>Đo Vref A4988 J5/J6, ghi dòng coil vào IMPLEMENTATION_LOG</td><td>☐</td></tr>
+      <tr><td>3</td><td>Jog mù từng trục — flip <code>AXIS_STEP_SIGN</code>/<code>AXIS_ENC_SIGN</code> nếu ngược</td><td>☐</td></tr>
+      <tr><td>4</td><td>Tune <code>STALL_SG_LEVEL</code> per-joint (xem SG_RESULT qua /api/status)</td><td>☐</td></tr>
+      <tr><td>5</td><td>Home All → jog → Move Cartesian → Draw circle thử</td><td>☐</td></tr>
+      <tr><td>6</td><td>Thí nghiệm phân biệt mô hình: jog J3 +30°, đo displacement bút (≤2 mm = Model A đúng). Ghi kết quả vào IMPLEMENTATION_LOG</td><td>☐</td></tr>
+      <tr><td>7</td><td>Xác nhận offset θ4/θ5/θ6 (đo giống θ2) — ảnh hưởng trực tiếp độ chính xác nét vẽ</td><td>☐</td></tr>
+      <tr><td>8</td><td>Xác nhận encoder gắn 1:1 trên trục ra khớp (để restore NVS đúng)</td><td>☐</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Cách chạy test / build</h2>
+    <ul>
+      <li>Build firmware: <code>pio run</code> — gate bắt buộc trước khi commit</li>
+      <li>Test kinematics host: <code>tools/run_kin_tests.sh</code> (g++ trực tiếp — PIO native env bị lỗi Core 6.1.19 "Nothing to build")</li>
+      <li>Monitor serial: <code>pio device monitor</code> @115200 (filter esp32_exception_decoder bật sẵn)</li>
+      <li>Web app: http://robot-arm.local hoặc IP hiển thị trong log setup</li>
+    </ul>
+  </div>
+</div>
+
+<div class="footer">
+  Generated 2026-08-26 · File này là <b>bản đồ hệ thống sống</b> — AI agent PHẢI cập nhật nó cùng
+  docs/IMPLEMENTATION_LOG.md sau mỗi thay đổi (quy tắc trong AGENTS.md)
+</div>
+
+<button id="toTop" title="Lên đầu trang" onclick="scrollTo({top:0,behavior:'smooth'})">&#8593;</button>
+
+<script>
+function activateTab(id){
+  document.querySelectorAll('.tab-btn').forEach(x=>x.classList.toggle('active',x.dataset.t===id));
+  document.querySelectorAll('.pane').forEach(x=>x.classList.toggle('active',x.id===id));
+}
+document.querySelectorAll('.tab-btn[data-t]').forEach(b=>{
+  b.onclick=()=>{activateTab(b.dataset.t);history.replaceState(null,'','#'+b.dataset.t);};
+});
+window.addEventListener('hashchange',()=>{
+  const t=location.hash.slice(1);
+  if(t&&document.getElementById(t)&&document.querySelector('[data-t="'+t+'"]'))activateTab(t);
+});
+(function(){
+  const t=location.hash.slice(1);
+  if(t&&document.getElementById(t)&&document.querySelector('[data-t="'+t+'"]'))activateTab(t);
+  // bọc bảng trong wrapper cuộn ngang cho màn hình nhỏ
+  document.querySelectorAll('.card table').forEach(tb=>{
+    if(tb.parentNode.classList.contains('tblwrap'))return;
+    const w=document.createElement('div');w.className='tblwrap';
+    tb.parentNode.insertBefore(w,tb);w.appendChild(tb);
+  });
+})();
+window.addEventListener('scroll',()=>{
+  document.getElementById('toTop').style.display=window.scrollY>400?'block':'none';
+},{passive:true});
+</script>
+</body>
+</html>

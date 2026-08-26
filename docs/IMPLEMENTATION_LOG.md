@@ -74,4 +74,118 @@ Decisions locked with owner (see plan): 4x TMC2209 UART addr 0-3 (no DIR pin, di
 
 ---
 
+## 2026-08-26 — Kiểm chứng mô hình động học (phản hồi review của owner)
+
+### Thắc mắc
+Owner hỏi: δ dùng cạnh 126mm (atan2(126,88)=55.06°) trong khi bản kinematics cũ của owner dùng
+φ=atan2(110,88)=51.34° — nghi ngờ việc gộp offset ngang 16mm vào d4 làm thay đổi cấu trúc DH.
+
+### Bằng chứng trong repo → mô hình hiện tại là ĐÚNG theo tài liệu gốc
+1. `ARM_GEOMETRY.md:35` — "**126mm tổng cộng, nối tiếp nhau trên cùng một trục** (không phải hai
+   hướng riêng biệt)" — khẳng định thẳng hàng 16+110, ghi rõ là đã xác nhận thực tế.
+2. `ARM_GEOMETRY.md:66` — bảng DH dòng 4: **d4 = 126 (=16+110)**.
+3. `ARM_GEOMETRY.md:97-104` — mục 5: đo đạc vật lý xác nhận wrist center home = (126, 0, 365),
+   "khớp chính xác tuyệt đối... không cần nghi ngờ hay đo lại". FK ma trận 4×4 trong
+   `kinematics.cpp` tái tạo đúng (126.000, 0.000, 365.000).
+4. `config.h:196` — `DH_D4_MM = 126.0f // (16mm + 110mm)`.
+5. Công thức đóng IK (L=153.69=√(88²+126²), δ=atan2(126,88)) được **rút ra từ bảng DH này** và
+   đối chiếu chéo với implementation ma trận độc lập: 3280/3280 pose khớp <0.5mm.
+   → Không có lẫn lộn 110/126 bên trong firmware: toàn bộ hệ thống nhất quán Model A.
+
+### Giới hạn được thừa nhận
+Roundtrip chỉ chứng minh closed-form ≡ bảng DH. Nó KHÔNG chứng minh bảng DH ≡ cơ khí thật —
+điều đó phụ thuộc vào việc 16mm có thực sự thẳng hàng với 110mm hay bị gắt L.
+
+### Định lượng rủi ro nếu sai mô hình (script so sánh phẳng)
+- Biến thể "gắt L" (16 vuông góc rồi 110): lệch tới **~155mm**, kể cả vị trí home.
+- Biến thể tinh vi hơn (16 vuông góc nhưng trùng phương ngang lúc home — thỏa mãn kiểm tra
+  (126,0,365)): khớp ở home NHƯNG lệch tăng dần theo góc khuỷu, cỡ **vài mm → ~16mm** khi
+  e3 gập sâu. Đây mới là kẻ ngụy trang nguy hiểm cho nét vẽ.
+
+### Thí nghiệm phân biệt (chỉ cần 1 phép đo, làm ngay khi có hardware)
+1. Home all. Đặt bút chạm giấy tại home, đánh dấu điểm mực M0.
+2. Giữ J1/J2 khóa, jog J3 đúng +30°. Bút sẽ nhấc khỏi giấy — đo khoảng cách ngang thực tế
+   mà đầu bút dịch chuyển, so với `/api/status` "pose" trước/sau.
+3. Khớp ≤ ~2mm → Model A đúng, vẽ được ngay. Lệch hệ thống lớn hơn và tỉ lệ với e3 → báo
+   lại số đo, đổi sang biến thể phù hợp (thay đổi chỉ nằm trong `kinematics.cpp`: hằng số
+   L/δ hoặc thêm 1 khâu offset + cập nhật test — ~30 phút).
+4. Ghi kết quả đo tại đây: ____ mm (thực) vs ____ mm (firmware dự đoán).
+
+### Cảnh báo
+Hằng số cũ atan2(110,88)=51.34° thuộc mô hình khác (d4=110). KHÔNG import lại vào firmware
+hiện tại trừ khi thí nghiệm trên buộc phải đổi mô hình.
+
+---
+
+## 2026-08-26 — Tài liệu sống: SYSTEM_OVERVIEW.html + AGENTS.md
+
+### Việc đã làm
+- What: thêm 2 file mới:
+  - `docs/SYSTEM_OVERVIEW.html` — bản đồ hệ thống sống tự chứa (8 tab: Tổng quan / Phần cứng /
+    RTOS & Tasks / Modules / FSM & Luồng / Kinematics / REST API / An toàn & TODO), tiếng Việt,
+    offline, nội dung rút trực tiếp từ code (pin map config.h, task table, 13 module cards,
+    FSM homing/planner/arm-mode, SVG hình học + bảng DH Modified Craig, API reference, invariants).
+  - `AGENTS.md` (root) — hợp đồng bảo trì cho AI agent: lệnh build/test gate, giao thức bắt buộc
+    cập nhật SYSTEM_OVERVIEW.html + IMPLEMENTATION_LOG.md sau MỖI thay đổi, quy tắc bất biến
+    (DH constants, NVS-only creds, web-handler không đụng hardware, uartMutex, chuỗi an toàn...).
+- Why: owner yêu cầu tài liệu demo toàn bộ logic/core/task + cơ chế giữ tài liệu đồng bộ với code.
+- How: HTML thuần CSS/JS một file (không CDN) để mở offline; AGENTS.md đặt ở root theo convention
+  để agent tự đọc khi vào repo. Nội dung chỉ ghi thứ code thật sự làm (đối chiếu từng module).
+
+### Build gate
+- Chỉ thay đổi docs — firmware không đụng tới.
+- Validate: HTML parse OK (balanced tags), inline JS syntax OK (node --check), 46 KB.
+
+### Việc còn lại
+- Owner review nội dung 2 file; duy trì theo giao thức trong AGENTS.md từ giờ.
+
+---
+
+## 2026-08-26 — AGENTS.md: thêm mục tri thức kỹ thuật rút từ skill/
+
+### Việc đã làm
+- What: AGENTS.md thêm mục mới "5. Tri thức kỹ thuật cô đọng (rút từ skill/)" — tinh gọn các
+  nguyên tắc áp dụng được cho firmware từ skill/embedded-systems, skill/embedded-agent-skills
+  (ESP32 GPIO) và skill/cpp-pro; chia 5 nhóm: ISR & thời gian thực, ESP32-S3 GPIO, FreeRTOS,
+  C++, giao tiếp bus. Đổi số mục cũ: Quy trình 5→6, Cấu trúc repo 6→7.
+- Why: owner yêu cầu nhúng tri thức tham khảo vào hợp đồng bảo trì để agent không phải đọc
+  toàn bộ thư viện skill trước mỗi thay đổi.
+- How: chỉ giữ những quy tắc có ảnh hưởng trực tiếp đến code hiện tại (ISR pattern khớp
+  Endstops::isrHandler, bảng cấm GPIO khớp config.h, atomic memory order khớp motor.*, ...),
+  mỗi nhóm dẫn mẫu chuẩn trong repo làm điểm tham chiếu.
+
+### Build gate
+- Docs-only — không đụng firmware. Kiểm tra cấu trúc heading AGENTS.md §1–§7 tuần tự đúng.
+
+---
+
+## 2026-08-26 — Refine UI: web app nhúng + SYSTEM_OVERVIEW.html
+
+### Việc đã làm
+- What: tinh chỉnh UI cả 2 bề mặt, không đổi REST API:
+  - `src/web_server.cpp` (INDEX_HTML PROGMEM):
+    - FIX BUG: nút jog nhúng giá trị stepSize cũ vào onclick lúc buildCards() — đổi bước jog
+      không có tác dụng đến khi reload. Giờ jog(axis,dir) đọc stepSize toàn cục tại thời điểm click.
+    - Nút hành động (home/move/draw/sethome) tự disable khi `busy` hoặc mode `fault` (class need-idle).
+    - Toast phản hồi mọi lệnh (OK/busy/queue full/lỗi mạng) qua api()/post() gom chung; bỏ alert().
+    - Chỉ báo MẤT KẾT NỐI khi poll /api/status lỗi ≥3 lần liên tiếp; tự hồi phục khi kết nối lại.
+    - Thanh progress homing fake 50% → chuỗi chip J1→J4 sáng theo axis đang home + phase (trung thực).
+    - Clear Calib thêm confirm() (hành động phá huỷ data NVS).
+    - Tab WiFi: card hiển thị kết nối hiện tại (mode/IP/SSID/RSSI từ status).
+    - E-STOP to hơn + pulse nhẹ (tôn trọng prefers-reduced-motion); canvas Draw thêm marker home (146,0);
+      input số thêm inputmode=decimal cho bàn phím mobile; focus-visible cho tab.
+  - `docs/SYSTEM_OVERVIEW.html`: tab deep-link qua location.hash (#kin, #api...), bảng bọc wrapper
+    cuộn ngang mobile (JS tự bọc), print stylesheet (mở hết pane, nền trắng), hover highlight dòng
+    bảng, nút scroll-to-top.
+- Why: owner yêu cầu "refine UI related things" cho cả hai bề mặt.
+- How: giữ nguyên kiến trúc polling 300ms + PROGMEM single-file; mọi feedback client-side đều dựa
+  trên dữ liệu /api/status sẵn có, không thêm endpoint.
+
+### Build gate
+- `pio run` → **SUCCESS**. RAM 15.0% (49,268 B), Flash 25.0% (836,245 B) (+3.2 KB so với trước).
+- HTML parse + JS syntax check pass cho cả 2 file (python html.parser + node --check).
+
+---
+
+
 

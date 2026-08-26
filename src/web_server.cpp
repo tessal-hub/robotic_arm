@@ -48,12 +48,21 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Ar
 .stepbtn{flex:1;background:#334155;color:#cbd5e1;border:none;padding:4px;border-radius:6px;font-size:.75rem;cursor:pointer;font-weight:600}
 .stepbtn.active{background:#38bdf8;color:#0f172a}
 .stat-line{display:flex;justify-content:space-between;font-size:.85rem;color:#94a3b8;margin:4px 0}
-.prog-bg{background:#334155;height:8px;border-radius:4px;overflow:hidden;margin-top:8px}
-.prog-fill{background:#38bdf8;height:100%;width:0%;transition:width .3s}
 input[type=text],input[type=password]{width:100%;background:#0f172a;border:1px solid #334155;color:#f8fafc;font-size:1rem;padding:9px 12px;border-radius:8px;outline:none;margin-bottom:8px}
 label{display:block;font-size:.78rem;font-weight:600;color:#94a3b8;margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em}
-#estop{position:fixed;bottom:16px;right:16px;z-index:99;padding:14px 22px;font-size:1rem;box-shadow:0 6px 24px rgba(220,38,38,.5)}
+#estop{position:fixed;bottom:16px;right:16px;z-index:99;padding:18px 30px;font-size:1.15rem;box-shadow:0 6px 24px rgba(220,38,38,.5);animation:estopPulse 2.2s ease-in-out infinite}
+@keyframes estopPulse{0%,100%{box-shadow:0 6px 24px rgba(220,38,38,.5)}50%{box-shadow:0 6px 36px rgba(220,38,38,.9)}}
+@media(prefers-reduced-motion:reduce){#estop{animation:none}}
 .muted{color:#64748b;font-size:.78rem}
+.btn[disabled]{opacity:.4;cursor:not-allowed;transform:none}
+.tab-btn:focus-visible{outline:2px solid #38bdf8}
+.home-track{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.hchip{background:#334155;color:#94a3b8;padding:3px 12px;border-radius:11px;font-size:.72rem;font-weight:700}
+.hchip.on{background:#d97706;color:#fff}
+.hchip.done{background:#166534;color:#4ade80}
+#toast{position:fixed;bottom:16px;left:16px;z-index:98;background:#0f172a;border:1px solid #334155;border-left-width:4px;border-radius:8px;padding:10px 14px;font-size:.84rem;color:#cbd5e1;display:none;max-width:70vw;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+.t-ok{border-color:#059669}.t-warn{border-color:#d97706}.t-err{border-color:#dc2626}
+.offline{color:#fca5a5!important}
 </style>
 </head>
 <body>
@@ -75,11 +84,11 @@ label{display:block;font-size:.78rem;font-weight:600;color:#94a3b8;margin-bottom
     <div class="stat-line"><span>WiFi</span><span id="wifiInfo">-</span></div>
     <div class="stat-line"><span>Endstops</span><span id="esInfo" class="muted">-</span></div>
     <div class="stat-line"><span>Homing</span><span id="homProg">idle</span></div>
-    <div class="prog-bg"><div id="progFill" class="prog-fill"></div></div>
+    <div class="home-track"><span class="hchip" id="hc0">J1</span><span class="hchip" id="hc1">J2</span><span class="hchip" id="hc2">J3</span><span class="hchip" id="hc3">J4</span></div>
   </div>
   <div class="card"><h2>Quick Actions</h2>
     <div class="row">
-      <button class="btn primary" onclick="api('/api/home/all')">HOME ALL (J1-J4)</button>
+      <button class="btn primary need-idle" onclick="api('/api/home/all')">HOME ALL (J1-J4)</button>
       <button class="btn warn" onclick="api('/api/stop')">STOP ALL</button>
       <button class="btn ghost" onclick="clearFault()">CLEAR FAULT</button>
     </div>
@@ -99,12 +108,12 @@ label{display:block;font-size:.78rem;font-weight:600;color:#94a3b8;margin-bottom
 <div id="home" class="tab-pane">
   <div class="card"><h2>Automatic Homing (TMC J1-J4)</h2>
     <div class="row">
-      <button class="btn primary" onclick="api('/api/home/all')">HOME ALL</button>
+      <button class="btn primary need-idle" onclick="api('/api/home/all')">HOME ALL</button>
       <span class="muted">từng khớp:</span>
-      <button class="btn ghost" onclick="api('/api/home/axis?axis=0')">Home J1</button>
-      <button class="btn ghost" onclick="api('/api/home/axis?axis=1')">Home J2</button>
-      <button class="btn ghost" onclick="api('/api/home/axis?axis=2')">Home J3</button>
-      <button class="btn ghost" onclick="api('/api/home/axis?axis=3')">Home J4</button>
+      <button class="btn ghost need-idle" onclick="api('/api/home/axis?axis=0')">Home J1</button>
+      <button class="btn ghost need-idle" onclick="api('/api/home/axis?axis=1')">Home J2</button>
+      <button class="btn ghost need-idle" onclick="api('/api/home/axis?axis=2')">Home J3</button>
+      <button class="btn ghost need-idle" onclick="api('/api/home/axis?axis=3')">Home J4</button>
     </div>
     <p class="muted" style="margin-top:8px">J1/J2: min-stop → về GIỮA hành trình. J3/J4: min-stop/stall + lùi 2°.</p>
   </div>
@@ -115,6 +124,12 @@ label{display:block;font-size:.78rem;font-weight:600;color:#94a3b8;margin-bottom
 </div>
 
 <div id="wifi" class="tab-pane">
+  <div class="card"><h2>Kết nối hiện tại</h2>
+    <div class="stat-line"><span>Chế độ</span><span id="wfMode" class="badge b-info">-</span></div>
+    <div class="stat-line"><span>IP</span><span id="wfIp">-</span></div>
+    <div class="stat-line"><span>SSID</span><span id="wfSsidNow">-</span></div>
+    <div class="stat-line"><span>RSSI</span><span id="wfRssi">-</span></div>
+  </div>
   <div class="card"><h2>WiFi Provisioning</h2>
     <label>SSID</label><input type="text" id="wfSsid" placeholder="ten wifi nha">
     <label>Password</label><input type="password" id="wfPass" placeholder="mat khau">
@@ -130,11 +145,11 @@ label{display:block;font-size:.78rem;font-weight:600;color:#94a3b8;margin-bottom
     <p class="muted" style="margin-bottom:8px">Yêu cầu đã HOME J1-J4. Vị trí hiện tại:
       <span id="poseNow" style="color:#38bdf8;font-weight:700">-</span></p>
     <div class="row">
-      <input type="text" id="mvX" placeholder="X (mm)" style="width:90px">
-      <input type="text" id="mvY" placeholder="Y (mm)" style="width:90px">
-      <input type="text" id="mvZ" placeholder="Z (mm)" style="width:90px">
-      <input type="text" id="mvFeed" placeholder="feed mm/s" value="30" style="width:90px">
-      <button class="btn primary" onclick="moveTo()">MOVE</button>
+      <input type="text" id="mvX" inputmode="decimal" placeholder="X (mm)" style="width:90px">
+      <input type="text" id="mvY" inputmode="decimal" placeholder="Y (mm)" style="width:90px">
+      <input type="text" id="mvZ" inputmode="decimal" placeholder="Z (mm)" style="width:90px">
+      <input type="text" id="mvFeed" inputmode="decimal" placeholder="feed mm/s" value="30" style="width:90px">
+      <button class="btn primary need-idle" onclick="moveTo()">MOVE</button>
     </div>
     <p class="muted" style="margin-top:6px">Home TCP = (146, 0, 365). Giấy vẽ đặt dưới bút, Z nhỏ hơn khi hạ.</p>
   </div>
@@ -150,15 +165,15 @@ label{display:block;font-size:.78rem;font-weight:600;color:#94a3b8;margin-bottom
       <option value="circle">Circle</option>
     </select>
     <div class="row">
-      <input type="text" id="dwA1" placeholder="x1 / cx" style="width:90px">
-      <input type="text" id="dwA2" placeholder="y1 / cy" style="width:90px">
-      <input type="text" id="dwA3" placeholder="x2 / r"   style="width:90px">
-      <input type="text" id="dwA4" placeholder="y2"       style="width:90px">
-      <input type="text" id="dwZ"  placeholder="z giấy"   style="width:90px">
-      <input type="text" id="dwFeed" placeholder="feed"   style="width:80px" value="20">
+      <input type="text" id="dwA1" inputmode="decimal" placeholder="x1 / cx" style="width:90px">
+      <input type="text" id="dwA2" inputmode="decimal" placeholder="y1 / cy" style="width:90px">
+      <input type="text" id="dwA3" inputmode="decimal" placeholder="x2 / r"   style="width:90px">
+      <input type="text" id="dwA4" inputmode="decimal" placeholder="y2"       style="width:90px">
+      <input type="text" id="dwZ"  inputmode="decimal" placeholder="z giấy"   style="width:90px">
+      <input type="text" id="dwFeed" inputmode="decimal" placeholder="feed"   style="width:80px" value="20">
     </div>
     <div class="row" style="margin-top:10px">
-      <button class="btn ok" onclick="startDraw()">START DRAW</button>
+      <button class="btn ok need-idle" onclick="startDraw()">START DRAW</button>
       <button class="btn danger" onclick="api('/api/stop')">ABORT</button>
       <button class="btn ghost" onclick="previewShape()">PREVIEW</button>
       <span class="muted">Preview: hình chiếu từ trên xuống (đơn vị mm, gốc = trục J1).</span>
@@ -167,13 +182,33 @@ label{display:block;font-size:.78rem;font-weight:600;color:#94a3b8;margin-bottom
 </div>
 
 <button id="estop" class="btn danger" onclick="api('/api/stop')">&#9888; E-STOP</button>
+<div id="toast"></div>
 
 <script>
-let stepSize=1.0, pollTimer=null;
+let stepSize=1.0, pollTimer=null, failN=0, toastTimer=null;
 const AXES=["J1 Base","J2 Shoulder","J3 Elbow","J4 WristPan","J5 Tilt","J6 Roll"];
 
-function api(url){ return fetch(url).then(r=>r.text()).catch(()=>{}); }
-function clearFault(){ fetch('/api/jog',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'fault_clear=1'}); }
+function toast(msg,cls){
+  const t=document.getElementById('toast');
+  t.textContent=msg;
+  t.className=cls?('t-'+cls):'';
+  t.style.display='block';
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>{t.style.display='none';},2600);
+}
+function api(url){
+  return fetch(url).then(r=>r.text()).then(t=>{
+    toast((t==='OK'?'\u2713 ':'')+t,t==='OK'?'ok':'warn');
+    return t;
+  }).catch(()=>toast('Lỗi mạng / mất kết nối','err'));
+}
+function post(url,body){
+  return fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body})
+    .then(r=>r.text())
+    .then(t=>toast((t==='OK'?'\u2713 ':'')+t,t==='OK'?'ok':'warn'))
+    .catch(()=>toast('Lỗi mạng / mất kết nối','err'));
+}
+function clearFault(){ post('/api/jog','fault_clear=1'); }
 
 document.querySelectorAll('.tab-btn[data-t]').forEach(b=>{
   b.onclick=()=>{
@@ -209,30 +244,28 @@ function buildCards(){
      `<div class="jcard">
         <div class="jname"><span>${AXES[i]}</span></div>
         <div class="jbtns">
-          <button class="btn ok" onclick="api('/api/sethome?axis=${i}')">Set Home</button>
-          <button class="btn warn" onclick="api('/api/clearcalib?axis=${i}')">Clear Calib</button>
+          <button class="btn ok need-idle" onclick="api('/api/sethome?axis=${i}')">Set Home</button>
+          <button class="btn warn" onclick="if(confirm('Xóa calib J${i+1}? Sẽ mất vị trí đã lưu trong NVS.'))api('/api/clearcalib?axis=${i}')">Clear Calib</button>
         </div>
       </div>`);
   }
 }
 buildCards();
 
-function jog(axis,deg){
-  fetch('/api/jog',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-    body:`axis=${axis}&deg=${deg}`});
+function jog(axis,dir){
+  post('/api/jog',`axis=${axis}&deg=${dir*stepSize}`);
 }
 
 function saveWifi(){
   const s=document.getElementById('wfSsid').value.trim(), p=document.getElementById('wfPass').value;
-  if(!s){alert('Nhap SSID');return;}
-  fetch('/api/wifi',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-    body:`ssid=${encodeURIComponent(s)}&pass=${encodeURIComponent(p)}`})
-    .then(()=>document.getElementById('sub').innerText='Da luu. Dang restart...');
+  if(!s){toast('Nhập SSID','warn');return;}
+  post('/api/wifi',`ssid=${encodeURIComponent(s)}&pass=${encodeURIComponent(p)}`)
+    .then(()=>{document.getElementById('sub').innerText='Đã lưu. Đang restart...';});
 }
 
 function moveTo(){
   const b=`x=${document.getElementById('mvX').value||0}&y=${document.getElementById('mvY').value||0}&z=${document.getElementById('mvZ').value||0}&feed=${document.getElementById('mvFeed').value||30}`;
-  fetch('/api/move',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b});
+  post('/api/move',b);
 }
 
 function drawParams(){
@@ -248,8 +281,7 @@ function drawParams(){
   return b;
 }
 function startDraw(){
-  fetch('/api/draw',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-    body:drawParams()});
+  post('/api/draw',drawParams());
   previewShape();
 }
 function previewShape(){
@@ -275,6 +307,11 @@ function previewShape(){
   // TCP hiện tại
   if(lastPose){ctx.fillStyle='#f8fafc';ctx.beginPath();
     ctx.arc(cxp+lastPose.x*sc,cyp-lastPose.y*sc,4,0,Math.PI*2);ctx.fill();}
+  // marker home (146,0)
+  ctx.fillStyle='#4ade80';ctx.beginPath();
+  ctx.arc(cxp+146*sc,cyp,3,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#64748b';ctx.font='10px sans-serif';
+  ctx.fillText('home',cxp+146*sc+6,cyp+3);
 }
 let lastPose=null;
 
@@ -286,6 +323,12 @@ function updateUI(d){
   let hn=0;d.joints.forEach(j=>hn+=j.homed?1:0);
   document.getElementById('homedN').innerText=`${hn}/6`;
   document.getElementById('wifiInfo').innerText=`${d.wifi.mode.toUpperCase()} ${d.wifi.rssi?('RSSI '+d.wifi.rssi):''}`;
+  document.getElementById('wfMode').innerText=d.wifi.mode.toUpperCase();
+  document.getElementById('wfIp').innerText=d.wifi.ip;
+  document.getElementById('wfSsidNow').innerText=d.wifi.ssid||'(AP)';
+  document.getElementById('wfRssi').innerText=d.wifi.rssi?('RSSI '+d.wifi.rssi+' dBm'):'-';
+  // khóa nút hành động khi arm đang bận hoặc FAULT
+  document.querySelectorAll('.need-idle').forEach(b=>{b.disabled=(d.busy||d.mode==='fault');});
   const esParts=[];
   d.endstops.forEach((e,i)=>{
     if(e.min&&e.min.pressed)esParts.push(`J${i+1}MIN`);
@@ -295,9 +338,15 @@ function updateUI(d){
   esEl.innerText=esParts.length?esParts.join(', '):'clear';
   esEl.className=esParts.length?'badge b-fault':'muted';
   const h=d.homing;
-  document.getElementById('homProg').innerText=
-    !h?'':(h.active?`J${h.axis}: ${h.phase}`:(h.lastOk?'hoan tat':'loi lan truoc'));
-  document.getElementById('progFill').style.width=h&&h.active?'50%':'0%';
+  const hcs=[document.getElementById('hc0'),document.getElementById('hc1'),
+             document.getElementById('hc2'),document.getElementById('hc3')];
+  if(h&&h.active){
+    hcs.forEach((c,i)=>{c.className='hchip'+(i<h.axis-1?' done':(i===h.axis-1?' on':''));});
+    document.getElementById('homProg').innerText=`J${h.axis}: ${h.phase}`;
+  }else{
+    hcs.forEach(c=>c.className='hchip');
+    document.getElementById('homProg').innerText=h?(h.lastOk?'hoàn tất':'lỗi lần trước'):'';
+  }
   if(d.pose){
     lastPose=d.pose;
     document.getElementById('poseNow').innerText=`(${d.pose.x.toFixed(1)}, ${d.pose.y.toFixed(1)}, ${d.pose.z.toFixed(1)})`;
@@ -314,8 +363,18 @@ function updateUI(d){
   });
 }
 
-setInterval(()=>{fetch('/api/status').then(r=>r.json()).then(updateUI).catch(()=>{});},300);
-fetch('/api/status').then(r=>r.json()).then(updateUI).catch(()=>{});
+function setOnline(on){
+  const s=document.getElementById('sub');
+  s.classList.toggle('offline',!on);
+  if(!on)s.innerText='\u26A0 MẤT KẾT NỐI — đang thử lại...';
+}
+function pollOnce(){
+  fetch('/api/status').then(r=>r.json())
+    .then(d=>{failN=0;setOnline(true);updateUI(d);})
+    .catch(()=>{if(++failN>=3)setOnline(false);});
+}
+setInterval(pollOnce,300);
+pollOnce();
 </script>
 </body>
 </html>
