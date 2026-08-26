@@ -1,0 +1,28 @@
+{
+  "name": "embedded-agent-skills",
+  "description": "Agent Skills for embedded systems development including GPIO configuration, pin validation, and hardware initialization code generation.",
+  "owner": {
+    "name": "Boris Polania",
+    "url": "https://github.com/bpolania"
+  },
+  "plugins": [
+    {
+      "name": "gpio-config",
+      "source": "./embedded-agent-skills/gpio-config",
+      "version": "1.0.0",
+      "description": "GPIO pin assignment and code generation for Raspberry Pi and ESP32",
+      "category": "embedded",
+      "keywords": [
+        "gpio",
+        "raspberry-pi",
+        "esp32",
+        "embedded",
+        "hardware",
+        "i2c",
+        "spi",
+        "uart",
+        "iot"
+      ]
+    }
+  ]
+}

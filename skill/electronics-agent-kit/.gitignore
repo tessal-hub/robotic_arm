@@ -1,0 +1,65 @@
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# KiCad backup and autosave files
+*.kicad_pcb-bak
+*.kicad_sch-bak
+*-backups/
+*.kicad_prl
+fp-info-cache
+
+# KiCad generated files (keep in output/)
+*.rpt
+*.drl
+*.gbr
+*.gbl
+*.gbo
+*.gbs
+*.gtl
+*.gto
+*.gts
+*.gm1
+
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+.venv/
+
+# Build outputs
+output/
+build/
+dist/
+
+# Node.js
+node_modules/
+*.tsbuildinfo
+
+# Package manager
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Logs
+*.log
+npm-debug.log*

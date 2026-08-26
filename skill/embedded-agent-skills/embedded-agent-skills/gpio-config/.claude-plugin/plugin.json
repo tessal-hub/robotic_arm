@@ -1,0 +1,10 @@
+{
+  "name": "gpio-config",
+  "version": "1.0.0",
+  "description": "GPIO pin assignment, validation, and code generation for Raspberry Pi and ESP32 embedded projects. Supports I2C, SPI, UART, PWM, 1-Wire, CAN, ADC protocols with 28 device profiles and hardware safety warnings.",
+  "author": {
+    "name": "Boris Polania",
+    "url": "https://github.com/bpolania"
+  },
+  "skills": ["./"]
+}
