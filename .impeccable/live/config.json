@@ -1,0 +1,12 @@
+{
+  "framework": "static",
+  "files": ["src/web_server.cpp"],
+  "insertBefore": "</head>",
+  "commentSyntax": "//",
+  "cspChecked": true,
+  "devServer": {
+    "command": "pio device monitor",
+    "port": 115200,
+    "url": "http://robot-arm.local"
+  }
+}

@@ -14,175 +14,482 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>6-Axis Arm Controller</title>
 <style>
+:root{
+  /* Colors - Primary */
+  --color-primary: #38bdf8;
+  --color-primary-deep: #0ea5e9;
+  --color-primary-muted: #7dd3fc;
+  /* Colors - Semantic Status */
+  --color-success: #059669;
+  --color-success-bg: #0c1a17;
+  --color-success-text: #6ee7b7;
+  --color-warning: #d97706;
+  --color-warning-bg: #1c1917;
+  --color-warning-text: #fcd34d;
+  --color-danger: #dc2626;
+  --color-danger-bg: #7f1d1d;
+  --color-danger-text: #fca5a5;
+  --color-info: #2563eb;
+  --color-info-bg: #1e3a8a;
+  --color-info-text: #93c5fd;
+  /* Colors - Neutral */
+  --color-bg: #0f172a;
+  --color-surface: #1e293b;
+  --color-surface-elevated: #0f172a;
+  --color-border: #334155;
+  --color-border-strong: #475569;
+  /* Colors - Text */
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #cbd5e1;
+  --color-text-muted: #94a3b8;
+  --color-text-dim: #64748b;
+  /* Colors - Special */
+  --color-focus-ring: #38bdf8;
+  --color-estop-glow: rgba(220,38,38,0.5);
+  --color-estop-glow-strong: rgba(220,38,38,0.9);
+  --color-shadow-card: rgba(0,0,0,0.35);
+  --color-shadow-toast: rgba(0,0,0,0.4);
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 8px;
+  --space-lg: 10px;
+  --space-xl: 12px;
+  --space-2xl: 14px;
+  --space-3xl: 16px;
+  --space-4xl: 18px;
+  --space-gutter: 12px;
+  --space-card-padding: 18px;
+  --space-card-gap: 14px;
+  --space-tab-gap: 6px;
+  --space-page-padding: 16px;
+  --space-max-width: 900px;
+  /* Border Radius */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 11px;
+  --radius-badge: 12px;
+  /* Typography */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --fs-display: clamp(1.25rem, 4vw, 1.5rem);
+  --fs-headline: 1.05rem;
+  --fs-title: 0.92rem;
+  --fs-body: 0.85rem;
+  --fs-label: 0.78rem;
+  --fs-mono: 0.78rem;
+  --fs-tabular: 1.5rem;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --lh-tight: 1.2;
+  --lh-normal: 1.3;
+  --lh-relaxed: 1.4;
+  --lh-loose: 1.55;
+  --ls-label: 0.04em;
+  /* Transitions */
+  --transition-fast: 80ms;
+  --transition-normal: 150ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.23, 1, 0.32, 1);
+  /* Shadows */
+  --shadow-card: 0 8px 20px var(--color-shadow-card);
+  --shadow-toast: 0 6px 20px var(--color-shadow-toast);
+  --shadow-estop: 0 6px 24px var(--color-estop-glow);
+  --shadow-estop-strong: 0 6px 36px var(--color-estop-glow-strong);
+  /* Z-index */
+  --z-toast: 98;
+  --z-estop: 99;
+}
+
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#0f172a;color:#f8fafc;min-height:100vh;padding:16px;display:flex;flex-direction:column;align-items:center}
+body{
+  font-family:var(--font-sans);
+  background:var(--color-bg);
+  color:var(--color-text-primary);
+  min-height:100vh;
+  padding:var(--space-page-padding);
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+}
 .header{text-align:center;margin-bottom:14px}
-.header h1{font-size:1.4rem;color:#38bdf8}
-.header p{font-size:.8rem;color:#94a3b8}
-.tabs{display:flex;gap:6px;background:#1e293b;padding:6px;border-radius:10px;margin-bottom:16px;flex-wrap:wrap;justify-content:center;width:100%;max-width:900px}
-.tab-btn{background:transparent;border:none;color:#94a3b8;padding:8px 14px;border-radius:8px;font-size:.85rem;font-weight:600;cursor:pointer}
-.tab-btn.active{background:#38bdf8;color:#0f172a}
-.tab-btn.disabled{opacity:.35;cursor:not-allowed}
-.tab-pane{display:none;width:100%;max-width:900px}
+.header h1{
+  font-size:var(--fs-display);
+  font-weight:var(--fw-bold);
+  color:var(--color-primary);
+  line-height:var(--lh-tight);
+}
+.header p{font-size:0.8rem;color:var(--color-text-muted);line-height:var(--lh-normal)}
+.tabs{
+  display:flex;gap:var(--space-tab-gap);
+  background:var(--color-surface);
+  padding:var(--space-sm);
+  border-radius:var(--radius-md);
+  margin-bottom:16px;
+  flex-wrap:wrap;
+  justify-content:center;
+  width:100%;
+  max-width:var(--space-max-width);
+}
+.tab-btn{
+  background:transparent;
+  border:none;
+  color:var(--color-text-muted);
+  padding:var(--space-md) var(--space-lg);
+  border-radius:var(--radius-sm);
+  font-size:0.85rem;
+  font-weight:var(--fw-semibold);
+  cursor:pointer;
+  transition:background var(--transition-normal) var(--ease-out),color var(--transition-normal) var(--ease-out);
+}
+.tab-btn:hover{
+  background:var(--color-border);
+  color:var(--color-text-secondary);
+}
+.tab-btn.active{
+  background:var(--color-primary);
+  color:var(--color-bg);
+}
+.tab-btn.disabled{
+  opacity:.35;
+  cursor:not-allowed;
+}
+.tab-btn:focus-visible{
+  outline:2px solid var(--color-focus-ring);
+  outline-offset:2px;
+}
+.tab-pane{display:none;width:100%;max-width:var(--space-max-width)}
 .tab-pane.active{display:block}
-.card{background:#1e293b;border-radius:14px;padding:18px;box-shadow:0 8px 20px rgba(0,0,0,.35);margin-bottom:14px}
-.card h2{font-size:1.05rem;color:#38bdf8;margin-bottom:12px;border-bottom:1px solid #334155;padding-bottom:8px}
-.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-.badge{padding:3px 10px;border-radius:12px;font-size:.7rem;text-transform:uppercase;font-weight:700}
-.b-idle{background:#1e3a8a;color:#93c5fd}.b-run{background:#166534;color:#4ade80}
-.b-fault{background:#7f1d1d;color:#fca5a5}.b-warn{background:#78350f;color:#fcd34d}
-.btn{border:none;border-radius:8px;padding:10px 14px;font-weight:600;font-size:.9rem;cursor:pointer;transition:transform .08s}
-.btn:active{transform:scale(.97)}
-.primary{background:#2563eb;color:#fff}.warn{background:#d97706;color:#fff}
-.danger{background:#dc2626;color:#fff}.ghost{background:#334155;color:#cbd5e1}
-.ok{background:#059669;color:#fff}
-.grid-joints{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
-.jcard{background:#0f172a;border:1px solid #334155;border-radius:10px;padding:12px}
-.jname{font-weight:700;color:#cbd5e1;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
-.jdeg{font-size:1.5rem;color:#38bdf8;font-variant-numeric:tabular-nums}
-.jenc{font-size:.72rem;color:#94a3b8}
-.jflags{font-size:.68rem;margin-top:4px}
-.f-h{color:#4ade80}.f-r{color:#93c5fd}.f-d{color:#fca5a5}.f-e{color:#fcd34d}
-.jbtns{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
-.stepsel{display:flex;gap:4px;margin-top:8px;width:200px}
-.stepbtn{flex:1;background:#334155;color:#cbd5e1;border:none;padding:4px;border-radius:6px;font-size:.75rem;cursor:pointer;font-weight:600}
-.stepbtn.active{background:#38bdf8;color:#0f172a}
-.stat-line{display:flex;justify-content:space-between;font-size:.85rem;color:#94a3b8;margin:4px 0}
-input[type=text],input[type=password]{width:100%;background:#0f172a;border:1px solid #334155;color:#f8fafc;font-size:1rem;padding:9px 12px;border-radius:8px;outline:none;margin-bottom:8px}
-label{display:block;font-size:.78rem;font-weight:600;color:#94a3b8;margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em}
-#estop{position:fixed;bottom:16px;right:16px;z-index:99;padding:18px 30px;font-size:1.15rem;box-shadow:0 6px 24px rgba(220,38,38,.5);animation:estopPulse 2.2s ease-in-out infinite}
-@keyframes estopPulse{0%,100%{box-shadow:0 6px 24px rgba(220,38,38,.5)}50%{box-shadow:0 6px 36px rgba(220,38,38,.9)}}
-@media(prefers-reduced-motion:reduce){#estop{animation:none}}
-.muted{color:#64748b;font-size:.78rem}
+.card{
+  background:var(--color-surface);
+  border-radius:var(--radius-lg);
+  padding:var(--space-card-padding);
+  box-shadow:var(--shadow-card);
+  margin-bottom:var(--space-card-gap);
+}
+.card h2{
+  font-size:var(--fs-headline);
+  font-weight:var(--fw-semibold);
+  color:var(--color-primary);
+  margin-bottom:12px;
+  border-bottom:1px solid var(--color-border);
+  padding-bottom:var(--space-md);
+}
+.row{
+  display:flex;
+  gap:var(--space-md);
+  flex-wrap:wrap;
+  align-items:center;
+}
+.badge{
+  padding:3px 10px;
+  border-radius:var(--radius-badge);
+  font-size:var(--fs-label);
+  font-weight:var(--fw-bold);
+  text-transform:uppercase;
+  letter-spacing:var(--ls-label);
+}
+.b-idle{background:var(--color-info-bg);color:var(--color-info-text)}
+.b-run{background:var(--color-success-bg);color:var(--color-success-text)}
+.b-fault{background:var(--color-danger-bg);color:var(--color-danger-text)}
+.b-warn{background:var(--color-warning-bg);color:var(--color-warning-text)}
+.btn{
+  border:none;
+  border-radius:var(--radius-sm);
+  padding:var(--space-md) var(--space-lg);
+  font-weight:var(--fw-semibold);
+  font-size:var(--fs-body);
+  cursor:pointer;
+  transition:transform var(--transition-fast) var(--ease-spring),background var(--transition-normal) var(--ease-out);
+}
+.btn:hover:not(:disabled){background:var(--color-primary-deep)}
+.btn:active:not(:disabled){transform:scale(0.97)}
+.btn:focus-visible{outline:2px solid var(--color-focus-ring);outline-offset:2px}
 .btn[disabled]{opacity:.4;cursor:not-allowed;transform:none}
-.tab-btn:focus-visible{outline:2px solid #38bdf8}
-.home-track{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
-.hchip{background:#334155;color:#94a3b8;padding:3px 12px;border-radius:11px;font-size:.72rem;font-weight:700}
-.hchip.on{background:#d97706;color:#fff}
-.hchip.done{background:#166534;color:#4ade80}
-#toast{position:fixed;bottom:16px;left:16px;z-index:98;background:#0f172a;border:1px solid #334155;border-left-width:4px;border-radius:8px;padding:10px 14px;font-size:.84rem;color:#cbd5e1;display:none;max-width:70vw;box-shadow:0 6px 20px rgba(0,0,0,.4)}
-.t-ok{border-color:#059669}.t-warn{border-color:#d97706}.t-err{border-color:#dc2626}
-.offline{color:#fca5a5!important}
+.primary{background:var(--color-info);color:var(--color-text-primary)}
+.warn{background:var(--color-warning);color:var(--color-text-primary)}
+.danger{background:var(--color-danger);color:var(--color-text-primary)}
+.ghost{background:var(--color-border);color:var(--color-text-secondary)}
+.ok{background:var(--color-success);color:var(--color-text-primary)}
+.grid-joints{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:var(--space-gutter);
+}
+.jcard{
+  background:var(--color-bg);
+  border:1px solid var(--color-border);
+  border-radius:var(--radius-md);
+  padding:12px;
+}
+.jname{
+  font-weight:var(--fw-bold);
+  color:var(--color-text-secondary);
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:6px;
+}
+.jdeg{
+  font-size:var(--fs-tabular);
+  color:var(--color-primary);
+  font-variant-numeric:tabular-nums;
+  font-family:var(--font-mono);
+}
+.jenc{
+  font-size:0.72rem;
+  color:var(--color-text-muted);
+  font-family:var(--font-sans);
+}
+.jflags{font-size:0.68rem;margin-top:4px;font-family:var(--font-sans)}
+.f-h{color:#4ade80}.f-r{color:#93c5fd}.f-d{color:#fca5a5}.f-e{color:#fcd34d}
+.jbtns{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:var(--space-xs);
+  margin-top:var(--space-md);
+}
+.stepsel{
+  display:flex;
+  gap:var(--space-xs);
+  margin-top:var(--space-md);
+  width:200px;
+}
+.stepbtn{
+  flex:1;
+  background:var(--color-border);
+  color:var(--color-text-secondary);
+  border:none;
+  padding:4px var(--space-xs);
+  border-radius:var(--radius-xs);
+  font-size:0.75rem;
+  font-weight:var(--fw-semibold);
+  cursor:pointer;
+  transition:background var(--transition-normal) var(--ease-out),color var(--transition-normal) var(--ease-out);
+}
+.stepbtn:hover{background:var(--color-border-strong)}
+.stepbtn.active{background:var(--color-primary);color:var(--color-bg)}
+.stepbtn:focus-visible{outline:2px solid var(--color-focus-ring);outline-offset:2px}
+.stat-line{
+  display:flex;
+  justify-content:space-between;
+  font-size:var(--fs-body);
+  color:var(--color-text-muted);
+  margin:4px 0;
+}
+label{
+  display:block;
+  font-size:var(--fs-label);
+  font-weight:var(--fw-semibold);
+  color:var(--color-text-muted);
+  margin-bottom:4px;
+  text-transform:uppercase;
+  letter-spacing:var(--ls-label);
+}
+input[type=text],input[type=password],select{
+  width:100%;
+  background:var(--color-bg);
+  border:1px solid var(--color-border);
+  color:var(--color-text-primary);
+  font-size:1rem;
+  padding:9px 12px;
+  border-radius:var(--radius-sm);
+  outline:none;
+  margin-bottom:8px;
+  font-family:var(--font-sans);
+  transition:border-color var(--transition-normal) var(--ease-out);
+}
+input[type=text]:focus,input[type=password]:focus,select:focus{
+  border-color:var(--color-focus-ring);
+}
+input::placeholder{color:var(--color-text-dim)}
+select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:36px}
+#estop{
+  position:fixed;
+  bottom:16px;
+  right:16px;
+  z-index:var(--z-estop);
+  padding:18px 30px;
+  font-size:1.15rem;
+  font-weight:var(--fw-semibold);
+  box-shadow:var(--shadow-estop);
+  animation:estopPulse 2.2s ease-in-out infinite;
+}
+@keyframes estopPulse{
+  0%,100%{box-shadow:var(--shadow-estop)}
+  50%{box-shadow:var(--shadow-estop-strong)}
+}
+@media(prefers-reduced-motion:reduce){
+  #estop{animation:none}
+  *{transition-duration:0.01ms !important;animation-duration:0.01ms !important}
+}
+.muted{color:var(--color-text-dim);font-size:var(--fs-label)}
+.need-idle:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.home-track{display:flex;gap:var(--space-xs);margin-top:var(--space-md);flex-wrap:wrap}
+.hchip{
+  background:var(--color-border);
+  color:var(--color-text-muted);
+  padding:3px 12px;
+  border-radius:var(--radius-pill);
+  font-size:0.72rem;
+  font-weight:var(--fw-bold);
+}
+.hchip.on{background:var(--color-warning);color:var(--color-text-primary)}
+.hchip.done{background:var(--color-success-bg);color:var(--color-success-text)}
+#toast{
+  position:fixed;
+  bottom:16px;
+  left:16px;
+  z-index:var(--z-toast);
+  background:var(--color-bg);
+  border:1px solid var(--color-border);
+  border-left-width:4px;
+  border-radius:var(--radius-sm);
+  padding:10px 14px;
+  font-size:0.84rem;
+  color:var(--color-text-secondary);
+  display:none;
+  max-width:70vw;
+  box-shadow:var(--shadow-toast);
+  animation:toastIn 0.15s var(--ease-out);
+}
+@keyframes toastIn{
+  from{opacity:0;transform:translateY(8px)}
+  to{opacity:1;transform:translateY(0)}
+}
+.t-ok{border-left-color:var(--color-success)}
+.t-warn{border-left-color:var(--color-warning)}
+.t-err{border-left-color:var(--color-danger)}
+.offline{color:var(--color-danger-text)!important}
+.step-label{display:flex;align-items:center;gap:var(--space-md);font-size:0.8rem;color:var(--color-text-muted)}
+.btn-loading{position:relative;color:transparent}
+.btn-loading::after{content:"";position:absolute;width:16px;height:16px;top:50%;left:50%;margin:-8px 0 0 -8px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
-<div class="header"><h1>6-Axis Robotic Arm</h1><p id="sub">connecting...</p></div>
+<div class="header"><h1>6-Axis Robotic Arm</h1><p id="sub">Đang kết nối...</p></div>
 
-<div class="tabs">
-  <button class="tab-btn active" data-t="dash">Dashboard</button>
-  <button class="tab-btn" data-t="joints">Joints</button>
-  <button class="tab-btn" data-t="home">Homing</button>
-  <button class="tab-btn" data-t="wifi">WiFi</button>
-  <button class="tab-btn" data-t="cart">Cartesian</button>
-  <button class="tab-btn" data-t="draw">Draw</button>
+<div class="tabs" role="tablist" aria-label="Điều khiển cánh tay">
+  <button class="tab-btn active" data-t="dash" role="tab" aria-selected="true" aria-controls="dash">Dashboard</button>
+  <button class="tab-btn" data-t="joints" role="tab" aria-selected="false" aria-controls="joints">Joints</button>
+  <button class="tab-btn" data-t="home" role="tab" aria-selected="false" aria-controls="home">Homing</button>
+  <button class="tab-btn" data-t="wifi" role="tab" aria-selected="false" aria-controls="wifi">WiFi</button>
+  <button class="tab-btn" data-t="cart" role="tab" aria-selected="false" aria-controls="cart">Cartesian</button>
+  <button class="tab-btn" data-t="draw" role="tab" aria-selected="false" aria-controls="draw">Draw</button>
 </div>
 
-<div id="dash" class="tab-pane active">
-  <div class="card"><h2>System Status</h2>
-    <div class="stat-line"><span>Mode</span><span id="mode" class="badge b-idle">idle</span></div>
-    <div class="stat-line"><span>Homed joints</span><span id="homedN">-/6</span></div>
+<div id="dash" class="tab-pane active" role="tabpanel" aria-labelledby="dash-tab">
+  <div class="card"><h2>Trạng thái hệ thống</h2>
+    <div class="stat-line"><span>Chế độ</span><span id="mode" class="badge b-idle">idle</span></div>
+    <div class="stat-line"><span>Khớp đã home</span><span id="homedN">-/6</span></div>
     <div class="stat-line"><span>WiFi</span><span id="wifiInfo">-</span></div>
     <div class="stat-line"><span>Endstops</span><span id="esInfo" class="muted">-</span></div>
     <div class="stat-line"><span>Homing</span><span id="homProg">idle</span></div>
-    <div class="home-track"><span class="hchip" id="hc0">J1</span><span class="hchip" id="hc1">J2</span><span class="hchip" id="hc2">J3</span><span class="hchip" id="hc3">J4</span></div>
+    <div class="home-track" aria-label="Tiến độ homing"><span class="hchip" id="hc0">J1</span><span class="hchip" id="hc1">J2</span><span class="hchip" id="hc2">J3</span><span class="hchip" id="hc3">J4</span></div>
   </div>
-  <div class="card"><h2>Quick Actions</h2>
+  <div class="card"><h2>Thao tác nhanh</h2>
     <div class="row">
-      <button class="btn primary need-idle" onclick="api('/api/home/all')">HOME ALL (J1-J4)</button>
-      <button class="btn warn" onclick="api('/api/stop')">STOP ALL</button>
-      <button class="btn ghost" onclick="clearFault()">CLEAR FAULT</button>
+      <button class="btn primary need-idle" onclick="api('/api/home/all')" aria-label="Home all joints J1-J4">HOME ALL (J1–J4)</button>
+      <button class="btn warn" onclick="api('/api/stop')" aria-label="Emergency stop all motion">STOP ALL</button>
+      <button class="btn ghost" onclick="clearFault()" aria-label="Clear fault state">CLEAR FAULT</button>
     </div>
     <p class="muted" style="margin-top:8px">HOME ALL chạy tuần tự J1→J2→J3→J4. J5/J6 dùng Set-Home thủ công ở tab Homing.</p>
   </div>
 </div>
 
-<div id="joints" class="tab-pane">
-  <div class="card"><h2>Manual Joint Control</h2>
-    <div class="row" style="margin-bottom:10px"><span style="font-size:.8rem;color:#94a3b8">Bước jog:</span>
-      <div class="stepsel" id="stepSel"></div>
+<div id="joints" class="tab-pane" role="tabpanel" aria-labelledby="joints-tab">
+  <div class="card"><h2>Điều khiển khớp thủ công</h2>
+    <div class="step-label" style="margin-bottom:10px"><span>Bước jog:</span>
+      <div class="stepsel" id="stepSel" role="group" aria-label="Chọn bước jog"></div>
     </div>
-    <div class="grid-joints" id="jointGrid"></div>
+    <div class="grid-joints" id="jointGrid" role="list" aria-label="6 khớp điều khiển"></div>
   </div>
 </div>
 
-<div id="home" class="tab-pane">
-  <div class="card"><h2>Automatic Homing (TMC J1-J4)</h2>
-    <div class="row">
-      <button class="btn primary need-idle" onclick="api('/api/home/all')">HOME ALL</button>
-      <span class="muted">từng khớp:</span>
-      <button class="btn ghost need-idle" onclick="api('/api/home/axis?axis=0')">Home J1</button>
-      <button class="btn ghost need-idle" onclick="api('/api/home/axis?axis=1')">Home J2</button>
-      <button class="btn ghost need-idle" onclick="api('/api/home/axis?axis=2')">Home J3</button>
-      <button class="btn ghost need-idle" onclick="api('/api/home/axis?axis=3')">Home J4</button>
+<div id="home" class="tab-pane" role="tabpanel" aria-labelledby="home-tab">
+  <div class="card"><h2>Homing tự động (TMC J1–J4)</h2>
+    <div class="row" style="flex-wrap:wrap;gap:8px">
+      <button class="btn primary need-idle" onclick="api('/api/home/all')" aria-label="Home all joints sequentially">HOME ALL</button>
+      <span class="muted">Từng khớp:</span>
+      <button class="btn ghost need-idle" onclick="api('/api/home/axis?axis=0')" aria-label="Home joint 1">Home J1</button>
+      <button class="btn ghost need-idle" onclick="api('/api/home/axis?axis=1')" aria-label="Home joint 2">Home J2</button>
+      <button class="btn ghost need-idle" onclick="api('/api/home/axis?axis=2')" aria-label="Home joint 3">Home J3</button>
+      <button class="btn ghost need-idle" onclick="api('/api/home/axis?axis=3')" aria-label="Home joint 4">Home J4</button>
     </div>
     <p class="muted" style="margin-top:8px">J1/J2: min-stop → về GIỮA hành trình. J3/J4: min-stop/stall + lùi 2°.</p>
   </div>
-  <div class="card"><h2>Manual Set-Home & Calibration</h2>
+  <div class="card"><h2>Set-Home thủ công & Calibration</h2>
     <p class="muted" style="margin-bottom:10px">Đưa khớp về vị trí mong muốn rồi nhấn Set Home. Dữ liệu lưu NVS — giữ nguyên sau khi tắt nguồn.</p>
-    <div class="grid-joints" id="setHomeGrid"></div>
+    <div class="grid-joints" id="setHomeGrid" role="list" aria-label="Set home và xóa calib"></div>
   </div>
 </div>
 
-<div id="wifi" class="tab-pane">
+<div id="wifi" class="tab-pane" role="tabpanel" aria-labelledby="wifi-tab">
   <div class="card"><h2>Kết nối hiện tại</h2>
     <div class="stat-line"><span>Chế độ</span><span id="wfMode" class="badge b-info">-</span></div>
     <div class="stat-line"><span>IP</span><span id="wfIp">-</span></div>
     <div class="stat-line"><span>SSID</span><span id="wfSsidNow">-</span></div>
     <div class="stat-line"><span>RSSI</span><span id="wfRssi">-</span></div>
   </div>
-  <div class="card"><h2>WiFi Provisioning</h2>
-    <label>SSID</label><input type="text" id="wfSsid" placeholder="ten wifi nha">
-    <label>Password</label><input type="password" id="wfPass" placeholder="mat khau">
+  <div class="card"><h2>Cấu hình WiFi</h2>
+    <label for="wfSsid">SSID</label>
+    <input type="text" id="wfSsid" placeholder="tên wifi nhà" autocomplete="off">
+    <label for="wfPass">Mật khẩu</label>
+    <input type="password" id="wfPass" placeholder="mật khẩu" autocomplete="current-password">
     <div class="row" style="margin-top:8px">
-      <button class="btn ok" onclick="saveWifi()">SAVE &amp; REBOOT</button>
+      <button class="btn ok" onclick="saveWifi()" aria-label="Lưu WiFi và khởi động lại">SAVE & REBOOT</button>
       <span class="muted">Lưu vào NVS — không cần flash lại khi đổi mạng.</span>
     </div>
   </div>
 </div>
 
-<div id="cart" class="tab-pane">
-  <div class="card"><h2>Move TCP (bút hướng xuống)</h2>
-    <p class="muted" style="margin-bottom:8px">Yêu cầu đã HOME J1-J4. Vị trí hiện tại:
-      <span id="poseNow" style="color:#38bdf8;font-weight:700">-</span></p>
-    <div class="row">
-      <input type="text" id="mvX" inputmode="decimal" placeholder="X (mm)" style="width:90px">
-      <input type="text" id="mvY" inputmode="decimal" placeholder="Y (mm)" style="width:90px">
-      <input type="text" id="mvZ" inputmode="decimal" placeholder="Z (mm)" style="width:90px">
-      <input type="text" id="mvFeed" inputmode="decimal" placeholder="feed mm/s" value="30" style="width:90px">
-      <button class="btn primary need-idle" onclick="moveTo()">MOVE</button>
+<div id="cart" class="tab-pane" role="tabpanel" aria-labelledby="cart-tab">
+  <div class="card"><h2>Di chuyển TCP (bút hướng xuống)</h2>
+    <p class="muted" style="margin-bottom:8px">Yêu cầu đã HOME J1–J4. Vị trí hiện tại:
+      <span id="poseNow" style="color:var(--color-primary);font-weight:var(--fw-bold)">-</span></p>
+    <div class="row" style="flex-wrap:wrap;gap:8px">
+      <input type="text" id="mvX" inputmode="decimal" placeholder="X (mm)" style="width:90px" aria-label="X coordinate">
+      <input type="text" id="mvY" inputmode="decimal" placeholder="Y (mm)" style="width:90px" aria-label="Y coordinate">
+      <input type="text" id="mvZ" inputmode="decimal" placeholder="Z (mm)" style="width:90px" aria-label="Z coordinate">
+      <input type="text" id="mvFeed" inputmode="decimal" placeholder="feed mm/s" value="30" style="width:90px" aria-label="Feed rate">
+      <button class="btn primary need-idle" onclick="moveTo()" aria-label="Move to position">MOVE</button>
     </div>
     <p class="muted" style="margin-top:6px">Home TCP = (146, 0, 365). Giấy vẽ đặt dưới bút, Z nhỏ hơn khi hạ.</p>
   </div>
 </div>
 
-<div id="draw" class="tab-pane">
-  <div class="card"><h2>Draw Shape (pen on paper)</h2>
-    <canvas id="cv" width="420" height="300"
-      style="background:#0f172a;border:1px solid #334155;border-radius:8px;display:block;margin-bottom:10px"></canvas>
-    <label>Hình</label>
-    <select id="dwShape" style="background:#0f172a;color:#f8fafc;border:1px solid #334155;padding:8px;border-radius:8px;margin-bottom:8px">
+<div id="draw" class="tab-pane" role="tabpanel" aria-labelledby="draw-tab">
+  <div class="card"><h2>Vẽ hình (bút trên giấy)</h2>
+    <canvas id="cv" width="420" height="300" aria-label="Preview đường vẽ từ trên xuống" style="background:var(--color-bg);border:1px solid var(--color-border);border-radius:var(--radius-sm);display:block;margin-bottom:10px"></canvas>
+    <label for="dwShape">Hình</label>
+    <select id="dwShape" aria-label="Chọn hình vẽ">
       <option value="line">Line</option>
       <option value="circle">Circle</option>
     </select>
-    <div class="row">
-      <input type="text" id="dwA1" inputmode="decimal" placeholder="x1 / cx" style="width:90px">
-      <input type="text" id="dwA2" inputmode="decimal" placeholder="y1 / cy" style="width:90px">
-      <input type="text" id="dwA3" inputmode="decimal" placeholder="x2 / r"   style="width:90px">
-      <input type="text" id="dwA4" inputmode="decimal" placeholder="y2"       style="width:90px">
-      <input type="text" id="dwZ"  inputmode="decimal" placeholder="z giấy"   style="width:90px">
-      <input type="text" id="dwFeed" inputmode="decimal" placeholder="feed"   style="width:80px" value="20">
+    <div class="row" style="flex-wrap:wrap;gap:8px">
+      <input type="text" id="dwA1" inputmode="decimal" placeholder="x1 / cx" style="width:90px" aria-label="X1 / Center X">
+      <input type="text" id="dwA2" inputmode="decimal" placeholder="y1 / cy" style="width:90px" aria-label="Y1 / Center Y">
+      <input type="text" id="dwA3" inputmode="decimal" placeholder="x2 / r"   style="width:90px" aria-label="X2 / Radius">
+      <input type="text" id="dwA4" inputmode="decimal" placeholder="y2"       style="width:90px" aria-label="Y2">
+      <input type="text" id="dwZ"  inputmode="decimal" placeholder="z giấy"   style="width:90px" aria-label="Paper Z">
+      <input type="text" id="dwFeed" inputmode="decimal" placeholder="feed"   style="width:80px" value="20" aria-label="Feed rate">
     </div>
-    <div class="row" style="margin-top:10px">
-      <button class="btn ok need-idle" onclick="startDraw()">START DRAW</button>
-      <button class="btn danger" onclick="api('/api/stop')">ABORT</button>
-      <button class="btn ghost" onclick="previewShape()">PREVIEW</button>
+    <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:8px">
+      <button class="btn ok need-idle" onclick="startDraw()" aria-label="Bắt đầu vẽ">START DRAW</button>
+      <button class="btn danger" onclick="api('/api/stop')" aria-label="Dừng vẽ ngay">ABORT</button>
+      <button class="btn ghost" onclick="previewShape()" aria-label="Xem trước đường vẽ">PREVIEW</button>
       <span class="muted">Preview: hình chiếu từ trên xuống (đơn vị mm, gốc = trục J1).</span>
     </div>
   </div>
 </div>
 
-<button id="estop" class="btn danger" onclick="api('/api/stop')">&#9888; E-STOP</button>
-<div id="toast"></div>
+<button id="estop" class="btn danger" onclick="api('/api/stop')" aria-label="Emergency stop — dừng khẩn cấp">&#9888; E-STOP</button>
+<div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
 <script>
 let stepSize=1.0, pollTimer=null, failN=0, toastTimer=null;
@@ -198,31 +505,46 @@ function toast(msg,cls){
 }
 function api(url){
   return fetch(url).then(r=>r.text()).then(t=>{
-    toast((t==='OK'?'\u2713 ':'')+t,t==='OK'?'ok':'warn');
+    toast((t==='OK'?'✓ ':'')+t,t==='OK'?'ok':'warn');
     return t;
   }).catch(()=>toast('Lỗi mạng / mất kết nối','err'));
 }
 function post(url,body){
   return fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body})
     .then(r=>r.text())
-    .then(t=>toast((t==='OK'?'\u2713 ':'')+t,t==='OK'?'ok':'warn'))
+    .then(t=>toast((t==='OK'?'✓ ':'')+t,t==='OK'?'ok':'warn'))
     .catch(()=>toast('Lỗi mạng / mất kết nối','err'));
 }
 function clearFault(){ post('/api/jog','fault_clear=1'); }
 
 document.querySelectorAll('.tab-btn[data-t]').forEach(b=>{
   b.onclick=()=>{
-    document.querySelectorAll('.tab-btn').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(x=>{
+      x.classList.remove('active');
+      x.setAttribute('aria-selected','false');
+    });
     document.querySelectorAll('.tab-pane').forEach(x=>x.classList.remove('active'));
     b.classList.add('active');
+    b.setAttribute('aria-selected','true');
     document.getElementById(b.dataset.t).classList.add('active');
   };
 });
 
 [0.5,1,5,15].forEach(s=>{
   const b=document.createElement('button');
-  b.className='stepbtn'+(s===stepSize?' active':''); b.textContent=s+'\u00B0';
-  b.onclick=()=>{stepSize=s;document.querySelectorAll('.stepbtn').forEach(x=>x.classList.remove('active'));b.classList.add('active');};
+  b.className='stepbtn'+(s===stepSize?' active':'');
+  b.textContent=s+'°';
+  b.setAttribute('role','radio');
+  b.setAttribute('aria-checked',s===stepSize);
+  b.onclick=()=>{
+    stepSize=s;
+    document.querySelectorAll('.stepbtn').forEach(x=>{
+      x.classList.remove('active');
+      x.setAttribute('aria-checked','false');
+    });
+    b.classList.add('active');
+    b.setAttribute('aria-checked','true');
+  };
   document.getElementById('stepSel').appendChild(b);
 });
 
@@ -231,21 +553,21 @@ function buildCards(){
   const sg=document.getElementById('setHomeGrid'); sg.innerHTML='';
   for(let i=0;i<6;i++){
     g.insertAdjacentHTML('beforeend',
-     `<div class="jcard">
+     `<div class="jcard" role="listitem">
         <div class="jname"><span>${AXES[i]}</span><span class="jdeg" id="jd${i}">--</span></div>
         <div class="jenc" id="je${i}">encoder: --</div>
         <div class="jflags" id="jf${i}"></div>
         <div class="jbtns">
-          <button class="btn danger" onclick="jog(${i},-${stepSize})">&#8630;</button>
-          <button class="btn primary" onclick="jog(${i},${stepSize})">&#8634;</button>
+          <button class="btn danger" onclick="jog(${i},-${stepSize})" aria-label="Jog ${AXES[i]} negative">&#8630;</button>
+          <button class="btn primary" onclick="jog(${i},${stepSize})" aria-label="Jog ${AXES[i]} positive">&#8634;</button>
         </div>
       </div>`);
     sg.insertAdjacentHTML('beforeend',
-     `<div class="jcard">
+     `<div class="jcard" role="listitem">
         <div class="jname"><span>${AXES[i]}</span></div>
         <div class="jbtns">
-          <button class="btn ok need-idle" onclick="api('/api/sethome?axis=${i}')">Set Home</button>
-          <button class="btn warn" onclick="if(confirm('Xóa calib J${i+1}? Sẽ mất vị trí đã lưu trong NVS.'))api('/api/clearcalib?axis=${i}')">Clear Calib</button>
+          <button class="btn ok need-idle" onclick="api('/api/sethome?axis=${i}')" aria-label="Set home for ${AXES[i]}">Set Home</button>
+          <button class="btn warn" onclick="if(confirm('Xóa calib J${i+1}? Sẽ mất vị trí đã lưu trong NVS.'))api('/api/clearcalib?axis=${i}')" aria-label="Clear calibration for ${AXES[i]}">Clear Calib</button>
         </div>
       </div>`);
   }
@@ -259,13 +581,26 @@ function jog(axis,dir){
 function saveWifi(){
   const s=document.getElementById('wfSsid').value.trim(), p=document.getElementById('wfPass').value;
   if(!s){toast('Nhập SSID','warn');return;}
+  const btn=event.target;
+  btn.classList.add('btn-loading');
+  btn.disabled=true;
   post('/api/wifi',`ssid=${encodeURIComponent(s)}&pass=${encodeURIComponent(p)}`)
-    .then(()=>{document.getElementById('sub').innerText='Đã lưu. Đang restart...';});
+    .then(()=>{
+      document.getElementById('sub').innerText='Đã lưu. Đang restart...';
+      btn.classList.remove('btn-loading');
+      btn.disabled=false;
+    });
 }
 
 function moveTo(){
+  const btn=event.target;
+  btn.classList.add('btn-loading');
+  btn.disabled=true;
   const b=`x=${document.getElementById('mvX').value||0}&y=${document.getElementById('mvY').value||0}&z=${document.getElementById('mvZ').value||0}&feed=${document.getElementById('mvFeed').value||30}`;
-  post('/api/move',b);
+  post('/api/move',b).finally(()=>{
+    btn.classList.remove('btn-loading');
+    btn.disabled=false;
+  });
 }
 
 function drawParams(){
@@ -281,7 +616,13 @@ function drawParams(){
   return b;
 }
 function startDraw(){
-  post('/api/draw',drawParams());
+  const btn=event.target;
+  btn.classList.add('btn-loading');
+  btn.disabled=true;
+  post('/api/draw',drawParams()).finally(()=>{
+    btn.classList.remove('btn-loading');
+    btn.disabled=false;
+  });
   previewShape();
 }
 function previewShape(){
@@ -296,7 +637,7 @@ function previewShape(){
     ctx.beginPath();ctx.moveTo(cxp+gx*sc,0);ctx.lineTo(cxp+gx*sc,cv.height);ctx.stroke();
     ctx.beginPath();ctx.moveTo(0,cyp-gx*sc);ctx.lineTo(cv.width,cyp-gx*sc);ctx.stroke();
   }
-  ctx.strokeStyle='#38bdf8';ctx.lineWidth=2;ctx.beginPath();
+  ctx.strokeStyle='var(--color-primary)';ctx.lineWidth=2;ctx.beginPath();
   if(sh==='line'){
     ctx.moveTo(cxp+v('dwA1')*sc,cyp-v('dwA2')*sc);
     ctx.lineTo(cxp+v('dwA3')*sc,cyp-v('dwA4')*sc);
@@ -305,12 +646,12 @@ function previewShape(){
   }
   ctx.stroke();
   // TCP hiện tại
-  if(lastPose){ctx.fillStyle='#f8fafc';ctx.beginPath();
+  if(lastPose){ctx.fillStyle='var(--color-text-primary)';ctx.beginPath();
     ctx.arc(cxp+lastPose.x*sc,cyp-lastPose.y*sc,4,0,Math.PI*2);ctx.fill();}
   // marker home (146,0)
   ctx.fillStyle='#4ade80';ctx.beginPath();
   ctx.arc(cxp+146*sc,cyp,3,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle='#64748b';ctx.font='10px sans-serif';
+  ctx.fillStyle='var(--color-text-dim)';ctx.font='10px sans-serif';
   ctx.fillText('home',cxp+146*sc+6,cyp+3);
 }
 let lastPose=null;
@@ -353,20 +694,20 @@ function updateUI(d){
   }
 
   d.joints.forEach((j,i)=>{
-    document.getElementById(`jd${i}`).innerText=j.deg.toFixed(1)+'\u00B0';
-    document.getElementById(`je${i}`).innerText='encoder: '+(j.encOK?j.encDeg.toFixed(1)+'\u00B0':'MAT KET NOI');
+    document.getElementById(`jd${i}`).innerText=j.deg.toFixed(1)+'°';
+    document.getElementById(`je${i}`).innerText='encoder: '+(j.encOK?j.encDeg.toFixed(1)+'°':'MẤT KẾT NỐI');
     const f=[];
-    f.push(`<span class="${j.homed?'f-h':'f-e'}">${j.homed?(j.restored?'HOMED(nvs)':'HOMED'):'CHUA HOME'}</span>`);
+    f.push(`<span class="${j.homed?'f-h':'f-e'}">${j.homed?(j.restored?'HOMED (NVS)':'HOMED'):'CHƯA HOME'}</span>`);
     if(j.drift)f.push('<span class="f-d">DRIFT!</span>');
     if(!j.encOK)f.push('<span class="f-e">ENC ERR</span>');
-    document.getElementById(`jf${i}`).innerHTML=f.join(' \u00B7 ');
+    document.getElementById(`jf${i}`).innerHTML=f.join(' · ');
   });
 }
 
 function setOnline(on){
   const s=document.getElementById('sub');
   s.classList.toggle('offline',!on);
-  if(!on)s.innerText='\u26A0 MẤT KẾT NỐI — đang thử lại...';
+  if(!on)s.innerText='⚠ MẤT KẾT NỐI — đang thử lại...';
 }
 function pollOnce(){
   fetch('/api/status').then(r=>r.json())

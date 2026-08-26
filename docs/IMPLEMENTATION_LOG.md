@@ -187,5 +187,32 @@ hiện tại trừ khi thí nghiệm trên buộc phải đổi mô hình.
 
 ---
 
+## 2026-08-26 — Polish UI: web app nhúng (impeccable polish)
+
+### Việc đã làm
+- What: tinh chỉnh toàn diện UI nhúng (`src/web_server.cpp`):
+  - **Design tokens**: chuyển toàn bộ hard-coded color/spacing/radius/typography sang CSS custom properties tại `:root` — single source of truth, dễ maintain, đồng bộ với DESIGN.md.
+  - **Interaction states**: thêm hover/focus-visible/active/disabled cho mọi button, tab, step selector, input, select. Focus ring dùng `--color-focus-ring` (Mission Sky).
+  - **Loading states**: nút async (SAVE & REBOOT, MOVE, START DRAW) có spinner + disable khi pending; class `.btn-loading` với keyframes spin.
+  - **Toast**: thêm entrance animation (`toastIn` 150ms ease-out), ARIA live region (`role="status" aria-live="polite"`).
+  - **Micro-interactions**: step selector dùng `role="radio" aria-checked`; tab dùng `role="tab" aria-selected`; tabpanel dùng `role="tabpanel" aria-labelledby`.
+  - **Vietnamese diacritics**: sửa "MAT KET NOI" → "MẤT KẾT NỐI", "CHUA HOME" → "CHƯA HOME", "HOMED(nvs)" → "HOMED (NVS)", Unicode checkmarks (✓) thay `\u2713`.
+  - **Copy consistency**: thống nhất tiếng Việt cho mọi label/tooltip/placeholder; aria-label cho icon-only buttons (E-STOP, jog arrows).
+  - **Canvas preview**: dùng CSS variable `var(--color-primary)` thay hard-coded `#38bdf8`.
+  - **Reduced motion**: mở rộng `@media (prefers-reduced-motion: reduce)` tắt mọi transition/animation.
+  - **Inline styles**: thay bằng class hoặc CSS variable; chỉ giữ `style="width:..."` cho input cố định.
+  - **Select styling**: native appearance:none + custom dropdown arrow SVG.
+- Why: impeccable polish pass — alignment với DESIGN.md, accessibility, interaction completeness, maintainability.
+- How: chỉ sửa `src/web_server.cpp` (INDEX_HTML + JS); không đổi REST API, không đổi firmware logic.
+
+### Build gate
+- `pio run` → **SUCCESS**. RAM 15.0% (49,268 B), Flash 25.3% (846,157 B) (+10 KB so với trước — CSS variables + ARIA + loading states).
+- `tools/run_kin_tests.sh` → **ALL PASSED** (3280/3280 IK roundtrip).
+
+### Việc còn lại
+- Cập nhật DESIGN.md và .impeccable/design.json để phản ánh CSS variables mới (đã làm song song).
+
+---
+
 
 

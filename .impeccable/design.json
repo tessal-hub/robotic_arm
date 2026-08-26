@@ -1,0 +1,271 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-26T12:30:00.000Z",
+  "title": "Design System: 6-Axis Arm Controller",
+  "extensions": {
+    "colorMeta": {
+      "primary": { "role": "primary", "displayName": "Mission Sky", "canonical": "oklch(72% 0.15 220)", "tonalRamp": ["#0369a1", "#0284c7", "#0ea5e9", "#38bdf8", "#7dd3fc", "#bae6fd", "#e0f2fe", "#f0f9ff"] },
+      "primary-deep": { "role": "primary", "displayName": "Mission Sky Deep", "canonical": "oklch(64% 0.18 220)", "tonalRamp": ["#026aa7", "#0369a1", "#0284c7", "#0ea5e9", "#38bdf8", "#7dd3fc", "#bae6fd", "#e0f2fe"] },
+      "primary-muted": { "role": "primary", "displayName": "Mission Sky Muted", "canonical": "oklch(78% 0.12 220)", "tonalRamp": ["#075985", "#0369a1", "#0284c7", "#0ea5e9", "#38bdf8", "#7dd3fc", "#bae6fd", "#f0f9ff"] },
+      "success": { "role": "success", "displayName": "Operational Green", "canonical": "oklch(55% 0.18 150)", "tonalRamp": ["#04471c", "#055a24", "#06752c", "#059669", "#10b981", "#34d399", "#6ee7b7", "#a7f3d0"] },
+      "success-bg": { "role": "neutral", "displayName": "Success Surface", "canonical": "oklch(15% 0.03 150)", "tonalRamp": ["#022c12", "#04471c", "#055a24", "#06752c", "#059669", "#10b981", "#34d399", "#dcfce7"] },
+      "success-text": { "role": "neutral", "displayName": "Success Text", "canonical": "oklch(85% 0.12 150)", "tonalRamp": ["#052e16", "#064e1b", "#06752c", "#059669", "#10b981", "#34d399", "#6ee7b7", "#dcfce7"] },
+      "warning": { "role": "warning", "displayName": "Caution Amber", "canonical": "oklch(62% 0.22 70)", "tonalRamp": ["#713f12", "#854d0e", "#a16207", "#b45309", "#d97706", "#f59e0b", "#fcd34d", "#fef3c7"] },
+      "warning-bg": { "role": "neutral", "displayName": "Warning Surface", "canonical": "oklch(15% 0.04 70)", "tonalRamp": ["#2c1810", "#422006", "#5b3a1e", "#78350f", "#92400e", "#b45309", "#d97706", "#fef9c3"] },
+      "warning-text": { "role": "neutral", "displayName": "Warning Text", "canonical": "oklch(88% 0.15 70)", "tonalRamp": ["#2c1810", "#422006", "#5b3a1e", "#78350f", "#92400e", "#b45309", "#fcd34d", "#fefce8"] },
+      "danger": { "role": "danger", "displayName": "Fault Red", "canonical": "oklch(55% 0.22 25)", "tonalRamp": ["#7f1d1d", "#991b1b", "#b91c1c", "#dc2626", "#ef4444", "#f87171", "#fca5a5", "#fecaca"] },
+      "danger-bg": { "role": "neutral", "displayName": "Danger Surface", "canonical": "oklch(18% 0.05 25)", "tonalRamp": ["#450a0a", "#7f1d1d", "#991b1b", "#b91c1c", "#dc2626", "#ef4444", "#f87171", "#fee2e2"] },
+      "danger-text": { "role": "neutral", "displayName": "Danger Text", "canonical": "oklch(82% 0.12 25)", "tonalRamp": ["#450a0a", "#7f1d1d", "#991b1b", "#b91c1c", "#dc2626", "#ef4444", "#fca5a5", "#ffe4e6"] },
+      "info": { "role": "info", "displayName": "Info Blue", "canonical": "oklch(58% 0.20 245)", "tonalRamp": ["#1e3a5f", "#1e429f", "#1e3a8a", "#2563eb", "#3b82f6", "#60a5fa", "#93c5fd", "#dbeafe"] },
+      "info-bg": { "role": "neutral", "displayName": "Info Surface", "canonical": "oklch(17% 0.06 245)", "tonalRamp": ["#172554", "#1e3a5f", "#1e429f", "#1e3a8a", "#2563eb", "#3b82f6", "#60a5fa", "#eff6ff"] },
+      "info-text": { "role": "neutral", "displayName": "Info Text", "canonical": "oklch(75% 0.15 245)", "tonalRamp": ["#172554", "#1e3a5f", "#1e429f", "#1e3a8a", "#2563eb", "#3b82f6", "#93c5fd", "#eff6ff"] },
+      "bg": { "role": "neutral", "displayName": "Void", "canonical": "oklch(12% 0.02 240)", "tonalRamp": ["#020617", "#0f172a", "#1e293b", "#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1"] },
+      "surface": { "role": "neutral", "displayName": "Slate-800", "canonical": "oklch(18% 0.03 240)", "tonalRamp": ["#020617", "#0f172a", "#1e293b", "#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1"] },
+      "surface-elevated": { "role": "neutral", "displayName": "Void Elevated", "canonical": "oklch(12% 0.02 240)", "tonalRamp": ["#020617", "#0f172a", "#1e293b", "#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1"] },
+      "border": { "role": "neutral", "displayName": "Slate-700", "canonical": "oklch(28% 0.04 240)", "tonalRamp": ["#0f172a", "#1e293b", "#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1", "#e2e8f0"] },
+      "border-strong": { "role": "neutral", "displayName": "Slate-600", "canonical": "oklch(38% 0.05 240)", "tonalRamp": ["#1e293b", "#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1", "#e2e8f0", "#f1f5f9"] },
+      "text-primary": { "role": "neutral", "displayName": "Slate-50", "canonical": "oklch(97% 0.01 240)", "tonalRamp": ["#0f172a", "#1e293b", "#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1", "#f8fafc"] },
+      "text-secondary": { "role": "neutral", "displayName": "Slate-200", "canonical": "oklch(88% 0.02 240)", "tonalRamp": ["#1e293b", "#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1", "#e2e8f0", "#f1f5f9"] },
+      "text-muted": { "role": "neutral", "displayName": "Slate-400", "canonical": "oklch(65% 0.04 240)", "tonalRamp": ["#1e293b", "#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1", "#e2e8f0", "#f1f5f9"] },
+      "text-dim": { "role": "neutral", "displayName": "Slate-500", "canonical": "oklch(55% 0.03 240)", "tonalRamp": ["#0f172a", "#1e293b", "#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1", "#e2e8f0"] },
+      "focus-ring": { "role": "primary", "displayName": "Focus Ring", "canonical": "oklch(72% 0.15 220)", "tonalRamp": ["#0369a1", "#0284c7", "#0ea5e9", "#38bdf8", "#7dd3fc", "#bae6fd", "#e0f2fe", "#f0f9ff"] },
+      "estop-glow": { "role": "danger", "displayName": "E-STOP Glow", "canonical": "rgba(220,38,38,0.5)", "tonalRamp": ["rgba(220,38,38,0.1)", "rgba(220,38,38,0.2)", "rgba(220,38,38,0.3)", "rgba(220,38,38,0.4)", "rgba(220,38,38,0.5)", "rgba(220,38,38,0.6)", "rgba(220,38,38,0.8)", "rgba(220,38,38,0.9)"] },
+      "estop-glow-strong": { "role": "danger", "displayName": "E-STOP Glow Strong", "canonical": "rgba(220,38,38,0.9)", "tonalRamp": ["rgba(220,38,38,0.2)", "rgba(220,38,38,0.3)", "rgba(220,38,38,0.4)", "rgba(220,38,38,0.5)", "rgba(220,38,38,0.6)", "rgba(220,38,38,0.7)", "rgba(220,38,38,0.8)", "rgba(220,38,38,0.9)"] },
+      "shadow-card": { "role": "neutral", "displayName": "Card Shadow", "canonical": "rgba(0,0,0,0.35)", "tonalRamp": ["rgba(0,0,0,0.1)", "rgba(0,0,0,0.15)", "rgba(0,0,0,0.2)", "rgba(0,0,0,0.25)", "rgba(0,0,0,0.3)", "rgba(0,0,0,0.35)", "rgba(0,0,0,0.4)", "rgba(0,0,0,0.5)"] },
+      "shadow-toast": { "role": "neutral", "displayName": "Toast Shadow", "canonical": "rgba(0,0,0,0.4)", "tonalRamp": ["rgba(0,0,0,0.1)", "rgba(0,0,0,0.15)", "rgba(0,0,0,0.2)", "rgba(0,0,0,0.25)", "rgba(0,0,0,0.3)", "rgba(0,0,0,0.35)", "rgba(0,0,0,0.4)", "rgba(0,0,0,0.5)"] },
+      "overlay-backdrop": { "role": "neutral", "displayName": "Overlay Backdrop", "canonical": "rgba(0,0,0,0.4)", "tonalRamp": ["rgba(0,0,0,0.1)", "rgba(0,0,0,0.2)", "rgba(0,0,0,0.3)", "rgba(0,0,0,0.4)", "rgba(0,0,0,0.5)", "rgba(0,0,0,0.6)", "rgba(0,0,0,0.7)", "rgba(0,0,0,0.8)"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Page title only — hero headline" },
+      "headline": { "displayName": "Headline", "purpose": "Card titles, section headers" },
+      "title": { "displayName": "Title", "purpose": "Sub-section headers within cards" },
+      "body": { "displayName": "Body", "purpose": "All prose, stat values, button labels, toast messages" },
+      "label": { "displayName": "Label", "purpose": "Input labels, badge text, chip text, step buttons" },
+      "mono": { "displayName": "Mono", "purpose": "Encoder values, coordinates, code snippets" },
+      "tabular": { "displayName": "Tabular", "purpose": "Joint degree readouts — monospace, fixed width, aligns vertically" }
+    },
+    "shadows": [
+      { "name": "card-ambient", "value": "0 8px 20px rgba(0,0,0,0.35)", "purpose": "Main content cards only — subtle diffuse elevation" },
+      { "name": "estop-glow", "value": "0 6px 24px rgba(220,38,38,0.5)", "purpose": "E-STOP button base glow (pulses to strong)" },
+      { "name": "estop-glow-strong", "value": "0 6px 36px rgba(220,38,38,0.9)", "purpose": "E-STOP button pulse peak" },
+      { "name": "toast-lift", "value": "0 6px 20px rgba(0,0,0,0.4)", "purpose": "Transient notifications — higher than cards" }
+    ],
+    "motion": [
+      { "name": "ease-standard", "value": "cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Default easing for state transitions" },
+      { "name": "ease-out-quint", "value": "cubic-bezier(0.23, 1, 0.32, 1)", "purpose": "Button press, toast enter" },
+      { "name": "ease-out-expo", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Card hover, tab switch" },
+      { "name": "estop-pulse", "value": "ease-in-out", "duration": "2200ms", "purpose": "E-STOP glow pulse — respects prefers-reduced-motion" }
+    ],
+    "breakpoints": [
+      { "name": "mobile", "value": "640px" },
+      { "name": "tablet", "value": "768px" },
+      { "name": "desktop", "value": "1024px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "btn-primary",
+      "description": "Main actions — HOME ALL, MOVE, START DRAW",
+      "html": "<button class=\"ds-btn-primary\">HOME ALL</button>",
+      "css": ".ds-btn-primary { background: var(--color-info, #2563eb); color: var(--color-text-primary, #f8fafc); padding: 10px 14px; border-radius: 8px; font-weight: 600; font-size: 0.9rem; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; border: none; cursor: pointer; transition: transform 0.08s cubic-bezier(0.23, 1, 0.32, 1); } .ds-btn-primary:hover { background: var(--color-primary-deep, #0ea5e9); } .ds-btn-primary:active { transform: scale(0.97); } .ds-btn-primary:focus-visible { outline: 2px solid var(--color-focus-ring, #38bdf8); outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }"
+    },
+    {
+      "name": "Danger Button (E-STOP)",
+      "kind": "button",
+      "refersTo": "btn-estop",
+      "description": "Emergency stop — fixed bottom-right, oversized, pulsing glow",
+      "html": "<button class=\"ds-btn-estop\">⚠ E-STOP</button>",
+      "css": ".ds-btn-estop { position: fixed; bottom: 16px; right: 16px; z-index: 99; background: var(--color-danger, #dc2626); color: var(--color-text-primary, #f8fafc); padding: 18px 30px; border-radius: 8px; font-weight: 600; font-size: 1.15rem; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; border: none; cursor: pointer; box-shadow: 0 6px 24px rgba(220,38,38,0.5); animation: estopPulse 2.2s ease-in-out infinite; } @keyframes estopPulse { 0%, 100% { box-shadow: 0 6px 24px rgba(220,38,38,0.5); } 50% { box-shadow: 0 6px 36px rgba(220,38,38,0.9); } } @media (prefers-reduced-motion: reduce) { .ds-btn-estop { animation: none; } } .ds-btn-estop:focus-visible { outline: 2px solid var(--color-focus-ring, #38bdf8); outline-offset: 2px; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "btn-ghost",
+      "description": "Secondary actions — individual joint home, clear fault",
+      "html": "<button class=\"ds-btn-ghost\">Home J1</button>",
+      "css": ".ds-btn-ghost { background: var(--color-border, #334155); color: var(--color-text-secondary, #cbd5e1); padding: 10px 14px; border-radius: 8px; font-weight: 600; font-size: 0.9rem; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; border: none; cursor: pointer; transition: transform 0.08s cubic-bezier(0.23, 1, 0.32, 1); } .ds-btn-ghost:hover { background: var(--color-border-strong, #475569); } .ds-btn-ghost:active { transform: scale(0.97); } .ds-btn-ghost:focus-visible { outline: 2px solid var(--color-focus-ring, #38bdf8); outline-offset: 2px; } .ds-btn-ghost:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }"
+    },
+    {
+      "name": "Tab Button",
+      "kind": "button",
+      "refersTo": "btn-tab",
+      "description": "Tab navigation — transparent inactive, Mission Sky active",
+      "html": "<button class=\"ds-btn-tab active\">Dashboard</button>",
+      "css": ".ds-btn-tab { background: transparent; color: var(--color-text-muted, #94a3b8); padding: 8px 14px; border-radius: 8px; font-weight: 600; font-size: 0.85rem; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; border: none; cursor: pointer; transition: background 0.15s cubic-bezier(0.16, 1, 0.3, 1), color 0.15s cubic-bezier(0.16, 1, 0.3, 1); } .ds-btn-tab:hover { background: var(--color-border, #334155); color: var(--color-text-secondary, #cbd5e1); } .ds-btn-tab.active { background: var(--color-primary, #38bdf8); color: var(--color-bg, #0f172a); } .ds-btn-tab:focus-visible { outline: 2px solid var(--color-focus-ring, #38bdf8); outline-offset: 2px; } .ds-btn-tab.disabled { opacity: 0.35; cursor: not-allowed; }"
+    },
+    {
+      "name": "Step Selector Button",
+      "kind": "button",
+      "refersTo": "btn-step",
+      "description": "Toggle group for jog step size (0.5°/1°/5°/15°)",
+      "html": "<button class=\"ds-btn-step active\">1°</button>",
+      "css": ".ds-btn-step { flex: 1; background: var(--color-border, #334155); color: var(--color-text-secondary, #cbd5e1); border: none; padding: 4px 8px; border-radius: 6px; font-weight: 600; font-size: 0.75rem; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; cursor: pointer; transition: background 0.15s, color 0.15s; } .ds-btn-step:hover { background: var(--color-border-strong, #475569); } .ds-btn-step.active { background: var(--color-primary, #38bdf8); color: var(--color-bg, #0f172a); } .ds-btn-step:focus-visible { outline: 2px solid var(--color-focus-ring, #38bdf8); outline-offset: 2px; }"
+    },
+    {
+      "name": "Main Card",
+      "kind": "card",
+      "refersTo": "card-main",
+      "description": "Primary content container with shadow elevation",
+      "html": "<div class=\"ds-card-main\"><h2 class=\"ds-card-header\">System Status</h2><div class=\"ds-card-body\">Content here</div></div>",
+      "css": ".ds-card-main { background: var(--color-surface, #1e293b); border-radius: 14px; padding: 18px; box-shadow: 0 8px 20px rgba(0,0,0,0.35); margin-bottom: 14px; max-width: 900px; width: 100%; } .ds-card-header { color: var(--color-primary, #38bdf8); font-weight: 600; font-size: 1.05rem; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; border-bottom: 1px solid var(--color-border, #334155); padding-bottom: 8px; margin-bottom: 12px; } .ds-card-body { color: var(--color-text-secondary, #cbd5e1); font-size: 0.85rem; line-height: 1.55; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }"
+    },
+    {
+      "name": "Joint Card",
+      "kind": "card",
+      "refersTo": "card-joint",
+      "description": "Dense data card in auto-fit grid — border only, no shadow",
+      "html": "<div class=\"ds-card-joint\"><div class=\"ds-jname\"><span>J1 Base</span><span class=\"ds-jdeg\">0.0°</span></div><div class=\"ds-jenc\">encoder: 0.0°</div><div class=\"ds-jflags\"><span class=\"ds-f-h\">HOMED</span></div></div>",
+      "css": ".ds-card-joint { background: var(--color-bg, #0f172a); border: 1px solid var(--color-border, #334155); border-radius: 10px; padding: 12px; } .ds-jname { font-weight: 700; color: var(--color-text-secondary, #cbd5e1); display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; } .ds-jdeg { font-size: 1.5rem; color: var(--color-primary, #38bdf8); font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; } .ds-jenc { font-size: 0.72rem; color: var(--color-text-muted, #94a3b8); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; } .ds-jflags { font-size: 0.68rem; margin-top: 4px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; } .ds-f-h { color: #4ade80; } .ds-f-r { color: #93c5fd; } .ds-f-d { color: #fca5a5; } .ds-f-e { color: #fcd34d; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input-text",
+      "description": "Full-width text/password input — dark surface, focus ring",
+      "html": "<label class=\"ds-label\">SSID</label><input type=\"text\" class=\"ds-input-text\" placeholder=\"ten wifi nha\">",
+      "css": ".ds-label { display: block; font-size: 0.78rem; font-weight: 600; color: var(--color-text-muted, #94a3b8); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; } .ds-input-text { width: 100%; background: var(--color-bg, #0f172a); border: 1px solid var(--color-border, #334155); color: var(--color-text-primary, #f8fafc); font-size: 1rem; padding: 9px 12px; border-radius: 8px; outline: none; margin-bottom: 8px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; transition: border-color 0.15s; } .ds-input-text:focus { border-color: var(--color-focus-ring, #38bdf8); } .ds-input-text::placeholder { color: var(--color-text-dim, #64748b); }"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "badge",
+      "description": "Semantic status indicator with paired bg/text",
+      "html": "<span class=\"ds-badge ds-badge-run\">run</span>",
+      "css": ".ds-badge { padding: 3px 10px; border-radius: 12px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; } .ds-badge-idle { background: var(--color-info-bg, #1e3a8a); color: var(--color-info-text, #93c5fd); } .ds-badge-run { background: var(--color-success-bg, #0c1a17); color: var(--color-success-text, #6ee7b7); } .ds-badge-fault { background: var(--color-danger-bg, #7f1d1d); color: var(--color-danger-text, #fca5a5); } .ds-badge-warn { background: var(--color-warning-bg, #1c1917); color: var(--color-warning-text, #fcd34d); }"
+    },
+    {
+      "name": "Homing Progress Chip",
+      "kind": "chip",
+      "refersTo": "chip-home",
+      "description": "J1–J4 homing progress track — inactive/active/done states",
+      "html": "<span class=\"ds-chip-home done\">J1</span>",
+      "css": ".ds-chip-home { background: var(--color-border, #334155); color: var(--color-text-muted, #94a3b8); padding: 3px 12px; border-radius: 11px; font-weight: 700; font-size: 0.72rem; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; } .ds-chip-home.on { background: var(--color-warning, #d97706); color: var(--color-text-primary, #f8fafc); } .ds-chip-home.done { background: var(--color-success-bg, #0c1a17); color: var(--color-success-text, #6ee7b7); }"
+    },
+    {
+      "name": "Toast",
+      "kind": "custom",
+      "refersTo": "toast",
+      "description": "Transient notification — fixed bottom-left, left accent border",
+      "html": "<div class=\"ds-toast ds-toast-ok\">Command sent</div>",
+      "css": ".ds-toast { position: fixed; bottom: 16px; left: 16px; z-index: 98; background: var(--color-bg, #0f172a); border: 1px solid var(--color-border, #334155); border-left-width: 4px; border-radius: 8px; padding: 10px 14px; font-size: 0.84rem; color: var(--color-text-secondary, #cbd5e1); box-shadow: 0 6px 20px rgba(0,0,0,0.4); max-width: 70vw; display: none; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; } .ds-toast-ok { border-left-color: var(--color-success, #059669); } .ds-toast-warn { border-left-color: var(--color-warning, #d97706); } .ds-toast-err { border-left-color: var(--color-danger, #dc2626); } .ds-toast.show { display: block; animation: toastIn 0.15s cubic-bezier(0.16, 1, 0.3, 1); } @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }"
+    },
+    {
+      "name": "Tab Bar",
+      "kind": "nav",
+      "refersTo": "tabs-bar",
+      "description": "Horizontal tab navigation — flex-wrap, centered, max-width 900px",
+      "html": "<div class=\"ds-tabs-bar\"><button class=\"ds-btn-tab active\">Dashboard</button><button class=\"ds-btn-tab\">Joints</button><button class=\"ds-btn-tab\">Homing</button></div>",
+      "css": ".ds-tabs-bar { display: flex; flex-wrap: wrap; gap: 6px; background: var(--color-surface, #1e293b); padding: 6px; border-radius: 10px; justify-content: center; max-width: 900px; width: 100%; margin-bottom: 16px; }"
+    },
+    {
+      "name": "Stat Line",
+      "kind": "custom",
+      "refersTo": "stat-line",
+      "description": "Key-value row in Dashboard card",
+      "html": "<div class=\"ds-stat-line\"><span>Mode</span><span class=\"ds-badge ds-badge-idle\">idle</span></div>",
+      "css": ".ds-stat-line { display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--color-text-muted, #94a3b8); margin: 4px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }"
+    },
+    {
+      "name": "Joint Grid",
+      "kind": "custom",
+      "refersTo": "grid-joints",
+      "description": "Responsive auto-fit grid for joint cards — no breakpoints",
+      "html": "<div class=\"ds-grid-joints\"><div class=\"ds-card-joint\">J1</div><div class=\"ds-card-joint\">J2</div><div class=\"ds-card-joint\">J3</div><div class=\"ds-card-joint\">J4</div><div class=\"ds-card-joint\">J5</div><div class=\"ds-card-joint\">J6</div></div>",
+      "css": ".ds-grid-joints { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }"
+    },
+    {
+      "name": "Loading Button",
+      "kind": "button",
+      "refersTo": "btn-loading",
+      "description": "Async action button with spinner — SAVE & REBOOT, MOVE, START DRAW",
+      "html": "<button class=\"ds-btn-primary btn-loading\">SAVE & REBOOT</button>",
+      "css": ".ds-btn-primary.btn-loading { color: transparent; position: relative; } .ds-btn-primary.btn-loading::after { content: \"\"; position: absolute; width: 16px; height: 16px; top: 50%; left: 50%; margin: -8px 0 0 -8px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.6s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }"
+    },
+    {
+      "name": "Select Input",
+      "kind": "input",
+      "refersTo": "input-select",
+      "description": "Native select with custom dropdown arrow — dark surface, focus ring",
+      "html": "<label class=\"ds-label\">Hình</label><select class=\"ds-input-select\"><option value=\"line\">Line</option><option value=\"circle\">Circle</option></select>",
+      "css": ".ds-input-select { width: 100%; background: var(--color-bg, #0f172a); border: 1px solid var(--color-border, #334155); color: var(--color-text-primary, #f8fafc); font-size: 1rem; padding: 9px 12px; border-radius: 8px; outline: none; margin-bottom: 8px; font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif); appearance: none; background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; transition: border-color 0.15s; } .ds-input-select:focus { border-color: var(--color-focus-ring, #38bdf8); }"
+    },
+    {
+      "name": "Draw Canvas Preview",
+      "kind": "custom",
+      "refersTo": "canvas-preview",
+      "description": "Top-view canvas preview with grid, shape stroke, TCP dot, home marker",
+      "html": "<canvas class=\"ds-canvas-preview\" width=\"420\" height=\"300\" aria-label=\"Preview đường vẽ từ trên xuống\"></canvas>",
+      "css": ".ds-canvas-preview { background: var(--color-bg, #0f172a); border: 1px solid var(--color-border, #334155); border-radius: 8px; display: block; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Mission Control Console",
+    "overview": "A dark, high-contrast technical interface designed for engineers standing at a physical robotic arm in a workshop. Every pixel serves operational clarity: status is glanceable from arm's length, primary actions are unmistakable, and the system never hides what the machine is doing. This is not a dashboard — it's a control surface.\n\nThe aesthetic rejects decorative futurism (glassmorphism, neon glow, gradient text, decorative grids) and generic SaaS patterns (cream backgrounds, card grids, tiny uppercase eyebrows). Instead it embraces bold, capable, modern — the visual language of professional tools that earn trust through precision and honesty.",
+    "keyCharacteristics": [
+      "Dark theme (slate-900 bg) reduces glare in workshop lighting; sky-blue primary pops without eye strain",
+      "Single accent color (sky blue) carries ≤10% of any screen — its rarity signals \"this is the active thing\"",
+      "Information-dense but not cluttered: tabular numbers, compact chips, real-time pose updates",
+      "Motion is functional only: E-STOP pulse for urgency, button press scale for tactility, toast entrance, loading spinners, reduced-motion respected",
+      "Honest feedback: toast for every command, connection loss after 3 failed polls, pose from step-count (not encoder)",
+      "Design tokens as CSS custom properties — single source of truth at `:root`, zero hard-coded values in component rules",
+      "Full interaction states — every interactive element has hover, focus-visible, active, disabled, loading",
+      "Accessibility first — ARIA roles, live regions, semantic HTML, keyboard operable"
+    ],
+    "rules": [
+      { "name": "The One Voice Rule", "body": "The primary accent (Mission Sky) appears on ≤10% of any given screen. Its rarity is the signal. If everything is highlighted, nothing is.", "section": "colors" },
+      { "name": "The Semantic Pair Rule", "body": "Every status color provides both a background and a text token. Never use a raw status hue on the page background — always pair with its designated surface.", "section": "colors" },
+      { "name": "The Dark-First Rule", "body": "This is a dark-theme-only system. No light mode tokens exist. If light mode is ever needed, it will be a separate palette, not an inversion.", "section": "colors" },
+      { "name": "The Tabular Numbers Rule", "body": "All numeric readouts that align vertically (joint angles, coordinates, feed rates) use `font-variant-numeric: tabular-nums` with the mono stack. No exceptions.", "section": "typography" },
+      { "name": "The Label Tracking Floor", "body": "Uppercase labels never go below 0.04em letter-spacing. Tighter reads as cramped, not \"designed.\"", "section": "typography" },
+      { "name": "The Display Ceiling", "body": "Clamp max ≤ 1.5rem (~24px). Hero headings larger than this dominate the control surface; this is a tool, not a landing page.", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "Surfaces are flat at rest. Shadows appear only on persistent containers (cards) and the one critical action (E-STOP). Buttons, tabs, chips, inputs — no shadows ever.", "section": "elevation" },
+      { "name": "The No-Ghost-Card Rule", "body": "Never pair a 1px border with a wide soft shadow (blur ≥16px) on the same element. Pick one: a clean border at the brand color, OR a defined shadow ≤8px blur. The card uses shadow; joint cards use border. Never both.", "section": "elevation" },
+      { "name": "The Token-First Rule (Colors)", "body": "No hard-coded color values in component CSS. All colors reference `var(--color-*)` custom properties. This ensures global changes propagate instantly and DESIGN.md stays in sync with code.", "section": "colors" },
+      { "name": "The Token-First Rule (Typography)", "body": "No hard-coded font sizes/weights in component CSS. All typography references `var(--fs-*)`, `var(--fw-*)`, `var(--lh-*)`, `var(--ls-*)` custom properties.", "section": "typography" },
+      { "name": "The Token-First Rule (Elevation)", "body": "No hard-coded shadow values in component CSS. All shadows reference `var(--shadow-*)` custom properties.", "section": "elevation" }
+    ],
+"dos": [
+      "Do use the system font stack — zero latency, native feel, matches OS chrome.",
+      "Do use `font-variant-numeric: tabular-nums` on every aligning numeric readout (joint angles, coordinates, feed rates).",
+      "Do pair every status color with its designated background and text tokens (Semantic Pair Rule).",
+      "Do keep Mission Sky to ≤10% of screen area — its rarity signals \"active now.\"",
+      "Do make primary actions (HOME, STOP, DRAW) visually dominant; destructive actions (Clear Calib) require confirmation.",
+      "Do show honest feedback: toast for every command, connection loss indicator after 3 failed polls, real-time pose from step-count.",
+      "Do respect `prefers-reduced-motion` — E-STOP pulse disabled, transitions instant.",
+      "Do keep touch targets ≥44×44px on primary actions (E-STOP is 18×30 padding ≈ 60×90px).",
+      "Do use auto-fit grids (`repeat(auto-fit, minmax(260px, 1fr))`) — no hardcoded breakpoints.",
+      "Do use focus-visible (2px Mission Sky) on all interactive elements — keyboard operable.",
+      "Do use CSS custom properties for all design tokens — colors, spacing, radius, typography, shadows, transitions. No hard-coded values in component CSS.",
+      "Do implement all interaction states: hover, focus-visible, active, disabled, loading for every button/input.",
+      "Do use semantic HTML and ARIA: roles (tablist, tab, tabpanel, list, listitem, radio, status), aria-live, aria-label, aria-selected, aria-checked.",
+      "Do use Unicode characters (✓, °, ⚠, ⬆, ⬇) instead of HTML entities for readability.",
+      "Do add loading spinners on async actions (SAVE & REBOOT, MOVE, START DRAW) with `.btn-loading` class."
+    ],
+    "donts": [
+      "Don't use glassmorphism, backdrop-filter, or decorative blur — rejected by PRODUCT.md anti-references (\"over-designed futuristic UIs\").",
+      "Don't use gradient text (`background-clip: text`) — decorative, never meaningful.",
+      "Don't use side-stripe borders (`border-left` > 1px as colored accent) — rewrite with full borders, background tints, or leading icons.",
+      "Don't use cream/sand/beige near-white backgrounds — the AI default of 2026, rejected by PRODUCT.md.",
+      "Don't use identical card grids with icon + heading + text repeated endlessly — PRODUCT.md anti-reference.",
+      "Don't put tiny uppercase tracked eyebrows above every section — the 2023-era kicker is AI grammar.",
+      "Don't use numbered section markers (01/02/03) as default scaffolding — numbers earn their place only for real sequences.",
+      "Don't pair 1px border + wide soft shadow (blur ≥16px) on the same element — the \"ghost-card\" pattern.",
+      "Don't use border-radius >16px on cards/inputs — cards top out at 14px; full-pill only for tags/buttons.",
+      "Don't use hand-drawn/sketchy SVG illustrations — reads as amateurish, not whimsical.",
+      "Don't use repeating-linear-gradient stripe backgrounds — pure decoration.",
+      "Don't use decorative grid backgrounds (CSS gradient overlays) — unless the surface is an actual canvas/blueprint.",
+      "Don't use meta-criticism copy (ironic modifiers, staged strawmen) — make the specific claim instead.",
+      "Don't let text overflow containers — test heading copy at every breakpoint; reduce clamp max or rewrite copy.",
+      "Don't animate CSS layout properties — only transform/opacity/color/box-shadow.",
+      "Don't use bounce/elastic easing — ease-out-quart/quint/expo only.",
+      "Don't gate content visibility on class-triggered transitions — reveal animations must enhance an already-visible default.",
+      "Don't hard-code color/spacing/typography values in component CSS — always use `var(--token-name)`.",
+      "Don't omit focus-visible styles — keyboard users must see where they are.",
+      "Don't omit loading states on async actions — users need feedback that something is happening.",
+      "Don't use `alert()` or bare `confirm()` without accessible alternatives — use toast + inline confirm.",
+      "Don't forget `prefers-reduced-motion` — all animations/transitions must respect it."
+    ]
+  }
+}
