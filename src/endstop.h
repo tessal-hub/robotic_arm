@@ -33,6 +33,7 @@ public:
     // Đọc và xoá latch (FSM dùng). Trả về true nếu latch đang set trước khi xoá.
     bool consumeLatch(uint8_t axis, EndstopWhich w) noexcept;
     void clearLatch(uint8_t axis, EndstopWhich w) noexcept;
+    void clearAllLatches() noexcept;
 
     [[nodiscard]] bool anyLatched() const noexcept;
 

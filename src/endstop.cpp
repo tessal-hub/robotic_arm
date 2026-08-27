@@ -33,6 +33,7 @@ void Endstops::begin(Motor** motors) {
             if (hasPin(a, w)) installPin(a, w);
         }
     }
+    clearAllLatches(); // Xoá mọi latch cũ — endstop pressed at boot không phải fault
     initialized.store(true, std::memory_order_release);
 }
 
@@ -80,6 +81,13 @@ bool Endstops::consumeLatch(uint8_t axis, EndstopWhich w) noexcept {
 void Endstops::clearLatch(uint8_t axis, EndstopWhich w) noexcept {
     if (!hasPin(axis, w)) return;
     ch(axis, w).latched = false;
+}
+
+void Endstops::clearAllLatches() noexcept {
+    for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
+        minCh[a].latched = false;
+        maxCh[a].latched = false;
+    }
 }
 
 bool Endstops::anyLatched() const noexcept {

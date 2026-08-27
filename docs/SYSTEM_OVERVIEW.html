@@ -119,7 +119,7 @@ tr:hover td{background:#243247}
           <li><b>Không có chân EN</b> — driver luôn enabled (<code>toff(4)</code>)</li>
           <li>WiFi credentials lưu NVS, cấp phát qua trang provisioning ở chế độ AP — đổi mạng không cần flash lại</li>
           <li>Vị trí home từng khớp lưu NVS (raw góc AS5600 lúc home) → boot lại <b>không cần home lại</b> nếu encoder còn nguyên</li>
-          <li>Homing: J1/J2 về giữa hành trình, J3/J4 tại min-stop/stall + backoff</li>
+          <li>Homing: J1/J2 quét Min+Max → home tại tâm cơ khí (đo enc_sign + tỷ số bước); J3 tại Min+offset; J4 stall; J5/J6 thủ công</li>
           <li>Vẽ: IK closed-form pen-down (bút thẳng đứng, θ4=θ6=0), nâng bút = nâng Z</li>
         </ul>
       </div>
@@ -209,7 +209,7 @@ tr:hover td{background:#243247}
       <tr><td>Dự phòng còn trống</td><td colspan="2"><code>13</code>, <code>14</code>, <code>17</code>, <code>18</code>, <code>48</code></td></tr>
       <tr><td>Cấm dùng</td><td colspan="2"><code>4</code> (bootloop) · <code>0/3/45/46</code> (strapping) · <code>19/20</code> (USB-OTG) · <code>26–32</code> (flash nội bộ)</td></tr>
     </table>
-    <div class="warn-box">Dấu hiệu chiều quay: <code>AXIS_STEP_SIGN</code> và <code>AXIS_ENC_SIGN</code> trong config.h hiện đều +1 — phải hiệu chỉnh thực tế lúc lắp ráp (xem checklist An toàn).</div>
+    <div class="warn-box">Quy ước chiều quay: gear ratio (config.h) là ĐỘ LỚN dương; chiều quay dời vào <code>AXIS_STEP_SIGN</code> = { +1, −1, −1, −1, +1, +1 } (J2/J3/J4 quay ngược chiều motor). <code>AXIS_ENC_SIGN</code> hiện đều +1 — vẫn phải xác minh thực tế lúc lắp ráp (xem checklist An toàn).</div>
   </div>
 </div>
 
@@ -258,7 +258,7 @@ tr:hover td{background:#243247}
       <span class="farrow">→</span>
       <div class="fbox">pl->tick()<br><span class="muted">planner segment</span></div>
       <span class="farrow">→</span>
-      <div class="fbox red">endstop check<br><span class="muted">ngoài homing ⇒ FAULT</span></div>
+      <div class="fbox red">endstop check<br><span class="muted">motor running + endstop pressed ⇒ FAULT<br>(bỏ qua khi homing — homing tự xử lý)</span></div>
       <span class="farrow">→</span>
       <div class="fbox">drift check<br><span class="muted">mỗi 50 tick = 500 ms</span></div>
       <span class="farrow">→</span>
@@ -316,8 +316,9 @@ tr:hover td{background:#243247}
       <div class="body">
         6 kênh (J1–J3 × MIN/MAX). ISR FALLING: debounce 50 ms bằng timestamp, set <code>latched</code>,
         gọi <code>owner[axis]->stopFromISR()</code> — tức thì, không qua queue.<br>
-        FSM homing chủ động <code>consumeLatch()</code> (đọc-và-xoá nguyên tử); motion task kiểm tra
-        <code>anyLatched() && !homing</code> mỗi tick ⇒ FAULT toàn hệ.
+        Motion task kiểm tra <code>isPressed()</code> + motor running mỗi tick ⇒ FAULT (bỏ qua khi homing — homing tự xử lý endstop).<br>
+        Endstop pressed at boot (arm resting against switch) = OK, không fault — endstop chỉ là protection khi đang chuyển động.<br>
+        Clear latches at boot + sau khi homing hoàn tất (backoff endstop vẫn pressed là bình thường).
       </div>
     </details>
 
@@ -326,7 +327,7 @@ tr:hover td{background:#243247}
       <div class="body">
         Quy đổi: <code>stepsPerDegree = 200 × microstep × gear / 360</code>. Góc khớp =
         <code>AXIS_STEP_SIGN × absSteps / stepsPerDegree</code> (gốc tại home đã calib).<br>
-        <span class="tag">setHomeHere</span> absSteps=0, chụp <code>encZeroRef</code> từ accumulated angle, lưu raw single-turn vào NVS (nếu encoder khoẻ), xoá drift fault.<br>
+        <span class="tag">setHomeHere</span> Encoder-aware: encoder khoẻ → dùng làm ground truth, set absSteps = degreesToSteps(encAngle) để step/encoder luôn đồng bộ (motor stall trong CENTERING không gây drift). Encoder chết → absSteps=0 (step-only). Lưu raw single-turn vào NVS, xoá drift fault.<br>
         <span class="tag">restoreFromNVS</span> lúc boot: delta = ENC_SIGN × wrap180(raw_now − raw_saved); từ chối nếu |delta| &gt; hành trình lý thuyết + 15° (nam châm trôi); set absSteps theo delta, đánh dấu <code>restored</code>. Giới hạn đúng ±180° của encoder (J6 chỉ mod 360 — vô hại vì roll).<br>
         <span class="tag">drift watchdog</span> khi idle: |angleFromSteps − angleFromEncoder| &gt; 5° → latch <code>driftFault</code>.
       </div>
@@ -335,10 +336,21 @@ tr:hover td{background:#243247}
     <details class="mod">
       <summary>homing.* — FSM homing tuần tự J1→J4 <span class="file">src/homing.h/.cpp</span></summary>
       <div class="body">
-        Xem sơ đồ FSM ở tab "FSM & Luồng". Fusion phát hiện chạm: endstop latch/pressed <b>HOẶC</b>
-        StallGuard (SG_RESULT &lt; STALL_SG_LEVEL=100 trong 3 poll liên tiếp cách 20 ms — chỉ TMC;
-        SG=1023 khi lỗi UART coi như không stall). Dòng homing giảm mạnh: J1=300/J2=500/J3=450/J4=300 mA,
-        khôi phục 800 mA sau khi xong. Timeout 30 s mỗi phase. J5/J6 bỏ qua — Set-Home thủ công.
+        Xem sơ đồ FSM ở tab "FSM & Luồng". Endstop vật lý là NGUỒN SỰ THẬT DUY NHẤT
+        trong quá trình homing — <b>không dùng StallGuard</b> (tránh false-stall trên trục chịu tải trọng lực J2/J3).<br>
+        <b>J1/J2 (có đủ Min+Max endstop):</b> kiến trúc 7 giai đoạn — SAFE_MODE (set dòng homing) → WARMUP (đo
+        <code>enc_dir_mult</code> + chọn hướng an toàn) → SCAN_MIN (quét tới endstop đầu tiên, lưu <code>enc_min</code>, reset step=0)
+        → SCAN_MAX (quét tới endstop còn lại, lưu <code>enc_max</code>, <code>step_max</code>) → CROSSCHECK (tính tâm cơ khí
+        <code>enc_center=(enc_min+enc_max)/2</code>, đo <code>real_step_to_enc</code> + áp dụng vào điều khiển;
+        <b>inline tức thời, 1 tick — không phải state chờ</b>, nên không xuất hiện trong enum phase JSON)
+        → CENTERING (căn theo BƯỚC: J1/J2 về TÂM cơ khí = <code>step_max/2</code> từ cực đầu; J3 về điểm riêng
+        gần MIN = <code>Min + offset</code> ~2.5° — không chạy vòng encoder tinh vì AS5600 accumulated
+        không ổn định làm phản hồi ngược hướng) → SETREF.
+        Home: J1/J2 = TÂM cơ khí (giữa 2 endstop); J3 = điểm riêng (Min + offset).<br>
+        <b>J3:</b> cũng quét 2 endstop (7 giai đoạn) nhưng <b>home tại điểm riêng gần MIN</b>, không phải tâm.
+        <b>J4:</b> legacy stallguard bump (không endstop). Endstop vật lý là NGUỒN SỰ THẬT DUY NHẤT — <b>không dùng StallGuard</b>.
+        Dòng homing: J1=800/J2=500/J3=450/J4=300 mA (J1 đủ torque để quét full range vì homing giờ chỉ dùng endstop, không StallGuard; ISR bảo vệ chạm), khôi phục 800 mA khi xong.
+        Timeout: scan phases 60 s; các phase khác 30 s. J5/J6 bỏ qua — Set-Home thủ công.
       </div>
     </details>
 
@@ -385,11 +397,16 @@ tr:hover td{background:#243247}
     <details class="mod">
       <summary>web_server.* — web app + REST API <span class="file">src/web_server.h/.cpp</span></summary>
       <div class="body">
-        Trang single-page nhúng PROGMEM (dark UI), tabs: Dashboard | Joints | Homing | WiFi | Cartesian | Draw
-        + nút E-STOP nổi. Polling <code>/api/status</code> mỗi 300 ms. Canvas preview hình vẽ (top view, mm).<br>
+        Trang single-page nhúng PROGMEM (dark Mission Sky: nền <code>#0f172a</code>, accent <code>#38bdf8</code>),
+        tabs: Dashboard | Joints | Homing | WiFi | Cartesian | Draw + nút E-STOP nổi.
+        Polling <code>/api/status</code> mỗi 300 ms.<br>
+        <b>Dashboard</b> (Operate): canvas 2D pose nhìn từ trên (TCP + home trên graticule 50 mm) + cột
+        trạng thái glanceable — chế độ hoạt động (mode word + badge màu theo trạng thái), WiFi, số khớp đã
+        home, trạng thái endstop (J#MIN/MAX đang nhấn), phase homing, và tiến độ J1→J4 theo chip hightlight.<br>
+        <b>Joints</b>: panel jog 6 khớp (readout độ lớn, encoder/flag trạng thái, jog ± theo bước 0.5/1/5/15°).
+        <b>Homing</b>: home all/đơn lẻ + Set-Home / Clear-Calib cho từng khớp.<br>
         Front-end: nút hành động (home/move/draw/sethome) tự disable khi arm busy hoặc FAULT; toast phản hồi
-        mỗi lệnh; cảnh báo "MẤT KẾT NỐI" khi poll lỗi ≥3 lần liên tiếp; confirm trước xoá calib; chip J1→J4
-        hiển thị tiến độ homing theo phase.<br>
+        mỗi lệnh; cảnh báo "MẤT KẾT NỐI" khi poll lỗi ≥3 lần liên tiếp; confirm trước xoá calib.<br>
         Validation đầu vào: jog |deg| ≤ 45°; move z ∈ [−20;450]; circle r ∈ [5;250]; ssid ≤ 32, pass ≤ 64 ký tự.<br>
         Toàn bộ handler chỉ tạo <code>ArmCommand</code> và enqueue — trừ <code>/api/clearcalib</code>
         (gọi trực tiếp forgetHome, an toàn vì chỉ xoá dữ liệu calib) và wifi save (restart).
@@ -400,7 +417,8 @@ tr:hover td{background:#243247}
       <summary>arm.* — arbiter trung tâm <span class="file">src/arm.h/.cpp</span></summary>
       <div class="body">
         Nhận lệnh từ mọi nguồn → queue → motion task thực thi tuần tự. Mode machine 6 trạng thái tính lại mỗi tick.
-        FAULT khi endstop latch ngoài homing (stop hết + cần CLEAR_FAULT). STOP_ALL huỷ homing + planner + dừng motors.
+        FAULT khi endstop pressed + motor running (ngoài homing — homing tự xử lý endstop). 
+        Endstop pressed at boot = OK, arm vẫn hoạt động bình thường. STOP_ALL huỷ homing + planner + dừng motors.
         <code>statusJson()</code> tổng hợp: fw, mode, busy, wifi, homing, joints, endstops, pose (FK realtime từ absSteps),
         planner, motors[]. Jog clamp theo soft limit khi đã home; bỏ qua nếu trục đang chạy.
       </div>
@@ -430,30 +448,51 @@ tr:hover td{background:#243247}
       <div class="fbox">JOG<br><span class="muted">có motor running</span></div>
     </div>
     <p class="desc" style="margin-top:8px"><span class="badge" style="background:#7f1d1d;color:#fca5a5">FAULT</span>
-    vào từ: endstop latch ngoài homing (mọi motor bị dừng). Thoát: lệnh <code>CLEAR_FAULT</code> (nút Clear Fault / POST /api/jog fault_clear=1).
+    vào từ: endstop pressed + motor running ngoài homing (mọi motor bị dừng). 
+    Endstop pressed at boot = OK, không fault. Thoát: lệnh <code>CLEAR_FAULT</code> (nút Clear Fault / POST /api/jog fault_clear=1).
     DRAW là mode dự phòng cho job vẽ — hiện planner chạy mode CART.</p>
   </div>
 
   <div class="card">
     <h2>Homing FSM — mỗi khớp chạy chuỗi sau</h2>
+    <p><b>J1 / J2 / J3 — kiến trúc 7 giai đoạn (quét Min+Max):</b></p>
     <div class="flow">
-      <div class="fbox">APPROACH<br><span class="muted">runContinuous về min,<br>dòng thấp</span></div>
+      <div class="fbox">SAFE_MODE<br><span class="muted">set dòng homing/khớp<br>J1=800, J2=500, J3=450, J4=300</span></div>
       <span class="farrow">→</span>
-      <div class="fbox amber">CONTACT<br><span class="muted">endstop HOẶC stallguard</span></div>
+      <div class="fbox">WARMUP<br><span class="muted">chạy ~3° góc khớp,<br>đo <code>enc_dir_mult</code></span></div>
+      <span class="farrow">→</span>
+      <div class="fbox">SCAN_MIN<br><span class="muted">quét tới endstop 1,<br>enc_min, step=0</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox">SCAN_MAX<br><span class="muted">quét tới endstop 2,<br>enc_max, step_max</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox amber">CROSSCHECK<br><span class="muted">inline (1 tick):<br>tâm + real_step_to_enc</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox">CENTERING<br><span class="muted">bước: J1/J2→step_max/2<br>J3→Min+offset ~2.5°</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox green">SETREF<br><span class="muted">setHomeHere + NVS</span></div>
+    </div>
+    <p><b>J4 — legacy (stall bump, không endstop):</b></p>
+    <div class="flow">
+      <div class="fbox">APPROACH<br><span class="muted">runContinuous về min,<br>dòng thấp, stall-detect</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox amber">CONTACT<br><span class="muted">stallguard / stall detect</span></div>
       <span class="farrow">→</span>
       <div class="fbox">BACKOFF<br><span class="muted">lùi 2° + 0.5° margin</span></div>
       <span class="farrow">→</span>
-      <div class="fbox">CENTERING?*<br><span class="muted">*chỉ J1/J2:<br>+stroke/2 − backoff</span></div>
+      <div class="fbox">REAPPROACH<br><span class="muted">dò lại chậm, ghi encoder<br>tại điểm chạm chính xác</span></div>
+      <span class="farrow">→</span>
+      <div class="fbox">CENTERING*<br><span class="muted">home tại chỗ sau backoff</span></div>
       <span class="farrow">→</span>
       <div class="fbox green">SETREF<br><span class="muted">setHomeHere + NVS</span></div>
     </div>
     <ul>
-      <li><b>J1/J2:</b> home ở GIỮA hành trình (centering). <b>J3/J4:</b> home tại chỗ sau backoff.</li>
-      <li>Nếu endstop đã nhấn trước khi bắt đầu → bỏ qua APPROACH, vào BACKOFF luôn.</li>
-      <li>BACKOFF xong mà vẫn đè công tắc → lùi thêm một nấc nữa.</li>
-      <li>StallGuard: poll SG_RESULT mỗi 20 ms; &lt; 100 trong 3 lần liên tiếp = chạm. Lỗi UART trả SG=1023 (không bao giờ stall).</li>
-      <li>Timeout 30 s/khớp → FAILED, dừng cả chuỗi. Xong khớp → restore dòng 800 mA + tốc độ default, sang khớp kế.</li>
-      <li>Thứ tự cố định J1→J2→J3→J4 (HOME_ALL) hoặc 1 khớp bất kỳ trong 0..3 (HOME_AXIS).</li>
+      <li><b>J1/J2:</b> home tại TÂM cơ khí (giữa Min/Max), đo <code>enc_dir_mult</code> + <code>real_step_to_enc</code> và ÁP DỤNG vào điều khiển (thay <code>AXIS_ENC_SIGN</code> / gear cố định). <b>J3:</b> home tại điểm riêng (Min+offset ~2.5°). <b>J4:</b> home tại chỗ sau backoff (stall).</li>
+      <li>CROSSCHECK (inline, đồng bộ trong tick chạm SCAN_MAX — không có state/polling riêng nên không cần phase JSON): <code>enc_center=(enc_min+enc_max)/2</code>, <code>step_max</code> = bước đếm Min→Max, <code>real_step_to_enc=(enc_max-enc_min)/step_max</code>; tỷ số đo được so với config, ngoài [0.5,2.0] → giữ config.</li>
+      <li>WARMUP: nếu Min đang nhấn → chạy dương (tránh kẹt); đo dấu encoder = sign(δenc) so với hướng bước dự định.</li>
+      <li>CENTERING (J1/J2/J3): căn tâm BƯỚC — J1/J2 di chuyển <code>step_max/2</code> từ cực đầu (tâm = điểm giữa bước, đúng bất kể gear ratio), J3 di chuyển <code>Min + offset ~2.5°</code> (điểm riêng). KHÔNG dùng vòng encoder tinh: AS5600 accumulated trên HW không ổn định (drift/jump, idle≈39° rồi homing 240–430°) khiến phản hồi chạy ngược hướng đâm endstop + skip bước → FAILED. Encoder chỉ dùng ở CROSSCHECK để đo <code>real_step_to_enc</code>, không dùng làm mục tiêu căn tâm tuyệt đối.</li>
+      <li><b>Không dùng StallGuard</b> — endstop là nguồn sự thật duy nhất (StallGuard gây false-stall trên J2/J3 chịu tải trọng lực).</li>
+      <li>Timeout: scan phases quét toàn hành trình → 60 s (<code>SCAN_TIMEOUT_MS</code>); các phase khác 30 s/khớp. Timeout → FAILED, dừng cả chuỗi. Xong khớp → restore dòng 800 mA + tốc độ default, sang khớp kế.</li>
+      <li>Thứ tự cố định J1→J2→J3→J4 (HOME_ALL) hoặc 1 khớp bất kỳ trong 0..3 (HOME_AXIS). J5/J6: Set-Home thủ công.</li>
     </ul>
   </div>
 
@@ -510,7 +549,7 @@ tr:hover td{background:#243247}
         <p class="desc">Pose hiển thị = FK từ absSteps (không phải encoder) — phản ánh đúng những gì firmware tin.</p>
       </div>
     </div>
-    <h3>Chuỗi phản ứng an toàn khi đụng endstop (ngoài homing)</h3>
+    <h3>Chuỗi phản ứng an toàn khi đụng endstop (khi đang chuyển động)</h3>
     <div class="flow">
       <div class="fbox red">ISR FALLING<br><span class="muted">&lt; 1 ms</span></div>
       <span class="farrow">→</span>
@@ -518,12 +557,13 @@ tr:hover td{background:#243247}
       <span class="farrow">→</span>
       <div class="fbox">latch set</div>
       <span class="farrow">→</span>
-      <div class="fbox red">motion task ≤ 10 ms<br><span class="muted">anyLatched && !homing</span></div>
+      <div class="fbox red">motion task ≤ 10 ms<br><span class="muted">isPressed && motor running<br>&& !homing</span></div>
       <span class="farrow">→</span>
       <div class="fbox red">STOP TOÀN BỘ + FAULT</div>
       <span class="farrow">→</span>
       <div class="fbox amber">CLEAR_FAULT<br><span class="muted">thủ công từ web</span></div>
     </div>
+    <p class="desc" style="margin-top:8px">Endstop pressed at boot (arm resting against switch) = OK — arm vẫn IDLE, không fault. Endstop chỉ là protection khi đang chuyển động.</p>
   </div>
 </div>
 
@@ -613,7 +653,7 @@ tr:hover td{background:#243247}
     <h3>Workspace & kỳ dị</h3>
     <ul>
       <li>Tầm xa nhất 291.7 mm (radial) · cao nhất 430.7 mm · thấp nhất −14.7 mm · góc chết ~90° phía sau (J1 chỉ 270°)</li>
-      <li>Singularity: tool z-axis thẳng đứng ⇒ J1/J6 gần trùng — mất 1 DOF (wrist singularity kinh điển). IK closed-form né bằng cách khóa e4=e6=0.</li>
+      <li>Gimbal-lock (không phải wrist singularity kinh điển): khi tool z-axis thẳng đứng, trục J1 và J6 gần song song/trùng → mất 1 DOF xoay tay trỏ. Đây là hệ quả của việc khóa cứng <code>e4=e6=0</code> (không có cổ tay cầu thật J4/J6), KHÔNG phải wrist singularity chuẩn. IK closed-form né bằng cách khóa <code>e4=e6=0</code>.</li>
     </ul>
   </div>
 </div>
@@ -640,7 +680,7 @@ tr:hover td{background:#243247}
     <ul style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.75rem">
       <li>fw · mode(idle|homing|jog|cart|draw|fault) · busy</li>
       <li>wifi{mode(sta|ap|off), ip, ssid, rssi}</li>
-      <li>homing{active, lastOk, axis, phase(idle|approach|backoff|centering|done)}</li>
+      <li>homing{active, lastOk, axis, phase(idle|safe_mode|warmup|scan_min|scan_max|approach|backoff|reapproach|centering|done)}</li>
       <li>joints[6]{deg, encDeg, homed, restored(nvs), encOK, drift, limitMin, limitMax}</li>
       <li>endstops[6]{min:{pressed,latched}|null, max:{...}|null} — chỉ J1–J3 có</li>
       <li>pose{x,y,z} — FK realtime · planner{active, state, segs}</li>
@@ -660,13 +700,13 @@ tr:hover td{background:#243247}
     <ul>
       <li><b>1.</b> Web handler không đụng hardware — chỉ enqueue <code>ArmCommand</code>.</li>
       <li><b>2.</b> STOP_ALL luôn được chấp nhận ngay cả khi queue gần đầy (timeout 50 ms).</li>
-      <li><b>3.</b> FAULT là latch: endstop ngoài homing ⇒ dừng tất cả; chỉ CLEAR_FAULT mở khoá.</li>
+      <li><b>3.</b> FAULT là latch: endstop pressed + motor running ngoài homing ⇒ dừng tất cả; endstop pressed at boot = OK. CLEAR_FAULT mở khoá.</li>
       <li><b>4.</b> Cartesian (move/draw) bắt buộc <code>allPositioningHomed()</code> (J1–J4).</li>
       <li><b>5.</b> Jog clamp theo soft limit khi đã home; bỏ lệnh nếu trục đang chạy.</li>
-      <li><b>6.</b> Homing chạy dòng giảm (300–500 mA), khôi phục 800 mA khi xong/thất bại/hủy.</li>
+      <li><b>6.</b> Homing chạy dòng theô khớp (J1=800, J2=500, J3=450, J4=300 mA — đủ để phủ full range vì homing không còn dùng StallGuard), khôi phục 800 mA khi xong/thất bại/hủy.</li>
       <li><b>7.</b> Drift watchdog 5° (step-count vs encoder) khi idle — báo fault từng khớp.</li>
       <li><b>8.</b> Restore NVS từ chối delta &gt; hành trình + 15° (nam châm dịch chuyển).</li>
-      <li><b>9.</b> Debounce endstop 50 ms trong ISR; latch chỉ do FSM homing tiêu thụ.</li>
+      <li><b>9.</b> Debounce endstop 50 ms trong ISR; clear latches at boot + sau homing; motion fault chỉ khi motor running + endstop pressed.</li>
       <li><b>10.</b> Mọi giao dịch UART TMC qua mutex với timeout ngắn — fail thì skip, không treo.</li>
       <li><b>11.</b> Driver luôn enabled — không có EN pin; <code>toff=4</code> bình thường, 0 khi disable.</li>
       <li><b>12.</b> Planner gate: điểm ngoài vùng với ⇒ stop toàn job (kể cả giữa chừng).</li>
@@ -700,7 +740,7 @@ tr:hover td{background:#243247}
 </div>
 
 <div class="footer">
-  Generated 2026-08-26 · File này là <b>bản đồ hệ thống sống</b> — AI agent PHẢI cập nhật nó cùng
+   Generated 2026-08-27 (update: UI web redesign — Dashboard pose-canvas + status column, mode word, chips homing, panel jog/sethome nhất quán; plus: chuẩn hóa gear dương + direction vào AXIS_STEP_SIGN; J3 home=Min+offset; J1/J2 step-center; J1 homing 800mA; FSM CROSSCHECK; gimbal-lock) · File này là <b>bản đồ hệ thống sống</b> — AI agent PHẢI cập nhật nó cùng
   docs/IMPLEMENTATION_LOG.md sau mỗi thay đổi (quy tắc trong AGENTS.md)
 </div>
 

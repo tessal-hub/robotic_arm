@@ -214,5 +214,473 @@ hiện tại trừ khi thí nghiệm trên buộc phải đổi mô hình.
 
 ---
 
+## 2026-08-26 — Fix endstop boot fault: arm resting against switch = OK
 
+### Việc đã làm
+- What: endstop pressed at boot不再 FAULT — arm vẫn boot và hoạt động bình thường.
+  - `src/endstop.h/.cpp`: thêm `clearAllLatches()` method; clear latches at boot trong `begin()`.
+  - `src/arm.cpp` motion task: thay logic fault check —
+   旧: `anyLatched() && !homing` → FAULT mọi lúc (endstop at boot = FAULT vô cực).
+    新: chỉ fault khi `motor running + isPressed() + !homing` — endstop pressed at boot = OK.
+    homing tự xử lý endstop riêng (APPROACH phase), arm controller bỏ qua khi homing active.
+    Clear latches sau homing hoàn tất (backoff endstop still pressed là bình thường).
+  - `docs/SYSTEM_OVERVIEW.html`: cập nhật safety rules, endstop module card, motion task timeline, FAULT flow, safety chain diagram.
+- Why: owner yêu cầu arm có thể boot và điều khiển được ngay cả khi đang tỳ lên endstop.
+  Endstop là protection khi đang chuyển động, không phải khóa boot.
+- How: endstop ISR vẫn hoạt động bình thường (stopFromISR + latch), nhưng motion task chỉ
+  fault khi motor thực sự đang chạy và endstop vật lý đang nhấn. At boot: clear latches,
+  endstop pressed → pin LOW nhưng không có ISR edge → không latch → không fault.
 
+### Build gate
+- `pio run` → **SUCCESS**. RAM 15.0% (49,268 B), Flash 25.3% (846,193 B) (+10 KB so với trước — fault logic mới + clearAllLatches).
+- HTML parse clean.
+
+### Việc còn lại
+- Không có.
+
+---
+
+## 2026-08-26 — Fix homing: stall false positive + encoder-aware setHomeHere
+
+### Việc đã làm
+- What: 2 fix cho homing — false stall detection và step/encoder drift sau homing.
+  - `src/homing.cpp`: StallGuard stall detection — bỏ qua sg < 10 (UART noise / motor chưa load).
+    sg=0 và sg=2 trong log boot là đọc không hợp lệ, gây false CONTACT sau 194/-21 steps.
+    Ngưỡng mới: sg ∈ [10; STALL_SG_LEVEL=100) trong 3 poll liên tiếp → stall thật.
+  - `src/joint_model.cpp`: `setHomeHere()` encoder-aware —
+   旧: luôn `absSteps=0` → step/encoder phân kỳ khi motor stall/slipped trong CENTERING.
+    新: encoder khoẻ → dùng làm ground truth, set `absSteps = degreesToSteps(encAngle)`
+    để angleFromSteps() và angleFromEncoder() luôn đồng bộ. Motor stall trong CENTERING
+    không gây drift fault nữa. Encoder chết → fallback absSteps=0 (step-only).
+  - `docs/SYSTEM_OVERVIEW.html`: cập nhật homing module card (sg range mới) và joint_model card (setHomeHere encoder-aware).
+- Why: owner report motor "go to max, hit endstop, keep pushing" + drift fault 66° liên tục.
+  Root cause: sg=0/2 false stall →CONTACT sai → CENTERING sai → step counter ≠ encoder → drift.
+- How: sg filter là smallest sufficient fix cho false stall. Encoder-aware setHomeHere là defense-in-depth
+  — ngay cả khi centering sai vì lý do khác, step counter vẫn khớp encoder.
+
+### Build gate
+- `pio run` → **SUCCESS**. RAM 15.0% (49,268 B), Flash 25.3% (846,317 B) (+124 B — sg filter + encoder-aware setHomeHere).
+- HTML parse clean.
+
+### Việc còn lại
+- Không có.
+
+---
+
+## 2026-08-26 — Redesign homing: endstop-only + REAPPROACH + encoder-guided centering
+
+### Việc đã làm
+- What: redesign homing sequence theo cảm hứng từ reference implementation — bỏ StallGuard, thêm
+  REAPPROACH, encoder-guided centering.
+  - `src/homing.h`: thêm `REAPPROACH` vào `HomePhase` enum, thêm `enterReapproach()`,
+    `gotoNearHome()`, `angleEncAtContact_` member.
+  - `src/homing.cpp`: viết lại toàn bộ homing FSM —
+    - APPROACH: bỏ hoàn toàn StallGuard poll (endstop là NGUỒN SỰ THẬT DUY NHẤT).
+    - CONTACT: ghi encoder tại điểm chạm (`angleEncAtContact_`).
+    - BACKOFF: lùi như cũ, thêm REAPPROACH sau khi đã rời endstop.
+    - REAPPROACH (MỚI): dò lại chậm (3000 µs/step) về phía MIN → khi tái chạm, ghi encoder
+      chính xác tại điểm contact (chính xác hơn do approach chậm, ít overshoot).
+    - CENTERING (MỚI): closed-loop encoder → di chuyển tới home = angleEncAtContact_ + stroke/2.
+      Dừng khi encoder gap < 0.5°. Fallback step-counted nếu encoder chết.
+    - toJson(): cập nhật phase names cho REAPPROACH.
+  - `docs/SYSTEM_OVERVIEW.html`: cập nhật homing module card (bỏ stallguard, mô tả sequence mới)
+    + homing FSM diagram (thêm REAPPROACH, cập nhật mô tả).
+- Why: owner report false stall (sg=0/2) gây CONTACT sai → CENTERING sai → drift 66°.
+  Root cause là StallGuard không đáng tin trên trục chịu tải trọng lực.
+  REAPPROACH + encoder-guided centering là giải pháp đúng đắn — endstop cho vị trí,
+  encoder cho precision.
+- How: inspired by reference homing sketch (MIN+MAX endstop midpoint), nhưng adaptable cho
+  thiết kế chỉ có MIN endstop. Home = endstop + stroke/2 thay vì midpoint 2 switch.
+
+### Build gate
+- `pio run` → **SUCCESS**. RAM 15.0% (49,268 B), Flash 25.3% (847,061 B) (+744 B — homing FSM mới + encoder-guided).
+- HTML parse clean.
+
+### Việc còn lại
+- Không có.
+
+---
+
+## 2026-08-26 — Fix: resync step counter on cancel + BACKOFF jam detection
+
+### Việc đã làm
+- What: fix step/encoder drift khi cancel homing + BACKOFF infinite loop.
+  - `src/joint_model.h/.cpp`: thêm `resyncFromEncoder(axis)` — đặt absSteps = degreesToSteps(encAngle)
+    để step-based và encoder-based đồng bộ. Dùng khi cancel/STOP/timeout.
+  - `src/homing.cpp`: 
+    - `cancel()`: gọi `resyncFromEncoder()` sau khi stop motor — step counter không còn lệch encoder.
+    - `finishJoint(false)`: cũng gọi `resyncFromEncoder()` khi homing thất bại (timeout/error).
+    - `BACKOFF`: nếu motor stopped + endstop still pressed → motor jammed/stepper skip →
+      resync + finishJoint(false) thay vì lặp vô hạn.
+  - `docs/SYSTEM_OVERVIEW.html`: cập nhật joint_model module card.
+- Why: owner report drift 45° trước homing, drift 223°/249° sau mỗi lần cancel.
+  Root cause: `cancel()` stops motor nhưng không sync step counter → lệch encoder → drift fault vô cực.
+  Additionally: BACKOFF lặp vô hạn khi motor jammed against endstop (chờ 30s timeout).
+- How: resyncFromEncoder() là smallest fix — chỉ cần set absSteps = encAngle là cả 2 hệ đồng bộ.
+  BACKOFF jam detection: nếu motor stopped + endstop still pressed → abort ngay.
+
+### Build gate
+- `pio run` → **SUCCESS**. RAM 15.0% (49,268 B), Flash 25.3% (847,205 B) (+144 B — resyncFromEncoder + BACKOFF jam).
+
+### Việc còn lại
+- Không có.
+
+---
+
+## 2026-08-26 — Fix: CENTERING direction bug + stall detection
+
+### Việc đã làm
+- What: fix encoder-guided centering drives motor TOWARD endstop instead of AWAY.
+  - `src/homing.cpp` `gotoNearHome()`: centering direction now uses `cwForDelta(-err)` instead of
+    `cwForDelta(err)`. Root cause: `cwForDelta` computes step-space direction (CW = absSteps increase),
+    but centering needs encoder-space direction (CW = encoder increase). When `AXIS_STEP_SIGN=+1`,
+    these are opposite — err=+90° → cwForDelta gives CW → but CW decreases encoder → wrong.
+    Negating err flips direction correctly.
+  - `src/homing.cpp` CENTERING tick: also fix direction correction to use `cwForDelta(-err)`.
+  - `src/homing.cpp` CENTERING tick: motor stopped without reaching target now triggers stall detection
+    (500ms grace period) instead of false `finishJoint(true)`. Grace period handles normal direction
+    changes (motor briefly stops during reversal).
+  - `src/homing.h`: added `stallStartMs_` member for CENTERING stall tracking.
+- Why: owner log shows CENTERING err=+90° but motor drives toward endstop (enc decreases from -173°),
+  then FAILED. Motor never reaches target because direction is inverted.
+- How: `cwForDelta(err)` is correct for `setHomeHere` context (CW = absSteps increase).
+  For closed-loop centering (CW = encoder increase), the relationship depends on `AXIS_STEP_SIGN`:
+  when STEP_SIGN=+1, CW in step-space = CCW in encoder-space → negate err.
+  `cwForDelta(-err)` gives the correct encoder-space direction for all step signs.
+
+### Build gate
+- `pio run` → **SUCCESS**. RAM 15.0% (49,276 B), Flash 25.4% (847,433 B) (+228 B — direction fix + stall grace).
+
+### Việc còn lại
+- Flash + test on hardware: verify centering moves motor away from endstop to midpoint.
+
+---
+
+## 2026-08-26 — Fix: stale endstop latch → false "pressed at start"
+
+### Việc đã làm
+- What: fix firmware báo "endstop pressed at start" dù arm không chạm công tắc.
+  - `src/homing.cpp` `beginJoint()`: trước khi kiểm tra, xoá latch cũ nếu endstop **đã rời**
+    (GPIO HIGH = `isPressed()==false`) nhưng ISR từng latch. ISR chỉ bắn trên cạnh (FALLING),
+    nên latch có thể "dính" sau khi arm đã rời công tắc (ví dụ CENTERING sai hướng đâm vào endstop
+    ở phiên trước → `finishJoint(false)` để lại latch).
+  - `src/homing.cpp` `finishJoint()`: thêm `clearLatch(MIN)` để latch không theo sang phiên sau.
+  - `src/homing.cpp` `beginJoint()`: log thêm `raw=<gpio>` để owner xác nhận mức thực tế.
+- Why: owner report "endstop do not pressed at start! maybe it is reversed in the logic".
+  Phân tích: logic endstop KHÔNG đảo — `ENDSTOP_ACTIVE_STATE = LOW` + ISR `FALLING` là active-LOW
+  đúng (phiên trước từng detect CONTACT thật sau khi motor di chuyển). Nguyên nhân thật: latch cũ
+  từ lần homing trước (CENTERING sai hướng) không được xoá → `isLatched()==true` → `beginJoint`
+  nhầm là chạm tại start → skip APPROACH → BACKOFF → REAPPROACH → CENTERING sai vị trí.
+- How: chỉ xoá latch khi GPIO hiện tại KHÔNG phải mức nhấn (`isPressed()==false`) → press thật
+  (GPIO LOW) vẫn được `isPressed()` phát hiện. Xoá latch cũ = giải quyết false-positive mà không
+  đảo logic.
+
+### Build gate
+- `pio run` → **SUCCESS**. RAM 15.0% (49,268 B), Flash 25.4% (847,577 B) (+144 B — latch clear + raw log).
+
+### Việc còn lại
+- Flash + test: verify APPROACH chạy bình thường khi arm không chạm công tắc (không còn skip BACKOFF).
+- Nếu vẫn báo "pressed at start" khi arm rời: check `raw=` trong log — nếu raw=0 (LOW) khi không chạm
+  → phần cứng (switch kẹt/giây hoặc pullup yếu), không phải logic.
+
+---
+
+## 2026-08-26 — Redesign homing kiến trúc 7 giai đoạn (scan Min+Max) cho J1/J2
+
+### Việc đã làm
+- Áp dụng kiến trúc owner cung cấp: SAFE_MODE → WARMUP → SCAN_MIN → SCAN_MAX → CENTERING → SETREF.
+- Scope (theo quyết định owner): **J1, J2** = quét cả Min+Max, home tại TÂM cơ khí;
+  **J3** = giữ home riêng (legacy Min+offset); **J4** = stall (legacy); **J5/J6** = thủ công (không đổi).
+- `src/joint_model.h/.cpp`: thêm hiệu chuẩn đo được (static `s_encSign`/`s_measuredSpd`/`s_hasMeasured`)
+  thay `AXIS_ENC_SIGN` và gear cố định khi đã home. Thêm `applyHomingCalibration()` + `rawEncoder()`.
+  `stepsPerDegree()` trả giá trị đo được nếu có, ngược lại config (sanity [0.5,2.0]×config).
+- `src/homing.h/.cpp`: viết lại FSM — path scan (J1/J2) và path legacy (J3/J4) tách biệt qua `isScanAxis()`.
+  - WARMUP: chạy 50 step, đo `enc_dir_mult` = sign(δenc) so với hướng bước; chọn hướng an toàn tránh endstop nhấn.
+  - SCAN_MIN: quét tới Min, lưu `enc_min`, reset step counter=0.
+  - SCAN_MAX: quét tới Max, lưu `enc_max`, `step_max`.
+  - CROSSCHECK (inline): `enc_center=(enc_min+enc_max)/2`; đo `real_step_to_enc`; áp dụng `applyHomingCalibration()`.
+  - CENTERING: thô lùi `step_max/2`, tinh closed-loop encoder→`enc_center` (tolerant 0.5°, stall 500 ms).
+- Home = tâm cơ khí (giữa 2 endstop) cho J1/J2; soft-limit động ±nửa hành trình (tính từ enc_min/enc_max).
+- `docs/SYSTEM_OVERVIEW.html`: cập nhật module card homing + FSM diagram (2 flow J1/J2 và J3/J4) + phase JSON enum + footer.
+
+### Build gate
+- `pio run` → **SUCCESS**. RAM 15.1% (49,364 B), Flash 25.5% (850,849 B).
+
+### Việc còn lại
+- Flash + test trên J1/J2: quan sát log `SAFE_MODE+WARMUP` (encDirMult), `SCAN_MIN/MAX CONTACT`,
+  `CROSSCHECK` (enc_c, step_max, spd×ratio), `CENTERING DONE` rồi `SETREF OK`.
+- Xác nhận `enc_dir_mult` đo được = +1 (mounting chuẩn) hoặc -1 (ngược); tỷ số spd×ratio nằm trong [0.5,2.0].
+- J3 giữ behavior cũ (home tại Min+offset) — owner xác nhận đúng "different home point".
+- Nếu J1/J2 không có Max endstop vật lý (chỉ định nghĩa chân trong config) → SCAN_MAX sẽ timeout; cần owner xác nhận wiring.
+
+---
+
+## 2026-08-26 — Fix: scan homing bị kẹt ở SCAN_MIN (không phát hiện endstop đúng cực)
+
+### Việc đã làm
+- What: J1 homing chạy tới WARMUP xong, SCAN_MIN di chuyển rồi dừng hẳn tại một endstop nhưng
+  **không chuyển sang SCAN_MAX** (không có log `SCAN_MIN CONTACT`), kẹt cho tới timeout.
+- Root cause: `SCAN_MIN` chỉ theo dõi latch/press của endstop **MIN**. Nhưng `cwForDelta(-360)`
+  (hướng giả định về Min) trên phần cứng thực tế lại lao vào endstop **MAX** (cực tính / thứ tự
+  chân lắp ngược). ISR endstop dừng motor + latch MAX, nhưng FSM chờ MIN mãi không tới → kẹt.
+  (Trong homing, arm.cpp vô hiệu FAULT endstop nên motor dừng do ISR, không do FAULT; drift log
+  hiện ra chỉ vì motor đã dừng — vô hại.)
+- Fix `src/homing.cpp`: `SCAN_MIN` giờ phát hiện **BẤT KỲ** endstop nào chạm trước (`minSide_` ghi
+  lại cực đó), `SCAN_MAX` lái ngược hướng và chỉ theo dõi cực **còn lại**. Độc lập với cực tính /
+  thứ tự chân MIN-MAX — luôn quét được 2 cực và tính tâm đúng.
+- `src/homing.h`: thêm member `minSide_` (EndstopWhich); include "endstop.h".
+- `docs/SYSTEM_OVERVIEW.html`: module card + footer cập nhật (scan direction-agnostic).
+
+### Build gate
+- `pio run` → **SUCCESS**. RAM 15.1% (49,364 B), Flash 25.5% (850,905 B).
+
+### Việc còn lại
+- Flash + test: kỳ vọng thấy `SCAN_MIN CONTACT (MAX ...)` hoặc `(MIN ...)` rồi `SCAN_MAX CONTACT`,
+  `CROSSCHECK`, `CENTERING DONE`, `SETREF OK` cho J1/J2.
+- Nếu log báo `(MAX ...)` ở SCAN_MIN tức là cực tính chân đang ngược — nhưng center vẫn đúng, không
+  cần sửa config. Chỉ sửa nếu muốn nhãn MIN/MAX khớp vật lý.
+
+---
+
+## 2026-08-26 — Fix: WARMUP enc dead + SCAN_MAX timeout ở J1
+
+### Việc đã làm
+- What: ở bản trước J1 homing chạy tới `SCAN_MIN CONTACT (MAX, enc_min=425.3)` rồi `SCAN_MAX`
+  bị **FAILED** sau 30s (không chạm tới endstop còn lại). Đồng thời `WARMUP enc dead (delta=-0.26)`.
+- Why:
+  - WARMUP chỉ chạy 50 step → với J1 (6:1, ~53 step/độ) chỉ ~0.9° góc khớp, encoder (đếm tích lũy)
+    dịch chuyển < 0.5° deadzone → `enc_dir_mult` giữ mặc định (có thể sai nếu lắp ngược). Còn nếu MAX
+    đang nhấn, warmup chạy đúng hướng âm nhưng chỉ 50 step.
+  - SCAN_MAX dùng timeout homing chung 30s — với hành trình dài (J2 20:1) không đủ; đồng thời không
+    log tiến trình nên không phân biệt được "motor không chạy" vs "đang chạy nhưng chưa tới endstop".
+- Fix `src/homing.cpp`:
+  - WARMUP: số bước = 3° góc khớp (tính từ stepsPerDegree) thay 50 cố định → encoder đo được chắc chắn.
+  - WARMUP hướng: check cả MIN và MAX nhấn (chọn hướng rời khỏi endstop đang đè), log minP/maxP.
+  - SCAN_MIN/SCAN_MAX: timeout riêng `SCAN_TIMEOUT_MS = 60s` (toàn hành trình), log tiến trình
+    `step=.. enc=..` mỗi 2s, và log rõ lý do TIMEOUT (cực nào + pin nào chưa chạm).
+  - sửa `JointModel::angleFromSteps` → `jm->angleFromSteps` (non-static); gỡ hằng `WARMUP_STEPS`.
+
+### Build gate
+- `pio run` → **SUCCESS**. RAM 15.1% (49,364 B), Flash 25.5% (851,585 B).
+
+### Việc còn lại
+- Flash + test J1: quan sát WARMUP (nên đo được encDirMult không còn "dead"), SCAN_MIN CONTACT,
+  rồi SCAN_MAX progress log để xem motor có chạy và có tới endstop còn lại không.
+- Nếu SCAN_MAX vẫn timeout dù motor chạy liên tục + enc thay đổi → endstop còn lại (pin 5 = MIN)
+  không kích hoạt vật lý (chưa nối / hư / vị trí lệch) → cần kiểm tra phần cứng, không phải logic.
+
+---
+
+## 2026-08-26 — Bổ sung Task WDT cho task arm_motion (homing/planner/FAULT)
+
+### Việc đã làm
+- What: `src/arm.cpp` — thêm `esp_task_wdt_add(nullptr)` khi vào `taskLoop()`,
+  `esp_task_wdt_reset()` mỗi vòng lặp (10ms), `esp_task_wdt_delete(nullptr)` trước khi thoát
+  (defensive, loop `for(;;)` không thoát), và `#include <esp_task_wdt.h>`.
+- Why: trước đây chỉ SensorScanTask đăng ký Task WDT. Task `arm_motion` chạy toàn bộ logic
+  homing/planner/FAULT/endstop an toàn — nếu nó bị treo (deadlock mutex, ISR storm...) mà không có
+  watchdog riêng, motor có thể chạy tiếp dù logic đã "đứng hình". Nay treo → WDT panic reset toàn hệ
+  thống thay vì motor chạy mất kiểm soát. Đây là cải thiện an toàn nghiêm ngặt.
+- Chi phí: timeout WDT mặc định ~5s (CONFIG_ESP_TASK_WDT_TIMEOUT_S) — motion task reset mỗi 10ms,
+  và các mutex trong homing/planner dùng timeout ngắn (không `portMAX_DELAY` trong loop) nên không
+  chạm ngưỡng 5s trong hoạt động bình thường.
+
+### Build gate
+- `pio run` → **SUCCESS**. RAM 15.1%, Flash 25.5% (+4 B).
+
+### Việc còn lại
+- Liên quan riêng: SCAN_MAX timeout do motor stall (homing current 300mA quá yếu cho J1) — cần xử lý
+  tăng homing current / detach stall; task riêng chưa làm trong entry này.
+
+---
+
+## 2026-08-26 — Docs: vẽ CROSSCHECK vào FSM, làm rõ phase JSON, chuẩn hoá gimbal-lock
+
+### Việc đã làm
+- What: chỉnh `docs/SYSTEM_OVERVIEW.html` + `docs/ARM_GEOMETRY.md` (docs-only, không code).
+- Why (review của owner về tính nhất quán tài liệu):
+  1. Module card ghi "kiến trúc 7 giai đoạn" nhưng sơ đồ flow chỉ vẽ 6 ô — đã thêm ô
+     **CROSSCHECK** (amber, chú "inline 1 tick") giữa SCAN_MAX và CENTERING cho khớp đủ 7.
+  2. Enum phase JSON không có `crosscheck` — đã **xác nhận đây là chủ đích đúng**: CROSSCHECK
+     (homing.cpp:228–245) là tính toán đồng bộ trong tick SCAN_MAX CONTACT (không state chờ, không
+     block >1 tick) nên không nên thêm phase riêng — thêm vào sẽ hiện flicker 1 tick (10ms) trên UI.
+     Ghi rõ điều này trong cả module card lẫn bullet FSM.
+  3. Thuật ngữ "wrist singularity" gây hiểu lầm — cổ tay cầu kinh điển là J4/J6 trùng trục, trong
+     khi ở đây là J1//J6 + khóa cứng e4=e6=0. Đổi wording thành **"gimbal-lock do khóa e4/e6"**
+     (SYSTEM_OVERVIEW + ARM_GEOMETRY cho nhất quán).
+  - Nhân tiện sửa luôn 2 chỗ tài liệu lỗi thời bám theo code hiện tại: WARMUP không còn "chạy 50
+    step" (giờ ~3° góc khớp), và timeout scan không còn "30s/khớp" (SCAN_TIMEOUT_MS=60s — các phase
+    khác vẫn 30s). Cập nhật footer Generated.
+
+### Build gate
+- Chỉ sửa docs → không cần `pio run`. (Code không đổi.)
+
+### Việc còn lại
+- Không liên quan entry này. Vẫn tồn tại: motor stall ở SCAN_MAX (homing current 300mA) trên J1.
+
+---
+
+## 2026-08-26 — Fix: motor stall ở SCAN_MAX do homing current J1 quá yếu
+
+### Việc đã làm
+- What: `src/config.h` — `HOMING_CURRENT_J1` 300 → **800 mA** (bằng dòng chạy thường). Only J1; J2/J3/J4 giữ nguyên.
+- Why: owner xác nhận nguyên nhân SCAN_MAX timeout là motor stall giữa đường do dòng homing quá yếu.
+  J1 là base yaw phải quét full range (2 endstop), 300 mA chỉ ~37% dòng thường → mất bước/thiếu torque.
+  Lý do gốc của việc giữ dòng homing cực thấp (300–500 mA) là phục vụ **StallGuard** (cần dòng thấp
+  để nhạy phát hiện stall) — nhưng dự án đã bỏ StallGuard (endstop là NGUỒN SỰ THẬT duy nhất, xem
+  docs homing tab FSM). Nên lý do đó không còn hiệu lực; phần còn lại (bảo vệ endstop khỏi va mạnh)
+  đã do ISR latch (50 ms debounce) lo. Vì vậy nâng J1 lên 800 mA là hợp lý và an toàn.
+- Docs: cập nhật SYSTEM_OVERVIEW (SAFE_MODE box, module card, commission checklist 6, footer).
+
+### Build gate
+- `pio run` → **SUCCESS**. RAM 15.1%, Flash 25.5% (không đổi — chỉ đổi hằng số).
+
+### Việc còn lại
+- Flash + test J1: kỳ vọng SCAN_MIN CONTACT → SCAN_MAX CONTACT (chạm endstop còn lại trong thời gian
+  hợp lý) → CROSSCHECK → CENTERING DONE → SETREF OK, không còn timeout/stall.
+- Nếu J1 vẫn stall dù 800 mA → nghi vấn cơ khí (backlash, cáp kéo, lệch trục), không phải dòng — cần
+  kiểm tra phần cứng, không phải code.
+- Nếu J2/J3 về sau cũng stall khi scan thì cân nhắc nâng tương tự theo kết quả đo thực tế.
+
+---
+
+## 2026-08-26 — Fix: CENTERING J1/J2 đâm endstop — bỏ vòng encoder tinh, căn tâm theo bước
+
+### Việc đã làm
+- Fix `src/homing.cpp` — case CENTERING trong `tickScan()` (path J1/J2): sau khi coarse
+  `step_max/2` xong → **DONE** ngay, không còn pha "fine" closed-loop encoder tới `enc_center`.
+- Why: log thực tế cho thấy scan đã chạy thông (sau khi tăng dòng 800 mA), CROSSCHECK ok
+  (enc_c=305.5, step_max=8836, spd=35.66 x0.67), coarse hoàn tất — nhưng pha fine chạy ngược hướng,
+  đâm vào endstop và **skip bước** rồi FAILED. Root cause: AS5600 **accumulated** trên HW này không
+  ổn định làm mục tiêu tuyệt đối — log xuyên chuỗi rất mâu thuẫn (idle enc≈39, homing lúc thì
+  240–430, nhảy không liên tục khi đảo chiều). Vì vậy vòng phản hồi `err=enc_center-encNow` nhận
+  `encNow` sai → chạy sai hướng tới endstop.
+- Tâm cơ khí = `step_max/2` bước từ cực đầu **đúng bất kể gear ratio** (bước tỉ lệ trực tiếp với góc
+  khớp), nên căn tâm bằng bước là deterministic + an toàn. Encoder vẫn được dùng ở CROSSCHECK để đo
+  `real_step_to_enc` (kết quả đo/áp dụng giữ nguyên), chỉ bỏ vai trò **mục tiêu căn tâm tuyệt đối**.
+- Docs cập nhật: SYSTEM_OVERVIEW (FSM CENTERING box, module card, bullet căn tâm, footer).
+
+### Build gate
+- `pio run` → **SUCCESS**, không warning. RAM 15.1%, Flash 25.5%.
+
+### Việc còn lại
+- Flash + test J1: kỳ vọng SCAN_MIN CONTACT → SCAN_MAX CONTACT → CROSSCHECK → CENTERING (bước) →
+  **CENTERING DONE (step-center)** → SETREF OK, không còn đâm endstop.
+- Lưu ý: lý do AS5600 accumulated drift (idle≈39 vs homing 240–430) vẫn chưa điều tra sâu — nếu owner
+  muốn căn tinh bằng encoder sau này cần fix gốc (accumulation/NV-hiệu chuẩn), không phải vòng lệnh này.
+- Backlash: căn theo bước không bù backlash (trước có bù bằng encoder). Nếu độ lệch tâm do backlash
+  không chấp nhận được, cần phương án khác (ví dụ tiếp cận từ cùng 1 phía + overshoot-settle bước).
+
+---
+
+## 2026-08-26 — Đang chẩn đoán: CENTERING coarse (bước) không di chuyển
+
+### Việc đã làm
+- What: sau khi bỏ pha fine encoder, homing J1 chạy xong tới `CENTERING DONE (step-center)` nhưng
+  motor **không di chuyển 4417 bước** — dừng tại endstop thứ 2 (enc≈181, giống vị trí SCAN_MAX chạm).
+  SetHome rồi lên 181° (drift log), tức là tâm chưa đạt.
+- Chẩn đoán hiện có (static): CROSSCHECK ok → `enterCenteringScan()` gọi `m.run(cw=0, 4417)` đúng →
+  log "CENTERING coarse 4417" in ra SAU `run()`. Tick kế `isRunning()` trả false ngay (<10 ms) nên
+  in "CENTERING DONE". Motor gần như không bước dù đã set dòng 800 mA. Không thấy stop giữa chừng
+  trong code path. Chưa rõ nguyên nhân → **thêm debug**: CENTERING in `abs`, `dir`, `pressed MIN/MAX`
+  tại lúc `isRunning()` false, để biết motor có chạy thật không + endstop nào đang nhấn + abs có đổi.
+- Chưa sửa logic căn tâm (giữ step-based). Chỉ thêm instrumentation.
+
+### Build gate
+- `pio run` → **SUCCESS** (build kèm debug). RAM 15.1%, Flash 25.5%.
+
+### Việc còn lại
+- Flash + test J1 homing, quan sát dòng `CENTERING tick stopped (abs=.., dir=.., pressed MIN=x MAX=y)`:
+  - Nếu `abs` ≈ 8834 (không đổi) → motor khởi động bị dừng ngay → nghi ISR endstop/stop gọi sai.
+  - Nếu `pressed MIN=1` → coarse đang đâm thẳng vào MIN (ngược hướng) → ISR dừng motor ~1 bước.
+  - Xác minh hướng coarse (cw=0 từ MIN có đúng là rời xa MIN không) với pressed thực tế.
+
+---
+
+## 2026-08-26 — Xác nhận + J3 home=Min+offset, J2 dùng chung scan/step-center
+
+### Việc đã làm
+- Xác nhận (debug `abs=`): CENTERING coarse J1 **chạy đúng** — absSteps đi 8837 → 4419 = đúng
+  `step_max/2`, motor tới TÂM cơ khí chuẩn. Căn tâm step-based hoạt động; `enc=` vẫn thay đổi
+  (181→231) do AS5600 accumulated drift — không ảnh hưởng (không dùng làm mục tiêu). Gỡ debug
+  instrumentation đã thêm.
+- Áp dụng logic tương tự:
+  - **J2**: không cần sửa — đã chạy chung `tickScan` (scan axis có đủ 2 endstop) nên tự được căn tâm
+    step-based giống J1.
+  - **J3**: owner chọn "scan nhưng home gần MIN" (không home tâm như J1/J2). J3 có đủ MIN=11 + MAX=12
+    nên vẫn đi scan path 7 giai đoạn, nhưng `enterCenteringScan()` với `homeAtMinOffset(J3)=true`
+    chỉ di chuyển `HOME_BACKOFF_DEG+0.5°` (~2.5°) khỏi MIN endstop thay vì `step_max/2`. Thêm helper
+    `homeAtMinOffset()` (J3=true, J1/J2=false).
+- Docs: SYSTEM_OVERVIEW (module card J1/J2/J3 homing, FSM diagram — J1/J2/J3 chung flow scan +
+  CENTERING phân nhánh; J4 legacy riêng, bỏ mô tả J3 legacy cũ; bullet căn tâm; footer).
+
+### Build gate
+- `pio run` → **SUCCESS**, không warning. RAM 15.1%, Flash 25.5%.
+
+### Việc còn lại
+- Flash + test J2 (kỳ vọng giống J1: scan → CENTERING step-center → SETREF OK) và J3 (kỳ vọng home
+  ~2.5° khỏi MIN, KHÔNG tới tâm).
+- J4 legacy chưa test lại trên HW mới.
+
+---
+
+## 2026-08-27 — Chuẩn hóa gear dương + direction vào AXIS_STEP_SIGN (fix J2/J3/J4 homing)
+
+### Việc đã làm
+- Bug (log J2 thực tế): `SAFE_MODE + WARMUP (cw=0, 4294966764 steps)` và SCAN_MAX hiện `step=0.0`
+  suốt — J2 homing không bao giờ tới endstop kia.
+- Chẩn đoán gốc: `GEAR_RATIO_J2/J3/J4` là **âm** (−20/−20/−4) → `stepsPerDegree(J2)=200×16×(−20)/360
+  = −177.78`. Hậu quả:
+  - WARMUP `(uint32_t)(3.0×spd)+1 = (uint32_t)(−533)+1` → **wrap thành 4294966764** (≈2.1 tỉ bước).
+  - `stepsToDegrees()` hard-return `0` khi `spd<=0` → `angleFromSteps(J2)` luôn `0.0` (step=0.0 dù
+    motor có chạy — chỉ là hiển thị, không phải bằng chứng đứng im).
+- Dấu âm gear từng được dùng trong `angleFromSteps` để cho góc khớp J2/J3/J4 đúng dấu vật lý
+  (kinematics), nhưng `cwForDelta()` chỉ xét `AXIS_STEP_SIGN` (+1 hết) nên **chiều di chuyển J2/J3/J4
+  bị đảo ngược** — đúng mục TODO commissioning "flip nếu ngược chiều".
+- Owner chọn: **chuẩn hóa gear = dương, dời chiều quay vào AXIS_STEP_SIGN**.
+- Sửa `src/config.h`:
+  - `GEAR_RATIO_J2/J3/J4` = +20/+20/+4 (bỏ dấu âm).
+  - `AXIS_STEP_SIGN` = { +1, −1, −1, −1, +1, +1 }.
+  - Kết quả: `angleFromSteps`/kinematics **giữ nguyên** (sản phẩm dấu không đổi), nhưng
+    `stepsPerDegree` dương → hết wrap WARMUP + `stepsToDegrees` trả đúng; `cwForDelta` tự đúng hướng
+    (đã xét dấu AXIS_STEP_SIGN từ trước).
+- Docs: SYSTEM_OVERVIEW warn-box chiều quay (gear=dương, direction ở AXIS_STEP_SIGN), footer.
+
+### Build gate
+- `pio run` → **SUCCESS**, không warning. RAM 15.1%, Flash 25.5%.
+
+### Việc còn lại
+- Flash + test J1/J2/J3 homing lại (kỳ vọng WARMUP vài trăm bước, scan 2 endstop, CENTERING đúng tâm /
+  J3 Min+offset, không còn `4294966764` và `step=0.0`).
+- J2/J3/J4 chiều jog giờ đảo so với trước (đúng chiều vật lý) — verify bằng jog mù checklist An toàn.
+
+---
+
+## 2026-08-27 — Redesign UI web nhúng (Dashboard Operate) trong web_server.cpp
+
+### Việc đã làm
+- What: Thay toàn bộ `INDEX_HTML` PROGMEM (khối HTML/CSS/JS từ dòng 10–721) bằng giao diện mới
+  trong `src/web_server.cpp`, giữ nguyên mọi REST endpoint và tên API.
+- Why: owner duyệt phương án "comprehensive upgrade" — UI cũ đơn điệu, chưa tối ưu cho màn hình
+  điều khiển glanceable; giữ identity dark Mission Sky (`#0f172a`, accent `#38bdf8`).
+- How: dùng thư viện "impeccable" (mode Operate). Bố cục mới:
+  - **Dashboard**: grid 2 cột — canvas pose 2D top-view (TCP + home trên graticule 50mm) + cột trạng
+    thái: mode word lớn + badge màu theo trạng thái (idle/run/fault), WiFi, số khớp đã home,
+    endstop đang nhấn (J#MIN/MAX), phase homing + 4 chip J1→J4 hightlight theo tiến độ, quick actions
+    (HOME ALL / STOP ALL / CLEAR FAULT).
+  - **Joints**: panel jog 6 khớp — readout độ lớn (mono tabular), encoder/flag (HOMED/DRIFT/ENC ERR),
+    jog ± theo bước chọn 0.5/1/5/15° (bước dùng chung, jog(axis,dir)×stepSize).
+  - **Homing**: home all/đơn lẻ (J1–J4) + Set-Home / Clear-Calib cho từng khớp (lưới nhất quán).
+  - **WiFi / Cartesian / Draw**: gom lại chuẩn vocab, cùng token.
+  - Tách gọn tiêu đề/CSS thành design tokens (`:root`), `prefers-reduced-motion` tôn trọng.
+- Fix bug ngầm: trước đây canvas `${'ctx.strokeStyle/fillStyle'}` gán `var(--color-primary)` — CSS custom
+  property KHÔNG resolve trong canvas → đường vẽ/preview bị đen. Đổi sang hex literal (`#38bdf8`…).
+- Validation đầu vào, confirm xoá calib, auto-disable nút khi busy/FAULT, toast, MẤT KẾT NỐI — giữ nguyên.
+
+### Build gate
+- `pio run` → **SUCCESS**, không warning. RAM 15.1%; Flash 25.7% (858,285 B, +~7 KB so với trước do UI lớn hơn).
+
+### Việc còn lại
+- Không cần thay đổi backend — field name JS khớp schema thật (`arm.cpp statusJson`, `homing toJson`,
+  `wifi toJson`, `joint_model toJson`, `endstop toJson` đã đối chiếu).
+- Flash rồi mở http://robot-arm.local: kiểm tra màu mode word, canvas pose, preview draw, jog step.

@@ -52,7 +52,8 @@ constexpr uint8_t NUM_MOTORS                    = 6;
 constexpr uint8_t MAX_WAYPOINTS                 = 32;
 
 // Chiều quay logic: +1 nếu step CW ứng với góc khớp tăng dương (hiệu chỉnh lúc lắp).
-constexpr int8_t AXIS_STEP_SIGN[NUM_MOTORS]     = { +1, +1, +1, +1, +1, +1 };
+// J2/J3/J4 quay ngược chiều motor (gear âm trước đây) -> bây giờ gear bỏ dấu, dời dấu vào đây.
+constexpr int8_t AXIS_STEP_SIGN[NUM_MOTORS]     = { +1, -1, -1, -1, +1, +1 };
 // Chiều đo của encoder AS5600 so với góc khớp dương (hiệu chỉnh lúc lắp).
 constexpr int8_t AXIS_ENC_SIGN[NUM_MOTORS]      = { +1, +1, +1, +1, +1, +1 };
 
@@ -120,9 +121,9 @@ constexpr uint16_t DEFAULT_MICROSTEPS           = 16;     // 1/16 microstepping
 constexpr uint16_t DEFAULT_NORMAL_CURRENT       = 800;    // Normal running current (mA)
 constexpr uint16_t DEFAULT_HOMING_CURRENT       = 350;    // Ultra-low current for Homing (mA)
 
-constexpr uint16_t HOMING_CURRENT_J1            = 300;    // Base Yaw (mA)
-constexpr uint16_t HOMING_CURRENT_J2            = 500;    // Shoulder Pitch (mA)
-constexpr uint16_t HOMING_CURRENT_J3            = 450;    // Elbow Pitch (mA)
+constexpr uint16_t HOMING_CURRENT_J1            = 800;    // Base Yaw (mA) — cần traverse full range, ISR endstop bảo vệ chạm
+constexpr uint16_t HOMING_CURRENT_J2            = 1000;    // Shoulder Pitch (mA)
+constexpr uint16_t HOMING_CURRENT_J3            = 1000;    // Elbow Pitch (mA)
 constexpr uint16_t HOMING_CURRENT_J4            = 300;    // Wrist Roll (mA)
 constexpr uint16_t HOMING_CURRENT_J5            = 0;      // A4988 - VREF cứng
 constexpr uint16_t HOMING_CURRENT_J6            = 0;      // A4988 - VREF cứng

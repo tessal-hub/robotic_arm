@@ -129,7 +129,9 @@ Với J1 chỉ 270° (không phải 360°), có một **góc chết ~90°** phí
 
 Khi hướng công cụ (tool z-axis) **chỉ thẳng đứng** (song song trục J1, ví dụ bút cắm thẳng
 xuống bàn) → trục J1 và J6 gần như trùng phương → **mất 1 bậc tự do thực tế** (vô số cặp
-(θ1, θ6) cho cùng kết quả). Đây là "wrist singularity" kinh điển, không phải lỗi code.
+(θ1, θ6) cho cùng kết quả). Lưu ý: đây là **gimbal-lock do J1//J6 và khóa cứng e4=e6=0**, không phải
+"wrist singularity" kinh điển (cái sau là trục cổ tay cầu J4/J6 trùng nhau). Trong firmware, đây
+không phải lỗi code — nó là hệ quả tất yếu của cấu trúc 6-DOF đã khóa e4=e6.
 
 **Cách xử lý đã áp dụng:** dùng Levenberg-Marquardt (damped least-squares) thay vì
 Newton-Raphson thuần túy khi giải IK số, tránh nghiệm trôi vô hạn. Xem `ik_line_trajectory.py`.

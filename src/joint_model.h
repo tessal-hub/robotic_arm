@@ -14,9 +14,10 @@ class NvsStore;
  * - Nguồn chính: bộ đếm step tuyệt đối trong Motor (motor.getAbsoluteSteps()).
  * - Nguồn tham chiếu: encoder AS5600 (zeroRef chụp lúc set home) để phát hiện drift.
  * - Quy đổi: stepsPerDegree = FULL_STEPS * microstep * gearRatio / 360.
+ *   Khi đã home bằng kiến trúc quét Min/Max, bước/độ và dấu encoder được ĐO thực tế
+ *   (s_encSign / s_measuredSpd) và áp dụng thay hằng số cố định.
  * - Bền vững qua nguồn: raw góc encoder lúc home được lưu NVS; khi bật nguồn,
- *   restoreFromNVS() đối chiếu raw hiện tại vs đã lưu -> khôi phục vị trí mà
- *   không cần chạy lại homing (chính xác trong phạm vi ±180° của encoder).
+ *   restoreFromNVS() đối chiếu raw hiện tại vs đã lưu -> khôi phục vị trí.
  */
 class JointModel {
 public:
@@ -40,9 +41,13 @@ public:
     [[nodiscard]] float angleFromSteps(uint8_t axis) const;
     // Góc khớp theo encoder (chỉ có nghĩa sau khi đã set home).
     [[nodiscard]] float angleFromEncoder(uint8_t axis);
+    // Góc thô tuyệt đối từ encoder (raw accumulated, không cần home) — homing dùng.
+    [[nodiscard]] float rawEncoder(uint8_t axis);
 
     // Đặt vị trí HIỆN TẠI làm mốc home (góc = 0) + lưu NVS nếu encoder khoẻ.
     void setHomeHere(uint8_t axis);
+    // Đồng bộ step counter với encoder — dùng khi cancel/STOP để tránh drift.
+    void resyncFromEncoder(uint8_t axis);
     void clearHome(uint8_t axis);
     void forgetHome(uint8_t axis);  // xoá cả NVS (nút CLEAR CALIB trên web)
 
@@ -61,6 +66,10 @@ public:
 
     [[nodiscard]] bool encOK(uint8_t axis) const;
 
+    // Đo và áp dụng hiệu chuẩn động (gọi từ homing sau cross-check):
+    // encSign = dấu encoder (±1) thay AXIS_ENC_SIGN, stepsPerDeg = bước/độ đo được.
+    void applyHomingCalibration(uint8_t axis, float encSign, float stepsPerDeg);
+
     String toJson();
 
 private:
@@ -71,6 +80,11 @@ private:
     bool homed[NUM_MOTORS]{};
     bool restored[NUM_MOTORS]{};
     bool driftFault[NUM_MOTORS]{};
+
+    // Hiệu chuẩn đo được (thay hằng số cố định khi đã home). Static: 1 instance duy nhất.
+    static float s_encSign[NUM_MOTORS];      // dấu encoder (±1)
+    static float s_measuredSpd[NUM_MOTORS];  // bước/độ đo được
+    static bool  s_hasMeasured[NUM_MOTORS];
 };
 
 #endif // JOINT_MODEL_H

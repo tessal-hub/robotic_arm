@@ -8,6 +8,8 @@
 #include "sensor.h"
 #include "wifi_manager.h"
 
+#include <esp_task_wdt.h>
+
 namespace {
 WifiManager* g_wifi = nullptr; // inject để statusJson đọc wifi (tránh include vòng)
 }
@@ -71,25 +73,56 @@ void ArmController::taskEntry(void* param) {
 void ArmController::taskLoop() {
     TickType_t lastWake = xTaskGetTickCount();
     ArmCommand cmd;
+    bool wasHoming{false};
+
+    // Đăng ký Task WDT — task homing/planner/FAULT là an toàn nhất, phải có watchdog riêng
+    esp_task_wdt_add(nullptr);
 
     for (;;) {
         vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(MOTION_TASK_PERIOD_MS));
+        esp_task_wdt_reset();
 
         // 1) Homing FSM trước (ưu tiên an toàn), rồi planner
         if (hc != nullptr) hc->tick();
         if (pl != nullptr) pl->tick();
 
-        // 2) Endstop ngoài ngữ cảnh homing => FAULT + dừng hết
-        if (es != nullptr && es->anyLatched() &&
-            !(hc != nullptr && hc->isActive())) {
+        // Sau khi homing hoàn tất: endstop vẫn nhấn do backoff là bình thường → clear latch
+        if (hc != nullptr && wasHoming && !hc->isActive()) {
+            es->clearAllLatches();
+        }
+        wasHoming = (hc != nullptr && hc->isActive());
+
+        // 2) Endstop bảo vệ: chỉ khi motor đang chạy VÀ endstop vật lý thực sự nhấn
+        //    Homing tự xử lý endstop riêng — arm không can thiệp trong quá trình homing.
+        //    Endstop pressed at boot = OK (resting against switch), không fault.
+        if (es != nullptr && hc != nullptr && !hc->isActive()) {
+            bool anyMotorRunning = false;
             for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
-                if (motors[i] != nullptr) motors[i]->stop();
+                if (motors[i] != nullptr && motors[i]->isRunning()) {
+                    anyMotorRunning = true;
+                    break;
+                }
             }
-            es->clearLatch(0, EndstopWhich::MIN); es->clearLatch(0, EndstopWhich::MAX);
-            es->clearLatch(1, EndstopWhich::MIN); es->clearLatch(1, EndstopWhich::MAX);
-            es->clearLatch(2, EndstopWhich::MIN); es->clearLatch(2, EndstopWhich::MAX);
-            mode_ = ArmMode::FAULT;
-            Serial.println("[ARM] FAULT: endstop ngoai homing - da dung toan bo");
+            if (anyMotorRunning) {
+                for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+                    if (es->hasPin(i, EndstopWhich::MIN) && es->isPressed(i, EndstopWhich::MIN)) {
+                        for (uint8_t j = 0; j < NUM_MOTORS; ++j)
+                            if (motors[j] != nullptr) motors[j]->stop();
+                        es->clearAllLatches();
+                        mode_ = ArmMode::FAULT;
+                        Serial.printf("[ARM] FAULT: endstop J%u MIN pressed during motion\n", i + 1);
+                        break;
+                    }
+                    if (es->hasPin(i, EndstopWhich::MAX) && es->isPressed(i, EndstopWhich::MAX)) {
+                        for (uint8_t j = 0; j < NUM_MOTORS; ++j)
+                            if (motors[j] != nullptr) motors[j]->stop();
+                        es->clearAllLatches();
+                        mode_ = ArmMode::FAULT;
+                        Serial.printf("[ARM] FAULT: endstop J%u MAX pressed during motion\n", i + 1);
+                        break;
+                    }
+                }
+            }
         }
 
         // 3) Drift watchdog ~ mỗi 500ms
@@ -121,6 +154,8 @@ void ArmController::taskLoop() {
             execute(cmd);
         }
     }
+
+    esp_task_wdt_delete(nullptr);
 }
 
 bool ArmController::motionAllowed() const { return mode_ != ArmMode::FAULT; }

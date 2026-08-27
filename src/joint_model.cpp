@@ -3,12 +3,19 @@
 #include "nvs_store.h"
 #include "sensor.h"
 
+float JointModel::s_encSign[NUM_MOTORS]{};
+float JointModel::s_measuredSpd[NUM_MOTORS]{};
+bool  JointModel::s_hasMeasured[NUM_MOTORS]{};
+
 JointModel::JointModel() {
     for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
         encZeroRef[i] = 0.0f;
         homed[i] = false;
         restored[i] = false;
         driftFault[i] = false;
+        s_encSign[i] = AXIS_ENC_SIGN[i];
+        s_measuredSpd[i] = stepsPerDegree(i);
+        s_hasMeasured[i] = false;
     }
 }
 
@@ -21,6 +28,7 @@ void JointModel::attachNvs(NvsStore* nvs_) { nvs = nvs_; }
 
 float JointModel::stepsPerDegree(uint8_t axis) {
     if (axis >= NUM_MOTORS) return 1.0f;
+    if (s_hasMeasured[axis]) return s_measuredSpd[axis];
     const float stepsPerRev =
         static_cast<float>(DEFAULT_FULL_STEPS) * static_cast<float>(DEFAULT_MICROSTEPS) *
         DEFAULT_AXIS_GEAR_RATIOS[axis];
@@ -44,7 +52,6 @@ float JointModel::wrap180(float deg) {
 
 bool JointModel::cwForDelta(uint8_t axis, float deltaDeg) {
     // cw=true => absSteps tăng. Góc = SIGN * absSteps / spd.
-    // Muốn delta góc dương: nếu SIGN dương cần absSteps tăng (cw), nếu âm thì ngược lại.
     return (AXIS_STEP_SIGN[axis] > 0) ? (deltaDeg >= 0.0f) : (deltaDeg < 0.0f);
 }
 
@@ -55,23 +62,33 @@ float JointModel::angleFromSteps(uint8_t axis) const {
 
 float JointModel::angleFromEncoder(uint8_t axis) {
     if (axis >= NUM_MOTORS || sensor == nullptr || !homed[axis]) return 0.0f;
-    return AXIS_ENC_SIGN[axis] * (sensor->getAccumulatedAngle(axis) - encZeroRef[axis]);
+    return s_encSign[axis] * (sensor->getAccumulatedAngle(axis) - encZeroRef[axis]);
+}
+
+float JointModel::rawEncoder(uint8_t axis) {
+    if (axis >= NUM_MOTORS || sensor == nullptr) return 0.0f;
+    return sensor->getAccumulatedAngle(axis);
 }
 
 void JointModel::setHomeHere(uint8_t axis) {
     if (axis >= NUM_MOTORS) return;
-    if (motors[axis] != nullptr) motors[axis]->setAbsoluteSteps(0);
-    bool encHealthy = false;
+    if (motors[axis] == nullptr) return;
+
     if (sensor != nullptr && sensor->isSensorOK(axis)) {
-        encZeroRef[axis] = sensor->getAccumulatedAngle(axis);
-        encHealthy = true;
-        // Lưu raw single-turn để khôi phục vị trí qua nguồn (chỉ tin khi encoder khoẻ)
+        const float encAngle = sensor->getAccumulatedAngle(axis);
+        encZeroRef[axis] = encAngle;
+        const float angleDeg = s_encSign[axis] * encAngle;
+        motors[axis]->setAbsoluteSteps(degreesToSteps(axis, angleDeg));
         if (nvs != nullptr) nvs->saveJointHome(axis, sensor->getAngle(axis));
+        Serial.printf("[JM] SetHome J%u (enc=ok, steps set to %.1f deg)\n",
+                      axis + 1, angleDeg);
+    } else {
+        motors[axis]->setAbsoluteSteps(0);
+        Serial.printf("[JM] SetHome J%u (enc=DEAD, step-only)\n", axis + 1);
     }
     driftFault[axis] = false;
     restored[axis] = false;
     homed[axis] = true;
-    Serial.printf("[JM] SetHome J%u (enc=%s)\n", axis + 1, encHealthy ? "ok" : "DEAD");
 }
 
 void JointModel::clearHome(uint8_t axis) {
@@ -81,9 +98,25 @@ void JointModel::clearHome(uint8_t axis) {
     driftFault[axis] = false;
 }
 
+void JointModel::resyncFromEncoder(uint8_t axis) {
+    if (axis >= NUM_MOTORS) return;
+    if (motors[axis] == nullptr || sensor == nullptr || !sensor->isSensorOK(axis)) return;
+    const float encAngle = s_encSign[axis] * sensor->getAccumulatedAngle(axis);
+    motors[axis]->setAbsoluteSteps(degreesToSteps(axis, encAngle));
+}
+
 void JointModel::forgetHome(uint8_t axis) {
     clearHome(axis);
     if (nvs != nullptr) nvs->clearJointHome(axis);
+}
+
+void JointModel::applyHomingCalibration(uint8_t axis, float encSign, float stepsPerDeg) {
+    if (axis >= NUM_MOTORS) return;
+    s_encSign[axis] = (encSign >= 0.0f) ? 1.0f : -1.0f;
+    s_measuredSpd[axis] = stepsPerDeg;
+    s_hasMeasured[axis] = true;
+    Serial.printf("[JM] Calib J%u: encSign=%+.0f, steps/deg=%.2f (measured)\n",
+                  axis + 1, s_encSign[axis], s_measuredSpd[axis]);
 }
 
 uint8_t JointModel::restoreFromNVS() {
@@ -95,9 +128,8 @@ uint8_t JointModel::restoreFromNVS() {
         if (!h.valid) continue;
 
         const float now = sensor->getAngle(a);
-        const float delta = AXIS_ENC_SIGN[a] * wrap180(now - h.rawDeg);
+        const float delta = s_encSign[a] * wrap180(now - h.rawDeg);
 
-        // Vượt quá hành trình lý thuyết + biên => nam châm dịch chuyển / dữ liệu sai
         const float maxSpan = DEFAULT_AXIS_CALIB_RANGE[a] + 15.0f;
         if (fabsf(delta) > maxSpan) {
             Serial.printf("[JM] J%u: restore BACON lech %.1f deg > span %.1f => bo qua\n",
