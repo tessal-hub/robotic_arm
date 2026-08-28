@@ -1,5 +1,6 @@
 #include "planner.h"
 #include <cmath>
+#include "differential_wrist.h"
 #include "joint_model.h"
 #include "kinematics.h"
 #include "motor.h"
@@ -108,17 +109,37 @@ bool Planner::startMoveTo(float x, float y, float z, float feedMmS) {
 
     // Bước step từng trục + trục chủ đạo (nhiều step nhất)
     int64_t steps[NUM_MOTORS];
+    float deltaAct[NUM_MOTORS];
     uint32_t maxSteps = 1;
     bool anyMove = false;
-    for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+
+    // Khớp J1..J4 (dẫn động trực tiếp)
+    for (uint8_t i = 0; i < 4; ++i) {
         if (!jm->isHomed(i)) { stop(); return false; }
-        const float curDeg = jm->angleFromSteps(i);
-        const float deltaDeg = target[i] - curDeg;
-        steps[i] = JointModel::degreesToSteps(i, fabsf(deltaDeg));
+        const float curDeg = jm->actuatorAngleFromSteps(i);
+        deltaAct[i] = target[i] - curDeg;
+        steps[i] = JointModel::degreesToSteps(i, fabsf(deltaAct[i]));
         if (steps[i] > 0) anyMove = true;
         if (steps[i] > 0 && static_cast<uint32_t>(steps[i]) > maxSteps)
             maxSteps = static_cast<uint32_t>(steps[i]);
     }
+
+    // Khớp J5, J6 qua cơ cấu Vi sai Bánh răng Côn (Differential Wrist)
+    {
+        const DifferentialWrist::ActuatorState actTarget = g_diffWrist.inverse(target[4], target[5]);
+        const float curM5 = jm->actuatorAngleFromSteps(4);
+        const float curM6 = jm->actuatorAngleFromSteps(5);
+        deltaAct[4] = actTarget.leftDeg - curM5;
+        deltaAct[5] = actTarget.rightDeg - curM6;
+
+        for (uint8_t i = 4; i < 6; ++i) {
+            steps[i] = JointModel::degreesToSteps(i, fabsf(deltaAct[i]));
+            if (steps[i] > 0) anyMove = true;
+            if (steps[i] > 0 && static_cast<uint32_t>(steps[i]) > maxSteps)
+                maxSteps = static_cast<uint32_t>(steps[i]);
+        }
+    }
+
     if (!anyMove) return true; // đã ở đúng vị trí
 
     // Thời gian segment từ feed (mm/s): T_us = 1e6 * segLen / feed.
@@ -129,9 +150,9 @@ bool Planner::startMoveTo(float x, float y, float z, float feedMmS) {
         float enc[6];
         for (uint8_t i = 0; i < NUM_MOTORS; ++i) enc[i] = jm->angleFromSteps(i);
         const kin::FkResult fkNow = kin::forward(enc);
-        const float dx = x - fkNow.tcp.x;
-        const float dy = y - fkNow.tcp.y;
-        const float dz = z - fkNow.tcp.z;
+        const float dx = rx - fkNow.tcp.x;
+        const float dy = ry - fkNow.tcp.y;
+        const float dz = rz - fkNow.tcp.z;
         segLenMm = sqrtf(dx * dx + dy * dy + dz * dz);
         if (segLenMm < 0.05f) segLenMm = 0.05f;
     }
@@ -148,8 +169,7 @@ bool Planner::startMoveTo(float x, float y, float z, float feedMmS) {
         if (interval > MAX_STEP_INTERVAL_US) interval = MAX_STEP_INTERVAL_US;
         if (interval < MIN_STEP_INTERVAL_US) interval = MIN_STEP_INTERVAL_US;
         motors[i]->setSpeed(interval);
-        const bool cw = JointModel::cwForDelta(
-            i, target[i] - jm->angleFromSteps(i));
+        const bool cw = JointModel::cwForDelta(i, deltaAct[i]);
         motors[i]->run(cw, static_cast<uint32_t>(steps[i]));
     }
     return true;

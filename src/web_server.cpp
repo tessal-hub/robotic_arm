@@ -563,7 +563,7 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
   <div id="cart" class="tab-pane" role="tabpanel" aria-labelledby="tab-cart">
     <section class="card" aria-labelledby="headingCartMove">
       <div class="card-head"><h2 id="headingCartMove">Di chuyển TCP (bút hướng xuống)</h2><span class="meta mono" id="poseNow2">--</span></div>
-      <p class="muted" style="margin-bottom:12px">Yêu cầu đã HOME J1–J4. Home TCP = (146, 0, 365). Giấy vẽ đặt dưới bút, Z nhỏ hơn khi hạ.</p>
+      <p class="muted" style="margin-bottom:12px">Yêu cầu đã HOME J1–J4. Home TCP = (177, 0, 365). Giấy vẽ đặt dưới bút, Z nhỏ hơn khi hạ.</p>
       <div class="row">
         <div class="input-group"><label for="mvX">X (mm)</label><input type="number" id="mvX" step="any" placeholder="X" value="160" aria-label="Tọa độ đích X (mm)"></div>
         <div class="input-group"><label for="mvY">Y (mm)</label><input type="number" id="mvY" step="any" placeholder="Y" value="0" aria-label="Tọa độ đích Y (mm)"></div>
@@ -631,7 +631,7 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
 /* =============================================================================
    1. HARDWARE CONSTANTS & CRAIG MODIFIED DH PARAMETERS (src/config.h)
 ============================================================================= */
-const D1 = 139.0, A2 = 138.0, A3 = 88.0, D4 = 126.0, D_TOOL = 20.0;
+const D1 = 139.0, A2 = 138.0, A3 = 88.0, D4 = 126.0, D6 = 31.0, D_TOOL = 20.0, D_TOOL_EFF = 51.0;
 const L_FORE = Math.hypot(A3, D4); 
 const DELTA_WRIST = Math.atan2(D4, A3) * 180.0 / Math.PI; 
 const DELTA_RAD = Math.atan2(D4, A3);
@@ -723,7 +723,7 @@ function forwardKinematics(enc){
 
   T = mat4Mul(T, craigMDH(0.0, 90.0, 0.0, th[4]));
 
-  T = mat4Mul(T, craigMDH(0.0, -90.0, 0.0, th[5]));
+  T = mat4Mul(T, craigMDH(0.0, -90.0, D6, th[5]));
   const p_tcp = [
     T[2]*D_TOOL + T[3],
     T[6]*D_TOOL + T[7],
@@ -744,7 +744,7 @@ function forwardKinematics(enc){
    3. CLOSED-FORM PEN-DOWN IK SOLVER
 ============================================================================= */
 function ikPenDown(tx, ty, tz){
-  const cx = tx, cy = ty, cz = tz + D_TOOL;
+  const cx = tx, cy = ty, cz = tz + D_TOOL_EFF;
   const t1 = Math.atan2(cy, cx);
   const r = Math.hypot(cx, cy);
   const h = cz - D1;

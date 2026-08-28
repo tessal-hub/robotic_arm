@@ -7,6 +7,6 @@ cd "$(dirname "$0")/.."
 OUT=/tmp/opencode/kinematics_test
 mkdir -p /tmp/opencode
 g++ -std=gnu++17 -Wall -Wextra -I src \
-    src/kinematics.cpp test/kinematics/test_kinematics.cpp \
+    src/kinematics.cpp src/differential_wrist.cpp test/kinematics/test_kinematics.cpp \
     -o "$OUT"
 "$OUT"

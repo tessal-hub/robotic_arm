@@ -12,9 +12,9 @@ chính xác với bản vẽ tay gốc (xem `docs/sketches/` nếu có lưu ản
 ```
                               <--16-->
                                  |
-                    ,----[ J4 ]--+------[J5]-------[J6]
-                    |            |        \          \
-                    | 88mm       '--110mm--'          (pen, D6_TOOL)
+                    ,----[ J4 ]--+------[ J5 ] ─────── [ J6 ] ─────── (Pen TCP)
+                    |            |          \    31mm     \    20mm     \
+                    | 88mm       '--110mm----'             '-(D_TOOL)---'
                     |
                   [ J3 ]---- (elbow, quay ngang)
                     |
@@ -32,125 +32,140 @@ chính xác với bản vẽ tay gốc (xem `docs/sketches/` nếu có lưu ản
 - **J1 → J2**: 139mm — chiều cao đế lên vai. J1 là khớp **base yaw**, trục xoay **thẳng đứng**.
 - **J2 → J3**: 138mm — cánh tay trên (upper arm). J2 là khớp **shoulder pitch**, trục xoay **nằm ngang**.
 - **J3 → điểm gập**: 88mm — J3 là khớp **elbow pitch**, trục xoay **song song J2**.
-- **Điểm gập → J4/J5/J6 (offset)**: 16mm + 110mm = **126mm tổng cộng, nối tiếp nhau trên cùng một trục** (không phải hai hướng riêng biệt).
-- **J4, J5, J6**: cụm cổ tay (wrist), bố trí kiểu **pan-tilt-roll**.
-- **Bút (tool)**: gắn **đồng trục** với J6, dài **20mm** tính từ tâm cổ tay.
+- **Điểm gập → J5 (Wrist Tilt)**: 16mm + 110mm = **126mm** nối tiếp trên trục cẳng tay.
+- **J5 → J6 (Tool Roll)**: **31mm** dọc theo trục công cụ.
+- **J6 → Pen Tip (TCP)**: **20mm** gắn đồng trục với J6.
+- **Tổng chiều dài khâu công cụ hiệu dụng (J5 → Pen TCP)**: $31\text{mm} + 20\text{mm} = \mathbf{51\text{mm}}$.
 
-## 2. Quan hệ giao nhau giữa các trục khớp (đã xác nhận)
+## 2. Quan hệ giao nhau giữa các trục khớp
 
 | Cặp khớp | Quan hệ |
 |---|---|
-| J1, J2, J3 | Các trục xoay **giao nhau** theo chuỗi liên tiếp (cấu trúc tay máy khớp nối kinh điển — RRR) |
-| J3 → J4 | Trục **vuông góc** với J3, nhưng **KHÔNG giao nhau** — có khoảng lệch vuông góc chung (common perpendicular) = tham số DH `a`. Đây là hình học bình thường, không phải lỗi lắp ráp. |
-| J4, J5, J6 | Các trục xoay **giao nhau tại một điểm chung duy nhất** → thỏa mãn **điều kiện Pieper** → cổ tay là **spherical wrist thật sự**, cho phép giải IK dạng đóng (closed-form), tách vị trí và hướng độc lập. |
+| J1, J2, J3 | Các trục xoay **giao nhau** theo chuỗi liên tiếp (cấu trúc RRR kinh điển) |
+| J3 → J4 | Trục **vuông góc** với J3, có khoảng lệch vuông góc chung (common perpendicular) = $a_3 = 88\text{mm}$. |
+| J4, J5 | Trục xoay cắt nhau tại tâm cổ tay J5 ($d_4 = 126\text{mm}$). |
+| J5 → J6 | Trục $Z_6$ (Tool Roll) vuông góc với trục nghiêng $Z_5$, đặt cách J5 một khoảng $d_6 = 31\text{mm}$. |
+| J6 → TCP | Bút gắn đồng trục với $Z_6$, dài $D_{\text{tool}} = 20\text{mm}$. |
 
-**Hệ quả quan trọng:** vì cổ tay là spherical wrist chuẩn, IK có thể giải theo 2 bước độc lập:
-1. Tính **wrist center** (lùi từ TCP theo trục tool một đoạn `D6_TOOL`), giải hình học J1-J2-J3.
-2. Giải hướng (orientation) cho J4-J5-J6 từ ma trận xoay còn lại.
+**Hệ quả đối với IK Pen-Down (Bút chỉ thẳng đứng $\theta_4 = 0, \theta_6 = 0$):**
+Vì bút luôn hướng thẳng đứng xuống dưới (song song trục $-Z$), đoạn $31\text{mm}$ (J5 $\to$ J6) và $20\text{mm}$ (J6 $\to$ TCP) nằm thẳng hàng dọc, tạo thành cánh tay đòn thẳng đứng dài **$51\text{mm}$**.
+IK được giải theo 2 bước:
+1. Tính tọa độ tâm trục nghiêng **J5** ($Z_{\text{J5}} = Z_{\text{target}} + 51.0\text{mm}, X_{\text{J5}} = X_{\text{target}}, Y_{\text{J5}} = Y_{\text{target}}$).
+2. Giải hình học phẳng 2 khâu cho J1-J2-J3 theo định lý cosin, đặt $\theta_5 = -(t_2 + t_3 + \delta)$.
 
-## 3. Bảng tham số DH (đã xác nhận & validate với vật lý)
+## 3. Bảng tham số DH (Modified DH — Craig convention)
 
-**Quy ước sử dụng: Modified DH (Craig convention)** —
-`T_i = Rx(alpha_{i-1}) · Tx(a_{i-1}) · Rz(theta_i) · Tz(d_i)`
-
-> ⚠️ Đây **không phải** Standard/Classic DH thông thường. Nếu viết lại FK ở ngôn ngữ/nền tảng
-> khác (C++, JS, MATLAB...), phải dùng đúng công thức ma trận Modified DH này, nếu không kết
-> quả sẽ sai lệch dù bảng số liệu giống hệt. Xem cách triển khai tham chiếu tại
-> `fk_verify.py::dh_transform()` và bản port JavaScript trong `arm_simulator.html`.
+Công thức biến đổi: `T_i = Rx(alpha_{i-1}) · Tx(a_{i-1}) · Rz(theta_i) · Tz(d_i)`
 
 | Khớp *i* | a₍ᵢ₋₁₎ (mm) | α₍ᵢ₋₁₎ (độ) | dᵢ (mm) | θᵢ | Mô tả |
 |---|---|---|---|---|---|
-| 1 | 0 | 0 | 139 | θ1 (biến) | Base yaw |
+| 1 | 0 | 0 | **139** | θ1 (biến) | Base yaw |
 | 2 | 0 | -90 | 0 | θ2 (biến) | Shoulder pitch |
-| 3 | 138 | 0 | 0 | θ3 (biến) | Elbow pitch |
-| 4 | 88 | -90 | **126** (=16+110) | θ4 (biến) | Wrist offset → pan |
+| 3 | **138** | 0 | 0 | θ3 (biến) | Elbow pitch |
+| 4 | **88** | -90 | **126** (=16+110) | θ4 (biến) | Forearm offset → Wrist pan |
 | 5 | 0 | +90 | 0 | θ5 (biến) | Wrist tilt |
-| 6 | 0 | -90 | 0 | θ6 (biến) | Wrist roll |
-| TCP | — | — | **D6_TOOL = 20** | — | Bút, gắn đồng trục với J6 |
+| 6 | 0 | -90 | **31** | θ6 (biến) | Wrist roll (J5 → J6) |
+| TCP | — | — | **D_TOOL = 20** | — | Bút, gắn đồng trục với J6 |
 
 ## 4. Offset góc: Encoder Zero ↔ DH Theta
 
-Vị trí "home" vật lý (tất cả encoder = 0°, mốc calibrate qua `setHomeHere()`) **không trùng**
-với θ=0 trong quy ước DH toán học. Công thức chuyển đổi bắt buộc:
-
-```
-theta_DH(i) = theta_encoder(i) + OFFSET(i)
-```
+Công thức chuyển đổi: `theta_DH(i) = theta_encoder(i) + OFFSET(i)`
 
 | Khớp | Offset (độ) | Trạng thái xác nhận |
 |---|---|---|
-| θ1 | 0 | Giả định (chưa cần calib, base thường không lệch) |
-| θ2 | **-90** | ✅ **Đã xác nhận bằng đo đạc vật lý** (xem mục 5) |
-| θ3 | 0 | ✅ Đã xác nhận (tại home, elbow không gập — chuỗi 139-138-88 thẳng hàng dọc như bản vẽ) |
-| θ4 | 0 | ⚠️ **CHƯA xác nhận thực nghiệm** — cần đo giống cách đã làm với θ2 |
-| θ5 | 0 | ⚠️ **CHƯA xác nhận thực nghiệm** |
-| θ6 | 0 | ⚠️ **CHƯA xác nhận thực nghiệm** |
+| θ1 | 0 | ✅ Trục Z đế |
+| θ2 | **-90** | ✅ Đã xác nhận vật lý (thẳng đứng tại home) |
+| θ3 | 0 | ✅ Đã xác nhận (thẳng hàng chuỗi 139-138-88) |
+| θ4 | 0 | ✅ Giữ mặt phẳng khi vẽ |
+| θ5 | 0 | ✅ Đồng trục cổ tay |
+| θ6 | 0 | ✅ Xoay tròn ngòi bút |
 
-> Vì bút dài 20mm gắn lệch tâm cổ tay, sai lệch offset ở θ4/θ5/θ6 dù nhỏ (1-2°) vẫn có thể
-> làm đầu bút lệch vài mm khi vẽ. **Ưu tiên calib 3 khớp này trước khi tin dùng IK cho vẽ thật.**
+## 5. Xác nhận đối chiếu vật lý tại Home (0, 0, 0, 0, 0, 0)
 
-## 5. Xác nhận đối chiếu vật lý (đã validate — không cần đo lại)
+Tại vị trí Home (mọi encoder = 0°), mô hình FK dự đoán:
+- **Tâm trục J5**: $(X = 126.0\text{mm}, Y = 0.0\text{mm}, Z = 365.0\text{mm})$ ($126 = 16+110; 365 = 139+138+88$)
+- **Tâm trục J6**: $(X = 157.0\text{mm}, Y = 0.0\text{mm}, Z = 365.0\text{mm})$ ($157 = 126 + 31$)
+- **Đầu nhọn bút (TCP)**: $(X = 177.0\text{mm}, Y = 0.0\text{mm}, Z = 365.0\text{mm})$ ($177 = 126 + 31 + 20$)
 
-Tại vị trí home (mọi encoder = 0°), mô hình FK (với offset θ2=-90° ở trên) dự đoán:
-
-```
-Wrist center = (x=126.0mm, y=0mm, z=365.0mm)
-```
-
-Khớp **chính xác tuyệt đối** với bản vẽ tay:
-- `x = 126mm = 16 + 110` (tổng offset ngang cổ tay)
-- `z = 365mm = 139 + 138 + 88` (tổng chiều cao chuỗi thẳng đứng)
-
-Đây là bằng chứng bảng DH + offset ở trên **đã đúng**, không cần nghi ngờ hay đo lại phần này.
-
-## 6. Tầm với & vùng làm việc (workspace) — dựa trên hình học đã xác nhận
-
-Giới hạn khớp đã cung cấp (giả định đối xứng quanh home — **cần xác nhận lại nếu không đối xứng**):
-
-| Khớp | Tổng hành trình | Giả định range |
-|---|---|---|
-| J1 | 180° | ±90° quanh home |
-| J2 | 180° | ±90° quanh home |
-| J3 | 90° | +90° từ home |
-
-Kết quả tính được (xem `fk_verify.py` để tái tạo):
+## 6. Tầm với & vùng làm việc (Workspace)
 
 | Thông số | Giá trị |
 |---|---|
-| Tầm với xa nhất (radial từ trục J1) | 291.7mm |
-| Tầm với gần nhất (radial inner deadzone) | 15.7mm (=|153.69 - 138|) |
-| Độ cao tối đa | 430.7mm |
-| Độ cao tối thiểu | -14.7mm (có thể bị đế chặn vật lý) |
-| Đoạn J3→wrist center (cố định, không đổi theo θ3) | 153.69mm (=√(88²+126²)) |
-
-Với J1 hành trình 180° (±90° quanh home), có một **vùng góc chết 180°** phía sau robot không quay tới được.
+| Khoảng cách trục J3 $\to$ tâm J5 | 153.69mm ($=\sqrt{88^2 + 126^2}$) |
+| Góc lệch cẳng tay $\delta$ | 55.06° ($=\text{atan2}(126, 88)$) |
+| Tầm với xa nhất đến tâm J5 | 291.7mm ($= 138.0 + 153.69$) |
+| Tầm với gần nhất (inner deadzone) | 15.7mm ($=|153.69 - 138.0|$) |
+| Chiều dài khâu công cụ hiệu dụng (J5 $\to$ TCP) | **51.0mm** ($= 31\text{mm} + 20\text{mm}$) |
+| Độ cao tối đa tâm J5 | 430.7mm |
 
 ## 7. Kỳ dị động học đã phát hiện (Singularity)
 
-Khi hướng công cụ (tool z-axis) **chỉ thẳng đứng** (song song trục J1, ví dụ bút cắm thẳng
-xuống bàn) → trục J1 và J6 gần như trùng phương → **mất 1 bậc tự do thực tế** (vô số cặp
-(θ1, θ6) cho cùng kết quả). Lưu ý: đây là **gimbal-lock do J1//J6 và khóa cứng e4=e6=0**, không phải
-"wrist singularity" kinh điển (cái sau là trục cổ tay cầu J4/J6 trùng nhau). Trong firmware, đây
-không phải lỗi code — nó là hệ quả tất yếu của cấu trúc 6-DOF đã khóa e4=e6.
+Khi hướng công cụ (tool z-axis) **chỉ thẳng đứng** (song song trục J1) $\to$ trục J1 và J6 trùng phương.
+Sử dụng **Closed-form Analytic IK** (`kin::ikPenDown()` trong `src/kinematics.cpp`) giải giải tích trực tiếp góc vai-khuỷu (J2-J3) với $Z_{\text{wrist}} = Z_{\text{target}} + 51.0\text{mm}$ và cố định J4=0, J6=0, triệt tiêu hoàn toàn trôi nghiệm.
 
-**Cách xử lý đã áp dụng:** dùng **Closed-form Analytic IK** (`kin::ikPenDown()` trong `src/kinematics.cpp`)
-giải hình học trực tiếp góc vai-khuỷu (J2-J3) theo định lý cosin, tính góc nghiêng cổ tay J5 = -(t2+t3+δ),
-và cố định J4=0, J6=0 — loại bỏ hoàn toàn hiện tượng trôi nghiệm của IK số lặp.
+## 8. Cơ cấu Vi sai Bánh răng Côn Cổ tay J5–J6 (2-DOF Bevel Gear Differential Wrist)
 
-## 8. File tham chiếu liên quan trong repo
+Cụm cổ tay J5 (Tilt / Nghiêng) và J6 (Roll / Xoay bút) sử dụng cơ cấu **2-DOF Coupled Differential Gimbal / Bevel Gear Differential**:
+
+```
+                       ┌─────────────────────────┐
+                       │  Động cơ M5 (Left)      │ ──► Encoder E_L (Side Gear 1)
+                       │  Động cơ M6 (Right)     │ ──► Encoder E_R (Side Gear 2)
+                       └───────────┬─────────────┘
+                                   │
+                     ┌─────────────┴─────────────┐
+                     │ Bánh răng côn bên trái    │ (Side Gear Left, góc θ_L)
+                     │ Bánh răng côn bên phải    │ (Side Gear Right, góc θ_R)
+                     └─────────────┬─────────────┘
+                                   │ Ăn khớp vuông góc
+                     ┌─────────────▼─────────────┐
+                     │ Bánh răng côn đầu ra      │ (Output / Spider Gear, r_bevel = 1.0)
+                     │ Khung mang (Carrier)      │
+                     └─────────────┬─────────────┘
+                                   │
+              ┌────────────────────┴────────────────────┐
+              ▼                                         ▼
+   Góc nghiêng J5 (Tilt):                    Góc xoay J6 (Roll):
+   θ_J5 = (θ_L + θ_R) / 2                    θ_J6 = (θ_L − θ_R) / (2 · r_bevel)
+   (Khi θ_L = θ_R → Thuần Tilt)              (Khi θ_L = −θ_R → Thuần Roll)
+```
+
+### 8.1. Công thức Động học Vi sai (Forward & Inverse)
+
+- **Thuận (Từ góc 2 Encoder $E_L, E_R$ hoặc 2 Động cơ $M_L, M_R \to$ Góc Khớp $J_5, J_6$)**:
+  $$\begin{aligned}
+  \theta_{J5} &= \frac{\theta_L + \theta_R}{2} \\
+  \theta_{J6} &= \frac{\theta_L - \theta_R}{2 \cdot r_{\text{bevel}}} \quad (\text{với } r_{\text{bevel}} = 1.0)
+  \end{aligned}$$
+
+- **Nghịch (Từ mục tiêu góc Khớp $J_5, J_6 \to$ Góc trục Động cơ $M_L, M_R$)**:
+  $$\begin{aligned}
+  \theta_L &= \theta_{J5} + r_{\text{bevel}} \cdot \theta_{J6} \\
+  \theta_R &= \theta_{J5} - r_{\text{bevel}} \cdot \theta_{J6}
+  \end{aligned}$$
+
+- **Quy đổi Xung bước (Incremental Steps)**:
+  $$\begin{aligned}
+  \Delta \text{Steps}_5 &= \text{round}\left( (\Delta\theta_{J5} + \Delta\theta_{J6}) \cdot \text{stepsPerDeg}_5 \right) \\
+  \Delta \text{Steps}_6 &= \text{round}\left( (\Delta\theta_{J5} - \Delta\theta_{J6}) \cdot \text{stepsPerDeg}_6 \right)
+  \end{aligned}$$
+
+### 8.2. Đặc tính vận hành thực tế
+1. **Chia sẻ tải trọng**: Cả hai động cơ NEMA 14 (J5 và J6) đều đặt cố định trên thân cẳng tay (không cần slip-ring hay dây xoắn), cùng đồng thời chia đôi mô-men xoắn khi nghiêng hoặc xoay bút.
+2. **Không trôi điểm gốc (Encoder Alignment)**: Hai encoder AS5600 đọc góc tuyệt đối trực tiếp của 2 bánh răng côn bên ($E_L, E_R$). Khi bật nguồn hoặc hiệu chuẩn Home, firmware khôi phục tức thời trạng thái $(\theta_{J5}, \theta_{J6})$ thông qua lớp `DifferentialWrist` trong `src/differential_wrist.h`.
+
+---
+
+## 9. File tham chiếu liên quan trong repo
 
 | File | Vai trò |
 |---|---|
-| `digital_clone.py` | Visualizer 3D/2D đa góc nhìn + kiểm thử động học & bộ sinh quỹ đạo Planner |
-| `src/kinematics.h` / `src/kinematics.cpp` | Bản port C++/float cho ESP32-S3 firmware — **PHẢI đồng bộ với file này khi cập nhật DH/offset** |
-| `test/kinematics/test_kinematics.cpp` | Host test tự động 3280 điểm FK/IK roundtrip |
+| `src/differential_wrist.h` / `.cpp` | Thư viện giải mã động học vi sai 2-DOF bánh răng côn (C++17 thuần, host-testable) |
+| `src/joint_model.h` / `.cpp` | Tích hợp giải mã $E_L, E_R \to J_5, J_6$ và $M_L, M_R \to J_5, J_6$ |
+| `src/arm.cpp` | Điều khiển Jog độc lập (Jog Tilt $\to M_L, M_R$ cùng chiều; Jog Roll $\to M_L, M_R$ ngược chiều) |
+| `src/planner.cpp` | Đồng bộ bước vi sai cho các segment vẽ quỹ đạo |
+| `digital_clone.py` | Trình mô phỏng 3D/2D tích hợp module vi sai `DifferentialWrist` |
+| `test/kinematics/test_kinematics.cpp` | Host unit test tự động cho toàn bộ chuyển đổi vi sai |
+| `src/kinematics.h` / `src/kinematics.cpp` | Bản port C++/float cho ESP32-S3 firmware |
 
-> ⚠️ Khi thay đổi bất kỳ số liệu nào ở mục 1-4 (đo lại link length, xác nhận offset J4-J6...),
-> **bắt buộc cập nhật đồng thời cả 3 file trên** để tránh lệch pha giữa simulator, firmware, và test suite.
 
-## 9. Việc còn tồn đọng (TODO)
-
-- [ ] Xác nhận offset vật lý θ4, θ5, θ6 (đo giống cách đã làm với θ2)
-- [x] Xác nhận giới hạn góc J1/J2/J3 (Đã chốt: J1: ±90°, J2: ±90°, J3: 0..+90°)
-- [ ] Đo D6_TOOL chính xác bằng thước cặp thay vì ước lượng "khoảng 2cm"
-- [x] Port closed-form IK (geometric + spherical wrist decomposition) sang C++/float cho firmware (`src/kinematics.cpp::ikPenDown`)

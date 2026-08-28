@@ -22,9 +22,13 @@ struct FkResult {
 // DH constants (bản sao của config.h nhưng thuần C++ để test trên host)
 constexpr float D1 = 139.0f;
 constexpr float A2 = 138.0f;
+constexpr float A3 = 88.0f;
+constexpr float D4 = 126.0f;
+constexpr float D6 = 31.0f;
+constexpr float D_TOOL = 20.0f;
+constexpr float D_TOOL_EFFECTIVE = 51.0f;         // D6 + D_TOOL (31 + 20)
 constexpr float L_FORE = 153.6863f;              // sqrt(88^2+126^2)
 constexpr float DELTA_WRIST = 55.0587f;          // atan2(126, 88) deg
-constexpr float D_TOOL = 20.0f;
 
 constexpr float THETA2_OFFSET = -90.0f;
 

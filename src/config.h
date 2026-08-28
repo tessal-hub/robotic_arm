@@ -188,14 +188,14 @@ constexpr uint32_t MOTION_TASK_STACK_SIZE       = 5120;
 constexpr UBaseType_t MOTION_TASK_PRIORITY      = 3;
 constexpr BaseType_t MOTION_TASK_CORE           = 1;
 
-// ==============================================================================
-// 6. DH PARAMETERS & ROBOT GEOMETRY (docs/ARM_GEOMETRY.md — SINGLE SOURCE OF TRUTH)
-// ==============================================================================
 constexpr float DH_D1_MM                        = 139.0f; // J1 -> J2: Chiều cao đế lên vai (Base height)
 constexpr float DH_A2_MM                        = 138.0f; // J2 -> J3: Cánh tay trên (Upper arm length)
 constexpr float DH_A3_MM                        = 88.0f;  // J3 -> Điểm gập (Elbow longitudinal offset)
-constexpr float DH_D4_MM                        = 126.0f; // Điểm gập -> Cụm cổ tay (16mm + 110mm = 126mm wrist offset)
-constexpr float DH_D6_TOOL_MM                   = 20.0f;  // Bút (tool), gắn đồng trục với J6 (20mm từ tâm cổ tay)
+constexpr float DH_D4_MM                        = 126.0f; // Điểm gập -> Tâm trục nghiêng J5 (16mm + 110mm = 126mm)
+constexpr float DH_D6_MM                        = 31.0f;  // J5 -> J6: Khoảng cách dọc trục công cụ (Tool Roll offset)
+constexpr float DH_D_TOOL_MM                    = 20.0f;  // Bút (tool), gắn đồng trục với J6 (20mm từ J6)
+constexpr float DH_TOOL_EFFECTIVE_MM            = 51.0f;  // Tổng chiều dài khâu công cụ hiệu dụng (J5 -> TCP = 31 + 20)
+constexpr float DH_D6_TOOL_MM                   = DH_TOOL_EFFECTIVE_MM; // Alias tương thích ngược
 
 // Angle Offsets: theta_DH = theta_encoder + OFFSET
 constexpr float DH_THETA1_OFFSET_DEG            = 0.0f;

@@ -37,10 +37,14 @@ public:
     // Chiều quay logic (cw=true => absSteps tăng) để góc thay đổi theo deltaDeg.
     [[nodiscard]] static bool cwForDelta(uint8_t axis, float deltaDeg);
 
-    // Góc khớp hiện tại theo bước máy (độ so với home).
+    // Góc khớp động học hiện tại theo bước máy (độ so với home, đã giải mã vi sai J5/J6).
     [[nodiscard]] float angleFromSteps(uint8_t axis) const;
-    // Góc khớp theo encoder (chỉ có nghĩa sau khi đã set home).
+    // Góc khớp động học theo encoder (chỉ có nghĩa sau khi đã set home, đã giải mã vi sai J5/J6).
     [[nodiscard]] float angleFromEncoder(uint8_t axis);
+    // Góc trục động cơ / side gear trực tiếp theo bước máy (trước vi sai)
+    [[nodiscard]] float actuatorAngleFromSteps(uint8_t axis) const;
+    // Góc trục động cơ / side gear trực tiếp theo encoder (trước vi sai)
+    [[nodiscard]] float actuatorAngleFromEncoder(uint8_t axis);
     // Góc thô tuyệt đối từ encoder (raw accumulated, không cần home) — homing dùng.
     [[nodiscard]] float rawEncoder(uint8_t axis);
 

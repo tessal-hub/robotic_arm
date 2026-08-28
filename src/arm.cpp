@@ -1,4 +1,5 @@
 #include "arm.h"
+#include "differential_wrist.h"
 #include "endstop.h"
 #include "homing.h"
 #include "joint_model.h"
@@ -251,18 +252,50 @@ void ArmController::execute(const ArmCommand& cmd) {
 }
 
 void ArmController::applyJog(uint8_t axis, float deltaDeg) {
-    float delta = deltaDeg;
-    if (jm->isHomed(axis)) {
-        const float cur = jm->angleFromSteps(axis);
-        float target = cur + delta;
-        if (target > DEFAULT_AXIS_LIMIT_MAX[axis]) target = DEFAULT_AXIS_LIMIT_MAX[axis];
-        if (target < DEFAULT_AXIS_LIMIT_MIN[axis]) target = DEFAULT_AXIS_LIMIT_MIN[axis];
-        delta = target - cur; // clamp theo soft limit
+    if (axis < 4) {
+        // Khớp 1..4 dẫn động trực tiếp
+        float delta = deltaDeg;
+        if (jm->isHomed(axis)) {
+            const float cur = jm->angleFromSteps(axis);
+            float target = cur + delta;
+            if (target > DEFAULT_AXIS_LIMIT_MAX[axis]) target = DEFAULT_AXIS_LIMIT_MAX[axis];
+            if (target < DEFAULT_AXIS_LIMIT_MIN[axis]) target = DEFAULT_AXIS_LIMIT_MIN[axis];
+            delta = target - cur; // clamp theo soft limit
+        }
+        const int64_t steps = JointModel::degreesToSteps(axis, fabsf(delta));
+        if (steps <= 0) return;
+        const bool cw = JointModel::cwForDelta(axis, delta);
+        motors[axis]->run(cw, static_cast<uint32_t>(steps));
+    } else if (axis == 4) {
+        // Jog J5 (Tilt): Chuyển động thuần Tilt => Cả 2 động cơ M5 và M6 quay cùng chiều, cùng góc
+        float delta = deltaDeg;
+        if (jm->isHomed(4)) {
+            const float cur = jm->angleFromSteps(4);
+            float target = cur + delta;
+            if (target > DEFAULT_AXIS_LIMIT_MAX[4]) target = DEFAULT_AXIS_LIMIT_MAX[4];
+            if (target < DEFAULT_AXIS_LIMIT_MIN[4]) target = DEFAULT_AXIS_LIMIT_MIN[4];
+            delta = target - cur;
+        }
+        const int64_t s5 = JointModel::degreesToSteps(4, fabsf(delta));
+        const int64_t s6 = JointModel::degreesToSteps(5, fabsf(delta));
+        if (s5 > 0 && motors[4] != nullptr) motors[4]->run(JointModel::cwForDelta(4, delta), static_cast<uint32_t>(s5));
+        if (s6 > 0 && motors[5] != nullptr) motors[5]->run(JointModel::cwForDelta(5, delta), static_cast<uint32_t>(s6));
+    } else if (axis == 5) {
+        // Jog J6 (Roll): Chuyển động thuần Roll => Động cơ M5 quay +delta, M6 quay -delta (ngược chiều)
+        float delta = deltaDeg;
+        if (jm->isHomed(5)) {
+            const float cur = jm->angleFromSteps(5);
+            float target = cur + delta;
+            if (target > DEFAULT_AXIS_LIMIT_MAX[5]) target = DEFAULT_AXIS_LIMIT_MAX[5];
+            if (target < DEFAULT_AXIS_LIMIT_MIN[5]) target = DEFAULT_AXIS_LIMIT_MIN[5];
+            delta = target - cur;
+        }
+        const float effDelta = fabsf(delta) * g_diffWrist.getBevelRatio();
+        const int64_t s5 = JointModel::degreesToSteps(4, effDelta);
+        const int64_t s6 = JointModel::degreesToSteps(5, effDelta);
+        if (s5 > 0 && motors[4] != nullptr) motors[4]->run(JointModel::cwForDelta(4, +delta), static_cast<uint32_t>(s5));
+        if (s6 > 0 && motors[5] != nullptr) motors[5]->run(JointModel::cwForDelta(5, -delta), static_cast<uint32_t>(s6));
     }
-    const int64_t steps = JointModel::degreesToSteps(axis, fabsf(delta));
-    if (steps <= 0) return;
-    const bool cw = JointModel::cwForDelta(axis, delta);
-    motors[axis]->run(cw, static_cast<uint32_t>(steps));
 }
 
 String ArmController::statusJson() {

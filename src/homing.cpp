@@ -405,10 +405,25 @@ void HomingController::tickLegacy(uint32_t now, Motor& m) {
                 finishJoint(false);
                 return;
             }
-            if (es->hasPin(curAxis_, EndstopWhich::MIN) &&
+            if (es != nullptr && es->hasPin(curAxis_, EndstopWhich::MIN) &&
                 (es->isLatched(curAxis_, EndstopWhich::MIN) ||
                  es->isPressed(curAxis_, EndstopWhich::MIN))) {
                 contactMade();
+            } else if (m.isTmc()) {
+                // Trục không có endstop vật lý (ví dụ J4): kiểm tra StallGuard từ TMC2209
+                if (now - lastPollMs_ >= 10) {
+                    lastPollMs_ = now;
+                    const uint16_t sg = m.getSGResult();
+                    if (sg < STALL_SG_LEVEL) {
+                        stallCount_++;
+                        if (stallCount_ >= STALL_CONSECUTIVE_POLLS) {
+                            Serial.printf("[HOME] J%u: StallGuard detected (sg=%u)\n", curAxis_ + 1, sg);
+                            contactMade();
+                        }
+                    } else {
+                        stallCount_ = 0;
+                    }
+                }
             }
             break;
         }
@@ -419,7 +434,7 @@ void HomingController::tickLegacy(uint32_t now, Motor& m) {
                 return;
             }
             if (!m.isRunning()) {
-                if (es->hasPin(curAxis_, EndstopWhich::MIN) &&
+                if (es != nullptr && es->hasPin(curAxis_, EndstopWhich::MIN) &&
                     es->isPressed(curAxis_, EndstopWhich::MIN)) {
                     Serial.printf("[HOME] J%u: BACKOFF jammed — endstop still pressed\n", curAxis_ + 1);
                     if (jm != nullptr) jm->resyncFromEncoder(curAxis_);
@@ -432,7 +447,7 @@ void HomingController::tickLegacy(uint32_t now, Motor& m) {
         }
         case HomePhase::REAPPROACH: {
             if (now - phaseStartMs_ > HOMING_JOINT_TIMEOUT_MS) { finishJoint(false); return; }
-            if (es->hasPin(curAxis_, EndstopWhich::MIN) &&
+            if (es != nullptr && es->hasPin(curAxis_, EndstopWhich::MIN) &&
                 (es->isLatched(curAxis_, EndstopWhich::MIN) ||
                  es->isPressed(curAxis_, EndstopWhich::MIN))) {
                 m.stop();
@@ -446,6 +461,25 @@ void HomingController::tickLegacy(uint32_t now, Motor& m) {
                     if (!gotoNearHome()) enterCentering();
                 } else {
                     finishJoint(true); // J4: home tại chỗ
+                }
+            } else if (m.isTmc()) {
+                if (now - lastPollMs_ >= 10) {
+                    lastPollMs_ = now;
+                    const uint16_t sg = m.getSGResult();
+                    if (sg < STALL_SG_LEVEL) {
+                        stallCount_++;
+                        if (stallCount_ >= 2) {
+                            m.stop();
+                            if (jm != nullptr && jm->encOK(curAxis_)) {
+                                angleEncAtContact_ = jm->rawEncoder(curAxis_);
+                            }
+                            Serial.printf("[HOME] J%u: REAPPROACH STALL (sg=%u, enc=%.1f deg)\n",
+                                          curAxis_ + 1, sg, angleEncAtContact_);
+                            finishJoint(true);
+                        }
+                    } else {
+                        stallCount_ = 0;
+                    }
                 }
             }
             break;

@@ -47,7 +47,9 @@ D1 = 139.0          # Base height: J1 -> J2 (mm)
 A2 = 138.0          # Upper arm length: J2 -> J3 (mm)
 A3 = 88.0           # Forearm longitudinal offset: J3 -> Wrist X (mm)
 D4 = 126.0          # Forearm normal offset: J3 -> Wrist Z (mm) [d4=126 in Craig MDH]
-D_TOOL = 20.0       # Pen tool length along tool Z (mm)
+D6 = 31.0           # J5 -> J6 offset along tool axis (mm)
+D_TOOL = 20.0       # Pen tool length from J6 along tool Z (mm)
+D_TOOL_EFFECTIVE = 51.0  # Total effective tool offset (D6 + D_TOOL = 31 + 20 mm)
 
 # Derived forearm dimensions (docs/ARM_GEOMETRY.md)
 L_FORE = math.sqrt(A3**2 + D4**2)              # 153.6863 mm
@@ -65,7 +67,7 @@ DH_TABLE = [
     {"a": A2,    "alpha": 0.0,    "d": 0.0},     # Frame 3 (J3 Elbow Pitch)
     {"a": A3,    "alpha": -90.0,  "d": D4},      # Frame 4 (J4 Wrist Pan)
     {"a": 0.0,   "alpha": 90.0,   "d": 0.0},     # Frame 5 (J5 Wrist Tilt)
-    {"a": 0.0,   "alpha": -90.0,  "d": 0.0},     # Frame 6 (J6 Tool Roll)
+    {"a": 0.0,   "alpha": -90.0,  "d": D6},      # Frame 6 (J6 Tool Roll, d6=31mm)
 ]
 
 # Theta offsets: theta_DH = enc_deg + TH_OFFSETS (src/config.h lines 200-206)
@@ -112,7 +114,49 @@ JOINT_NAMES = [
 
 
 # ==============================================================================
-# 2. TRANSFORM & FORWARD KINEMATICS ENGINE
+# 2. BEVEL GEAR DIFFERENTIAL WRIST ENGINE (Coupled J5 Tilt & J6 Roll)
+# ==============================================================================
+class DifferentialWrist:
+    """
+    2-DOF Coupled Bevel Gear Differential Wrist Kinematics.
+    - Side Gear Left  (M_L / E_L): Driven by Motor 5 (Axis 4)
+    - Side Gear Right (M_R / E_R): Driven by Motor 6 (Axis 5)
+    - Output Pinion / Spider Gear: Mounted on Carrier
+    
+    Forward Differential Kinematics:
+        J5_Tilt = (theta_L + theta_R) / 2
+        J6_Roll = (theta_L - theta_R) / (2 * r_bevel)
+        
+    Inverse Differential Kinematics:
+        theta_L = J5_Tilt + (r_bevel * J6_Roll)
+        theta_R = J5_Tilt - (r_bevel * J6_Roll)
+    """
+    def __init__(self, bevel_ratio=1.0):
+        self.bevel_ratio = float(bevel_ratio)
+
+    def forward(self, left_deg, right_deg):
+        """Converts physical side gear / encoder angles (L, R) to decoupled (Tilt, Roll)."""
+        tilt_deg = (float(left_deg) + float(right_deg)) * 0.5
+        roll_deg = (float(left_deg) - float(right_deg)) / (2.0 * self.bevel_ratio)
+        return tilt_deg, roll_deg
+
+    def inverse(self, tilt_deg, roll_deg):
+        """Converts decoupled joint angles (Tilt, Roll) to physical motor angles (L, R)."""
+        left_deg = float(tilt_deg) + (self.bevel_ratio * float(roll_deg))
+        right_deg = float(tilt_deg) - (self.bevel_ratio * float(roll_deg))
+        return left_deg, right_deg
+
+    def compute_motor_steps(self, delta_tilt_deg, delta_roll_deg, spd5, spd6):
+        """Computes incremental motor steps for M5 and M6 from joint deltas."""
+        d_left, d_right = self.inverse(delta_tilt_deg, delta_roll_deg)
+        return int(round(d_left * spd5)), int(round(d_right * spd6))
+
+
+diff_wrist = DifferentialWrist(bevel_ratio=1.0)
+
+
+# ==============================================================================
+# 3. TRANSFORM & FORWARD KINEMATICS ENGINE
 # ==============================================================================
 def deg2rad(d):
     return d * (math.pi / 180.0)
@@ -192,7 +236,8 @@ class KinematicState:
         # 3. Forearm physical L-bend structure
         T3 = self.frames[3]
         p_fore_bend = (T3 @ np.array([A3, 0.0, 0.0, 1.0]))[:3]
-        p_wrist = self.frames[4][:3, 3]     # Wrist Center (Frame 4 origin)
+        p_wrist = self.frames[4][:3, 3]     # Wrist Center (Frame 4 origin / J5 Tilt pivot)
+        p_j6 = self.frames[6][:3, 3]        # Frame 6 origin (J6 Tool Roll)
 
         # 4. Tool & TCP
         p_tcp = self.T_tool[:3, 3]
@@ -204,6 +249,7 @@ class KinematicState:
             "elbow": p_elbow,
             "fore_bend": p_fore_bend,
             "wrist": p_wrist,
+            "j6": p_j6,
             "tcp": p_tcp,
             "tool_z": tool_z_vec
         }
@@ -233,7 +279,7 @@ def ik_pen_down(target_x, target_y, target_z):
     """
     cx = float(target_x)
     cy = float(target_y)
-    cz = float(target_z) + D_TOOL
+    cz = float(target_z) + D_TOOL_EFFECTIVE  # 51.0mm (31mm D6 + 20mm D_TOOL)
 
     t1 = math.atan2(cy, cx)
     r = math.hypot(cx, cy)
@@ -1216,7 +1262,7 @@ def run_automated_audit():
     tcp, wc, _ = forward_kinematics([0, 0, 0, 0, 0, 0])
     print("\n1. FK Verification at HOME (0, 0, 0, 0, 0, 0):")
     print(f"   Wrist Center: ({wc[0]:.2f}, {wc[1]:.2f}, {wc[2]:.2f}) mm  [Expected: (126.0, 0.0, 365.0)]")
-    print(f"   TCP Pen Tip:  ({tcp[0]:.2f}, {tcp[1]:.2f}, {tcp[2]:.2f}) mm  [Expected: (146.0, 0.0, 365.0)]")
+    print(f"   TCP Pen Tip:  ({tcp[0]:.2f}, {tcp[1]:.2f}, {tcp[2]:.2f}) mm  [Expected: (177.0, 0.0, 365.0)]")
 
     print("\n2. Closed-form IK Roundtrip Sweep:")
     tested = 0
@@ -1252,8 +1298,23 @@ def run_automated_audit():
     star_ok, _ = PlannerSimulator.evaluate_trajectory(star_wps)
     print(f"   WorkPlane Star:     {'PASSED' if star_ok else 'FAILED'} ({len(star_wps)} waypoints)")
 
+    print("\n4. 2-DOF Bevel Gear Differential Wrist Kinematics Audit:")
+    # Test 1: Pure Tilt
+    t1_tilt, t1_roll = diff_wrist.forward(30.0, 30.0)
+    print(f"   Pure Tilt Test (ML=30°, MR=30°):  Tilt={t1_tilt:.2f}°, Roll={t1_roll:.2f}°  {'PASSED' if abs(t1_tilt-30)<1e-4 and abs(t1_roll)<1e-4 else 'FAILED'}")
+
+    # Test 2: Pure Roll
+    t2_tilt, t2_roll = diff_wrist.forward(45.0, -45.0)
+    print(f"   Pure Roll Test (ML=45°, MR=-45°): Tilt={t2_tilt:.2f}°, Roll={t2_roll:.2f}°  {'PASSED' if abs(t2_tilt)<1e-4 and abs(t2_roll-45)<1e-4 else 'FAILED'}")
+
+    # Test 3: Inverse & Roundtrip
+    ml, mr = diff_wrist.inverse(15.5, -22.3)
+    rec_tilt, rec_roll = diff_wrist.forward(ml, mr)
+    diff_err = math.hypot(rec_tilt - 15.5, rec_roll - (-22.3))
+    print(f"   Differential Roundtrip Sweep:     Max Error={diff_err:.6f}°  {'PASSED' if diff_err<1e-5 else 'FAILED'}")
+
     print("\n" + "=" * 75)
-    print("AUDIT COMPLETE: All kinematics models, WorkPlane & trajectories verified.")
+    print("AUDIT COMPLETE: All kinematics models, Differential Wrist & WorkPlane verified.")
     print("=" * 75)
 
 

@@ -352,6 +352,17 @@ tr:hover td{background:#243247}
     </details>
 
     <details class="mod">
+      <summary>differential_wrist.* — động học vi sai bánh răng côn 2-DOF (J5 & J6) <span class="file">src/differential_wrist.h/.cpp</span></summary>
+      <div class="body">
+        Giải mã động học vi sai 2-DOF Coupled Bevel Gear Differential Wrist:<br>
+        <span class="tag">forward</span> (Góc 2 Encoder $E_L, E_R \to$ Góc Khớp $J_5, J_6$): <code>θ_J5 = (θ_L + θ_R)/2</code> (Tilt), <code>θ_J6 = (θ_L − θ_R)/(2 × r_bevel)</code> (Roll).<br>
+        <span class="tag">inverse</span> (Mục tiêu Joint $J_5, J_6 \to$ Góc Động cơ $M_L, M_R$): <code>θ_L = θ_J5 + r_bevel × θ_J6</code>, <code>θ_R = θ_J5 − r_bevel × θ_J6</code>.<br>
+        <span class="tag">jogging</span> Jog J5 (Tilt) $\to$ cả 2 motor quay cùng chiều; Jog J6 (Roll) $\to$ 2 motor quay ngược chiều.<br>
+        <span class="tag">advantages</span> Hai động cơ cố định trên cẳng tay (không cần slip-ring hay xoắn dây), chia đôi mô-men xoắn, 2 encoder AS5600 đọc trực tiếp bánh bên.
+      </div>
+    </details>
+
+    <details class="mod">
       <summary>homing.* — FSM homing tuần tự J1→J4 <span class="file">src/homing.h/.cpp</span></summary>
       <div class="body">
         Xem sơ đồ FSM ở tab "FSM & Luồng". Endstop vật lý là NGUỒN SỰ THẬT DUY NHẤT
@@ -771,7 +782,7 @@ tr:hover td{background:#243247}
 </div>
 
 <div class="footer">
-   Generated 2026-08-28 (Digital Clone Pro Upgrade: 3-Point WorkPlane Calib, ESP32-S3 WiFi REST Bridge, Velocity/Step Profiler, Multi-Shape Generator, Click-to-Move Viewports) · File này là <b>bản đồ hệ thống sống</b> — AI agent PHẢI cập nhật nó cùng
+   Generated 2026-08-28 (Codebase Audit & Parallel Fixes: Motor zero-step guard, ISR timer safety, J4 StallGuard homing, WorkPlane coordinate sync, Web JS kinematics sync, 2-DOF Differential Wrist) · File này là <b>bản đồ hệ thống sống</b> — AI agent PHẢI cập nhật nó cùng
   docs/IMPLEMENTATION_LOG.md sau mỗi thay đổi (quy tắc trong AGENTS.md)
 </div>
 

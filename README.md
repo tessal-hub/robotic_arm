@@ -138,13 +138,15 @@ $$^{i-1}T_i = R_x(\alpha_{i-1}) \cdot T_x(a_{i-1}) \cdot R_z(\theta_i) \cdot T_z
 | **3** | J3 (Elbow) | **$138\,\text{mm}$** | $0^\circ$ | $0\,\text{mm}$ | $0^\circ$ | $[0^\circ, +90^\circ]$ |
 | **4** | J4 (Wrist Pan) | **$88\,\text{mm}$** | $-90^\circ$ | **$126\,\text{mm}$** | $0^\circ$ | $[-180^\circ, +180^\circ]$ |
 | **5** | J5 (Wrist Tilt) | $0\,\text{mm}$ | $+90^\circ$ | $0\,\text{mm}$ | $0^\circ$ | $[-120^\circ, +120^\circ]$ |
-| **6** | J6 (Tool Roll) | $0\,\text{mm}$ | $-90^\circ$ | $0\,\text{mm}$ | $0^\circ$ | $[-360^\circ, +360^\circ]$ |
+| **6** | J6 (Tool Roll) | $0\,\text{mm}$ | $-90^\circ$ | **$31\,\text{mm}$** | $0^\circ$ | $[-360^\circ, +360^\circ]$ |
 | **Tool**| Drawing Pen | $0\,\text{mm}$ | $0^\circ$ | **$20\,\text{mm}$** | $0^\circ$ | Fixed Tool Axis |
 
 - **Home Reference Pose $(0^\circ, 0^\circ, 0^\circ, 0^\circ, 0^\circ, 0^\circ)$**:
-  - Wrist Center: $(X = 126.0\,\text{mm}, Y = 0.0\,\text{mm}, Z = 365.0\,\text{mm})$
-  - Tool Pen Tip: $(X = 146.0\,\text{mm}, Y = 0.0\,\text{mm}, Z = 365.0\,\text{mm})$
-- **Max Planar Reach**: $R_{\text{max}} = A_2 + \sqrt{A_3^2 + D_4^2} = 138.0 + 153.69 = 291.69\,\text{mm}$
+  - Wrist Center (J5): $(X = 126.0\,\text{mm}, Y = 0.0\,\text{mm}, Z = 365.0\,\text{mm})$
+  - J6 Origin: $(X = 157.0\,\text{mm}, Y = 0.0\,\text{mm}, Z = 365.0\,\text{mm})$
+  - Tool Pen Tip: $(X = 177.0\,\text{mm}, Y = 0.0\,\text{mm}, Z = 365.0\,\text{mm})$
+- **Effective Tool Length (J5 $\to$ TCP)**: $D_{\text{tool\_eff}} = 31\,\text{mm} + 20\,\text{mm} = \mathbf{51\,\text{mm}}$
+- **Max Planar Reach (to J5)**: $R_{\text{max}} = A_2 + \sqrt{A_3^2 + D_4^2} = 138.0 + 153.69 = 291.69\,\text{mm}$
 - **Inner Deadzone**: $R_{\text{min}} = |A_2 - \sqrt{A_3^2 + D_4^2}| = |138.0 - 153.69| = 15.69\,\text{mm}$
 
 ---

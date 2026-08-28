@@ -295,6 +295,10 @@ void Motor::setDirection(bool cw) {
 }
 
 void Motor::run(bool cw, uint32_t steps) {
+    if (steps == 0) {
+        stop();
+        return;
+    }
     if (stepTimer != nullptr) esp_timer_stop(stepTimer);
     running.store(false, std::memory_order_relaxed);
 
@@ -361,7 +365,6 @@ void IRAM_ATTR Motor::stopFromISR() {
     targetSteps = 0;
     if (isHighPin) GPIO.out1_w1tc.val = stepPinMaskHigh;
     else GPIO.out_w1tc = stepPinMaskLow;
-    if (stepTimer != nullptr) esp_timer_stop(stepTimer);
 }
 
 void Motor::enable(bool en) {

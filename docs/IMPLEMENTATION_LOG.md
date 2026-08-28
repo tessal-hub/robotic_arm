@@ -930,6 +930,99 @@ hiện tại trừ khi thí nghiệm trên buộc phải đổi mô hình.
 ### Build gate
 - Docs update — bảo toàn tính nhất quán và liên kết với toàn bộ codebase.
 
+---
+
+## 2026-08-28 — Cập nhật Cơ học & Động học: Khoảng cách J5 $\to$ J6 (31mm) & Chiều dài Khâu Công cụ Hiệu dụng (51mm)
+
+### Việc đã làm
+- What: Cập nhật đồng bộ thông số khoảng cách cơ khí mới $31\,\text{mm}$ giữa tâm trục nghiêng **J5** (Wrist Tilt) và tâm trục xoay **J6** (Tool Roll) trên toàn bộ hệ thống:
+  1. **Tài liệu gốc [`docs/ARM_GEOMETRY.md`](file:///E:/00.Project/04.robot-arm/robotic_arm/docs/ARM_GEOMETRY.md)**:
+     - Thêm khoảng cách $d_6 = 31\,\text{mm}$ vào Bảng tham số Craig Modified DH.
+     - Xác lập chiều dài khâu công cụ hiệu dụng (từ tâm J5 xuống ngòi bút TCP): $D_{\text{tool\_eff}} = 31\,\text{mm} + 20\,\text{mm} = \mathbf{51\,\text{mm}}$.
+     - Cập nhật tọa độ tham chiếu Home $(0,0,0,0,0,0)$: J5 = $(126.0, 0.0, 365.0)\,\text{mm}$, J6 = $(157.0, 0.0, 365.0)\,\text{mm}$, Pen TCP = $(177.0, 0.0, 365.0)\,\text{mm}$.
+  2. **Cấu hình phần cứng [`src/config.h`](file:///E:/00.Project/04.robot-arm/robotic_arm/src/config.h)**:
+     - Định nghĩa `DH_D6_MM = 31.0f`, `DH_D_TOOL_MM = 20.0f`, `DH_TOOL_EFFECTIVE_MM = 51.0f`.
+  3. **Module Động học Firmware [`src/kinematics.h`](file:///E:/00.Project/04.robot-arm/robotic_arm/src/kinematics.h) & [`src/kinematics.cpp`](file:///E:/00.Project/04.robot-arm/robotic_arm/src/kinematics.cpp)**:
+     - Bảng Craig MDH `DH[5].d = 31.0f` (Frame 6).
+     - Bộ giải IK Pen-Down `ikPenDown()`: Bù cao độ tâm xoay J5 theo công thức $cz = \text{target}.z + D_{\text{TOOL\_EFFECTIVE}}$ ($51.0\,\text{mm}$).
+  4. **Host Unit Test [`test/kinematics/test_kinematics.cpp`](file:///E:/00.Project/04.robot-arm/robotic_arm/test/kinematics/test_kinematics.cpp)**:
+     - Cập nhật kiểm tra tọa độ Home: TCP $X=177.0\,\text{mm}$.
+     - Kiểm thử FK/IK roundtrip 2230 điểm đạt $100\%$ ($0$ lỗi).
+  5. **Mô phỏng 3D Digital Clone [`digital_clone.py`](file:///E:/00.Project/04.robot-arm/robotic_arm/digital_clone.py)**:
+     - Cập nhật `D6 = 31.0`, `D_TOOL_EFFECTIVE = 51.0`, `DH_TABLE` Frame 6 $d=31.0$.
+     - Thêm landmark `p_j6` và kiểm tra tự động Home TCP $177.0\,\text{mm}$.
+  6. **Tài liệu hệ thống [`README.md`](file:///E:/00.Project/04.robot-arm/robotic_arm/README.md) & [`docs/SYSTEM_OVERVIEW.html`](file:///E:/00.Project/04.robot-arm/robotic_arm/docs/SYSTEM_OVERVIEW.html)**:
+     - Đồng bộ bảng DH và thông số Home pose.
+- Why: Người dùng đo đạc vật lý thực tế và xác nhận có khoảng cách $31\,\text{mm}$ giữa trục J5 và J6.
+- How: Thực hiện nghiêm ngặt theo quy tắc bảo toàn tính bất biến trong `AGENTS.md`.
+
+### Build gate
+- `g++ kin_test.exe` $\to$ **ALL KINEMATICS TESTS PASSED** (2230/2230 roundtrip OK).
+- `py -3 digital_clone.py --test` $\to$ **ALL PASSED** (FK exact match, 2161 reachable points solved, Max error: $0.00000\,\text{mm}$).
+- `pio run` $\to$ **SUCCESS** (RAM: 17.8% 58,356 B, Flash: 26.7% 891,829 B, 0 errors, 0 warnings).
+
+---
+
+## 2026-08-28 — Tích hợp Module Động học Cổ tay Vi sai Bánh răng Côn 2-DOF (Bevel Gear Differential Wrist J5 & J6)
+
+### Việc đã làm
+- What: Thiết kế và tích hợp toàn diện cơ cấu vi sai bánh răng côn 2 bậc tự do (2-DOF Coupled Differential Gimbal / Bevel Gear Differential) cho cụm cổ tay J5 (Tilt) và J6 (Roll):
+  1. **Thư viện C++ Thuần [`src/differential_wrist.h`](file:///E:/00.Project/04.robot-arm/robotic_arm/src/differential_wrist.h) & [`src/differential_wrist.cpp`](file:///E:/00.Project/04.robot-arm/robotic_arm/src/differential_wrist.cpp)**:
+     - `forward(leftDeg, rightDeg) -> JointState`: Tính toán góc khớp giải mã $J_5 = (\theta_L + \theta_R) / 2$ (Tilt) và $J_6 = (\theta_L - \theta_R) / (2 \cdot r_{\text{bevel}})$ (Roll).
+     - `inverse(tiltDeg, rollDeg) -> ActuatorState`: Tính toán góc trục động cơ $\theta_L = J_5 + r_{\text{bevel}} \cdot J_6$ và $\theta_R = J_5 - r_{\text{bevel}} \cdot J_6$.
+     - `computeIncrementalSteps()`: Quy đổi vi sai góc lệch $(\Delta J_5, \Delta J_6) \to (\Delta M_5, \Delta M_6)$ thành xung bước stepper.
+  2. **Tích hợp Mô hình Khớp [`src/joint_model.h`](file:///E:/00.Project/04.robot-arm/robotic_arm/src/joint_model.h) & [`src/joint_model.cpp`](file:///E:/00.Project/04.robot-arm/robotic_arm/src/joint_model.cpp)**:
+     - Tách biệt rõ ràng góc trục động cơ/side gear (`actuatorAngleFromSteps`, `actuatorAngleFromEncoder`) và góc khớp động học thực tế (`angleFromSteps`, `angleFromEncoder`).
+     - Tự động giải mã vi sai 2 encoder AS5600 $E_L, E_R$ thành góc nghiêng Tilt $J_5$ và góc xoay Roll $J_6$.
+  3. **Bộ Arbiter Điều khiển Jog [`src/arm.cpp`](file:///E:/00.Project/04.robot-arm/robotic_arm/src/arm.cpp)**:
+     - Jog $J_5$ (Tilt): Cả 2 động cơ $M_5, M_6$ quay cùng chiều, cùng góc $\to$ Chuyển động thuần Tilt.
+     - Jog $J_6$ (Roll): Động cơ $M_5$ quay $+\Delta$, $M_6$ quay $-\Delta$ (ngược chiều) $\to$ Chuyển động thuần Roll.
+  4. **Bộ Phân tích Quỹ đạo [`src/planner.cpp`](file:///E:/00.Project/04.robot-arm/robotic_arm/src/planner.cpp)**:
+     - Quy đổi nghiệm góc khớp từ bộ giải IK $(J_5, J_6) \to (M_5, M_6)$ trong `Planner::startMoveTo`.
+  5. **Mô phỏng & Kiểm thử Đồ họa [`digital_clone.py`](file:///E:/00.Project/04.robot-arm/robotic_arm/digital_clone.py)**:
+     - Bổ sung lớp `DifferentialWrist` trong Python.
+     - Kiểm toán tự động chuyển đổi vi sai: Pure Tilt (30°, 30° $\to$ 30°, 0°), Pure Roll (45°, -45° $\to$ 0°, 45°), Roundtrip error $< 10^{-6\circ}$.
+  6. **Unit Test Host [`test/kinematics/test_kinematics.cpp`](file:///E:/00.Project/04.robot-arm/robotic_arm/test/kinematics/test_kinematics.cpp)**:
+     - Bổ sung hàm `testDifferentialWrist()` kiểm thử quét toàn bộ không gian vi sai.
+  7. **Tài liệu Kỹ thuật [`docs/ARM_GEOMETRY.md`](file:///E:/00.Project/04.robot-arm/robotic_arm/docs/ARM_GEOMETRY.md) & [`docs/SYSTEM_OVERVIEW.html`](file:///E:/00.Project/04.robot-arm/robotic_arm/docs/SYSTEM_OVERVIEW.html)**:
+     - Vẽ sơ đồ cơ cấu vi sai, công thức toán học, nguyên lý 2 encoder bên và ưu điểm cơ khí.
+- Why: Người dùng xác nhận cụm cổ tay J5-J6 sử dụng cơ cấu vi sai bánh răng côn (Bevel Gear Differential / Coupled Differential Gimbal) và yêu cầu cập nhật toàn diện codebase.
+- How: Tuân thủ cấu trúc phân tầng: Tầng Động học Craig MDH giữ nguyên Joint Space $(J_1 \dots J_6)$, tầng `DifferentialWrist` giải mã trung gian giữa Joint Space $\leftrightarrow$ Actuator / Encoder Space.
+
+### Build gate
+- `g++ kin_test.exe` $\to$ **ALL KINEMATICS & DIFFERENTIAL WRIST TESTS PASSED**.
+- `py -3 digital_clone.py --test` $\to$ **ALL PASSED** (Pure Tilt, Pure Roll, Differential Roundtrip Sweep PASSED).
+- `pio run` $\to$ **SUCCESS** (RAM: 17.8% 58,356 B, Flash: 26.7% 892,609 B, 0 errors, 0 warnings).
+
+---
+
+## 2026-08-28 — Kiểm toán Toàn diện Codebase qua Đa Agent Song song & Khắc phục Lỗi Tiềm ẩn
+
+### Việc đã làm
+- What: Điều phối 3 AI Subagent song song độc lập rà soát 3 Domain lớn trong toàn bộ Codebase và khắc phục triệt để các lỗi phát hiện:
+  1. **Domain 1 (Firmware Core & Motion Pipeline)**:
+     - *Lỗi Vòng lặp Vô hạn khi bước = 0*: Trong [`src/motor.cpp`](file:///E:/00.Project/04.robot-arm/robotic_arm/src/motor.cpp) hàm `Motor::run(cw, 0)`, nếu được gọi với 0 bước, `stepsRemaining` bằng 0 nhưng timer không kiểm tra nhánh dừng khiến timer re-arm liên tục và `busy()` treo vô hạn. Đã thêm guard `if (steps == 0) { stop(); return; }`.
+     - *An toàn Ngắt Hardware ISR*: Xoá `esp_timer_stop(stepTimer)` khỏi `Motor::stopFromISR()` vì hàm này dùng non-ISR spinlock không an toàn trong ngắt GPIO. Cờ `running.store(false)` và lệnh hạ chân STEP đã đảm bảo timer callback thoát an toàn.
+     - *Homing J4 không có Endstop Vật lý*: Khớp J4 (TMC2209 không gắn công tắc hành trình) trong `tickLegacy()` của [`src/homing.cpp`](file:///E:/00.Project/04.robot-arm/robotic_arm/src/homing.cpp) trước đây chỉ kiểm tra `hasPin(3, MIN)` dẫn đến luôn bị timeout 30s. Đã bổ sung logic thăm dò `StallGuard` (`m.getSGResult() < STALL_SG_LEVEL`) và kiểm tra `m.isTmc()`.
+     - *Jog Vi sai J6 Roll*: Trong [`src/arm.cpp`](file:///E:/00.Project/04.robot-arm/robotic_arm/src/arm.cpp), nhân thêm hệ số `g_diffWrist.getBevelRatio()` khi tính xung bước.
+  2. **Domain 2 (Sensors, Bus & Hardware Peripherals)**:
+     - Kiểm toán chân GPIO ESP32-S3: Toàn bộ strapping pins (GPIO 0, 3, 45, 46), Octal Flash (GPIO 26–32), USB OTG (GPIO 19, 20) được bảo vệ an toàn.
+     - Bus I2C/AS5600: Quét 200 Hz, lọc EMA chống wrap 360°, tính năng khôi phục bus I2C tự động hoạt động chuẩn xác.
+     - NVS: Key length $\le 15$ ký tự, guard bảo vệ Flash Write Isolation chống ghi Flash khi robot đang chuyển động (HTTP 409).
+  3. **Domain 3 (Kinematics, 3-Point WorkPlane & Web UI)**:
+     - *Lỗi Sai lệch Hệ tọa độ trong Planner*: Trong [`src/planner.cpp`](file:///E:/00.Project/04.robot-arm/robotic_arm/src/planner.cpp) hàm `Planner::startMoveTo`, tính `segLenMm` dùng nhầm $x, y, z$ (WorkPlane space) trừ đi `fkNow.tcp` (Robot Base space) khi WorkPlane bật. Đã sửa lại dùng $rx, ry, rz$.
+     - *Đồng bộ Tham số Động học trong Web SPA*: Trong [`src/web_server.cpp`](file:///E:/00.Project/04.robot-arm/robotic_arm/src/web_server.cpp), cập nhật JavaScript client-side Craig MDH $D_6 = 31.0\,\text{mm}$, $D_{\text{eff}} = 51.0\,\text{mm}$ và sửa hiển thị tọa độ Home TCP thành $(177, 0, 365)\,\text{mm}$.
+- Why: Thực hiện kiểm toán toàn diện hệ thống để loại bỏ xung đột, lỗi tiềm ẩn và đồng bộ 100% giữa firmware, simulator và web client.
+- How: Tiếp cận song song đa tác nhân, xác thực qua bộ 3 cổng kiểm thử tự động (Host C++ unit test, Python Digital Clone audit suite, PlatformIO firmware compilation).
+
+### Build gate
+- `g++ kin_test.exe` $\to$ **ALL KINEMATICS & DIFFERENTIAL WRIST TESTS PASSED** (2230/2230 points OK).
+- `py -3 digital_clone.py --test` $\to$ **ALL PASSED** (Pure Tilt, Pure Roll, Differential Sweep, WorkPlane Star/Line).
+- `pio run` $\to$ **SUCCESS** (RAM: 17.8% 58,356 B, Flash: 26.7% 893,069 B, 0 errors, 0 warnings).
+
+
+
+
 
 
 
