@@ -63,6 +63,8 @@ public:
     void tick();
 
     [[nodiscard]] uint32_t segmentsDone() const noexcept { return segDone_; }
+    void setWorkPlane(class WorkPlane* wp) noexcept { workPlane = wp; }
+    [[nodiscard]] class WorkPlane* getWorkPlane() const noexcept { return workPlane; }
 
 private:
     bool startMoveTo(float x, float y, float z, float feedMmS); // 1 segment tới đích
@@ -71,6 +73,7 @@ private:
 
     Motor* motors[NUM_MOTORS]{};
     JointModel* jm{nullptr};
+    class WorkPlane* workPlane{nullptr};
 
     Job job_{};
     bool hasJob_{false};

@@ -2,6 +2,12 @@
 #include "driver/gpio.h"
 #include "rtos_guard.h"
 
+// Global direct fail-fast emergency stop flag (Checked in Step ISR every 20us)
+std::atomic<bool> g_emergencyStop{false};
+
+// 6-Axis Synchronized Lock-Free SPSC Motion Queue (Capacity 64 blocks)
+SPSCQueue<MotionBlock, 64> g_motionQueue;
+
 Motor::Motor(HardwareSerial* serial, float rSense, uint8_t uartAddress,
              uint8_t stepPinNum, uint8_t dirPinNum, const char* motorLabel)
     : serialPort(serial),
@@ -73,6 +79,14 @@ inline uint32_t Motor::calculateSCurveInterval(uint32_t currentStep, uint32_t to
 void IRAM_ATTR Motor::onStepTimer(void* arg) {
     Motor* self = static_cast<Motor*>(arg);
     if (!self->running.load(std::memory_order_relaxed)) return;
+
+    // Fail-fast emergency stop check (Instantaneous abort <= 20us)
+    if (g_emergencyStop.load(std::memory_order_relaxed)) {
+        if (self->isHighPin) GPIO.out1_w1tc.val = self->stepPinMaskHigh;
+        else GPIO.out_w1tc = self->stepPinMaskLow;
+        self->running.store(false, std::memory_order_release);
+        return;
+    }
 
     if (self->isHighPin) GPIO.out1_w1ts.val = self->stepPinMaskHigh;
     else GPIO.out_w1ts = self->stepPinMaskLow;

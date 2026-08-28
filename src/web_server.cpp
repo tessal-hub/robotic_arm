@@ -5,13 +5,14 @@
 #include "joint_model.h"
 #include "nvs_store.h"
 #include "wifi_manager.h"
+#include "work_plane.h"
 
 const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>6-Axis Robotic Arm Controller &amp; 3D Digital Clone</title>
 <style>
 :root{
@@ -38,7 +39,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   --color-text-primary: #f8fafc;
   --color-text-secondary: #cbd5e1;
   --color-text-muted: #94a3b8;
-  --color-text-dim: #64748b;
+  --color-text-dim: #94a3b8;
   --color-focus-ring: #38bdf8;
   --color-estop-glow: rgba(220,38,38,0.5);
   --color-estop-glow-strong: rgba(220,38,38,0.9);
@@ -59,7 +60,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   --radius-sm: 8px;
   --radius-md: 10px;
   --radius-lg: 14px;
-  --radius-pill: 11px;
+  --radius-pill: 9999px;
   --radius-badge: 12px;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -77,7 +78,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.23, 1, 0.32, 1);
   --shadow-card: 0 8px 24px var(--color-shadow-card);
-  --shadow-toast: 0 6px 20px var(--shadow-toast);
+  --shadow-toast: 0 6px 20px var(--color-shadow-toast);
   --shadow-estop: 0 6px 24px var(--color-estop-glow);
   --shadow-estop-strong: 0 6px 36px var(--color-estop-glow-strong);
   --z-toast: 98;
@@ -93,6 +94,10 @@ body{
   color:var(--color-text-primary);
   min-height:100vh;
   padding:var(--space-page-padding);
+  padding-top:max(var(--space-page-padding), env(safe-area-inset-top));
+  padding-bottom:max(72px, env(safe-area-inset-bottom));
+  padding-left:max(var(--space-page-padding), env(safe-area-inset-left));
+  padding-right:max(var(--space-page-padding), env(safe-area-inset-right));
   display:flex;
   flex-direction:column;
   align-items:center;
@@ -109,9 +114,9 @@ body{
 .brand{display:flex;align-items:baseline;gap:var(--space-xl);flex-wrap:wrap}
 .brand h1{font-size:var(--fs-display);font-weight:var(--fw-bold);color:var(--color-text-primary)}
 .brand h1 b{color:var(--color-primary);font-weight:var(--fw-bold)}
-.brand .ver{font-size:var(--fs-label);color:var(--color-text-dim);font-family:var(--font-mono);background:var(--color-surface-elevated);padding:2px 8px;border-radius:4px}
+.brand .ver{font-size:var(--fs-label);color:var(--color-text-muted);font-family:var(--font-mono);background:var(--color-surface-elevated);padding:2px 8px;border-radius:4px;border:1px solid var(--color-border)}
 .connline{display:flex;align-items:center;gap:var(--space-md);color:var(--color-text-muted);font-size:var(--fs-body);flex-wrap:wrap}
-.connline .dot{width:8px;height:8px;border-radius:50%;background:var(--color-success)}
+.connline .dot{width:8px;height:8px;border-radius:50%;background:var(--color-success);display:inline-block}
 .connline.offline .dot{background:var(--color-danger)}
 .connline.offline{color:var(--color-danger-text)}
 
@@ -136,6 +141,8 @@ body{
   font-size:0.84rem;
   font-weight:var(--fw-semibold);
   cursor:pointer;
+  min-height:38px;
+  display:inline-flex;align-items:center;justify-content:center;
   transition:background var(--transition-normal) var(--ease-out),color var(--transition-normal) var(--ease-out);
 }
 .tab-btn:hover{background:var(--color-surface-elevated);color:var(--color-text-secondary)}
@@ -164,7 +171,7 @@ body{
   border-bottom:1px solid var(--color-border);
 }
 .card-head h2{font-size:var(--fs-headline);font-weight:var(--fw-semibold);color:var(--color-primary)}
-.card-head .meta{font-size:var(--fs-label);color:var(--color-text-dim)}
+.card-head .meta{font-size:var(--fs-label);color:var(--color-text-muted)}
 
 /* ---- 3D Viewport & Simulation Box ---- */
 .sim-viewport-box{
@@ -193,8 +200,9 @@ body{
 }
 .sim-pill-btn{
   background:transparent;border:none;color:var(--color-text-muted);
-  padding:4px 9px;border-radius:var(--radius-xs);
-  font-size:0.72rem;font-weight:var(--fw-semibold);cursor:pointer;
+  padding:5px 10px;border-radius:var(--radius-xs);
+  font-size:0.75rem;font-weight:var(--fw-semibold);cursor:pointer;min-height:30px;
+  display:inline-flex;align-items:center;justify-content:center;
   transition:all var(--transition-fast);
 }
 .sim-pill-btn:hover{background:var(--color-surface-elevated);color:var(--color-text-primary)}
@@ -213,25 +221,25 @@ body{
 @media(max-width:768px){.sim-ctrl-grid{grid-template-columns:1fr}}
 
 .sim-slider-row{
-  display:grid;grid-template-columns:85px 1fr 50px;align-items:center;gap:8px;
+  display:grid;grid-template-columns:95px 1fr 55px;align-items:center;gap:8px;
   margin-bottom:6px;font-size:0.78rem;
 }
 .sim-slider-row label{color:var(--color-text-secondary);font-weight:var(--fw-medium);margin-bottom:0;text-transform:none;letter-spacing:normal}
-.sim-slider-row input[type="range"]{accent-color:var(--color-primary);width:100%;margin:0}
+.sim-slider-row input[type="range"]{accent-color:var(--color-primary);width:100%;margin:0;cursor:pointer}
 .sim-slider-row span.val{color:var(--color-primary);font-family:var(--font-mono);font-weight:var(--fw-bold);text-align:right}
 
 .preset-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(95px,1fr));gap:6px;margin-top:8px}
 
 /* ---- Mode readout ---- */
 .mode-block{display:flex;flex-direction:column;gap:var(--space-sm);margin-bottom:var(--space-xl)}
-.mode-label{font-size:var(--fs-label);font-weight:var(--fw-semibold);color:var(--color-text-dim);text-transform:uppercase;letter-spacing:0.04em}
+.mode-label{font-size:var(--fs-label);font-weight:var(--fw-semibold);color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.04em}
 .mode-line{display:flex;align-items:center;gap:var(--space-md);flex-wrap:wrap}
 .mode-word{font-size:2.0rem;font-weight:var(--fw-bold);line-height:1;color:var(--color-text-primary);font-variant-numeric:tabular-nums}
 .badge{
   padding:3px 10px;border-radius:var(--radius-badge);
   font-size:var(--fs-label);font-weight:var(--fw-bold);
   text-transform:uppercase;letter-spacing:0.04em;
-  white-space:nowrap;
+  white-space:nowrap;display:inline-block;
 }
 .b-idle{background:var(--color-info-bg);color:var(--color-info-text)}
 .b-run{background:var(--color-success-bg);color:var(--color-success-text)}
@@ -245,7 +253,7 @@ body .mode-word.run{color:var(--color-success-text)}
 .stat-line .k{color:var(--color-text-muted);font-variant-numeric:tabular-nums}
 .stat-line .v{color:var(--color-text-primary);font-variant-numeric:tabular-nums;font-weight:var(--fw-medium);text-align:right}
 .stat-line .v.muted{color:var(--color-text-muted)}
-.stat-line .v.off{color:var(--color-text-dim)}
+.stat-line .v.off{color:var(--color-text-muted)}
 .stat-line.danger .v{color:var(--color-danger-text)}
 
 /* ---- Home progress ---- */
@@ -263,7 +271,8 @@ body .mode-word.run{color:var(--color-success-text)}
   border:none;border-radius:var(--radius-sm);
   padding:var(--space-md) var(--space-lg);
   font-weight:var(--fw-semibold);font-size:var(--fs-body);
-  cursor:pointer;
+  cursor:pointer;min-height:38px;
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
   transition:transform var(--transition-fast) var(--ease-spring),background var(--transition-normal) var(--ease-out),opacity var(--transition-normal);
 }
 .btn:hover:not(:disabled){filter:brightness(1.1)}
@@ -274,7 +283,7 @@ body .mode-word.run{color:var(--color-success-text)}
 .danger{background:var(--color-danger);color:var(--color-text-primary)}
 .ghost{background:var(--color-surface-elevated);color:var(--color-text-secondary);border:1px solid var(--color-border)}
 .ok{background:var(--color-success);color:var(--color-text-primary)}
-.row{display:flex;gap:var(--space-md);flex-wrap:wrap;align-items:center}
+.row{display:flex;gap:var(--space-md);flex-wrap:wrap;align-items:flex-end}
 .btn-loading{position:relative;color:transparent!important}
 .btn-loading::after{content:"";position:absolute;width:16px;height:16px;top:50%;left:50%;margin:-8px 0 0 -8px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -294,29 +303,33 @@ body .mode-word.run{color:var(--color-success-text)}
 .f-h{color:#4ade80}.f-r{color:#93c5fd}.f-d{color:#fca5a5}.f-e{color:#fcd34d}
 .jctrl{margin-top:var(--space-lg)}
 .jbtns{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-xs)}
-.jbtns .btn{padding:9px var(--space-lg);font-size:1.0rem}
-.stepsel{display:flex;gap:var(--space-xs);margin-top:var(--space-lg);width:200px}
+.jbtns .btn{padding:9px var(--space-lg);font-size:1.0rem;min-height:42px}
+.stepsel{display:flex;gap:var(--space-xs);width:200px}
 .stepbtn{
   flex:1;background:var(--color-surface-elevated);color:var(--color-text-secondary);
-  border:1px solid var(--color-border);padding:4px var(--space-xs);border-radius:var(--radius-xs);
-  font-size:0.75rem;font-weight:var(--fw-semibold);cursor:pointer;
+  border:1px solid var(--color-border);padding:6px var(--space-xs);border-radius:var(--radius-xs);
+  font-size:0.75rem;font-weight:var(--fw-semibold);cursor:pointer;min-height:32px;
+  display:inline-flex;align-items:center;justify-content:center;
   transition:background var(--transition-normal) var(--ease-out),color var(--transition-normal) var(--ease-out);
 }
 .stepbtn:hover{background:var(--color-border-strong)}
 .stepbtn.active{background:var(--color-primary);color:var(--color-bg);font-weight:var(--fw-bold)}
-.step-label{display:flex;align-items:center;gap:var(--space-md);font-size:0.8rem;color:var(--color-text-muted);margin-bottom:var(--space-lg)}
+.step-label{display:flex;align-items:center;gap:var(--space-md);font-size:0.8rem;color:var(--color-text-muted);margin-bottom:var(--space-lg);flex-wrap:wrap}
 .step-label .lbl{white-space:nowrap}
 
 /* ---- Forms ---- */
 label{display:block;font-size:var(--fs-label);font-weight:var(--fw-semibold);color:var(--color-text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.04em}
+.input-group{display:flex;flex-direction:column;gap:2px;flex:1;min-width:80px}
+.input-group label{font-size:0.70rem;color:var(--color-text-muted);margin-bottom:2px}
 input[type=text],input[type=password],input[type=number],select{
   width:100%;background:var(--color-surface-elevated);border:1px solid var(--color-border);
   color:var(--color-text-primary);font-size:0.95rem;padding:8px 12px;border-radius:var(--radius-sm);
   outline:none;margin-bottom:var(--space-md);font-family:var(--font-sans);
   transition:border-color var(--transition-normal) var(--ease-out);
 }
+.input-group input{margin-bottom:0}
 input:focus,select:focus{border-color:var(--color-focus-ring)}
-input::placeholder{color:var(--color-text-dim)}
+input::placeholder{color:var(--color-text-muted)}
 select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:36px}
 
 /* ---- E-STOP ---- */
@@ -326,28 +339,36 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
   box-shadow:var(--shadow-estop);animation:estopPulse 2.2s ease-in-out infinite;
 }
 @keyframes estopPulse{0%,100%{box-shadow:var(--shadow-estop)}50%{box-shadow:var(--shadow-estop-strong)}}
+
+/* ---- Toast Notification (Unified Clean HUD Badge) ---- */
+#toast{
+  position:fixed;bottom:16px;left:16px;z-index:var(--z-toast);
+  background:var(--color-surface-elevated);border:1px solid var(--color-border-strong);
+  border-radius:var(--radius-md);padding:10px 16px;
+  font-size:0.84rem;color:var(--color-text-primary);display:none;max-width:80vw;
+  box-shadow:var(--shadow-toast);animation:toastIn 0.15s var(--ease-out);
+}
+@keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+#toast.t-ok{border-color:var(--color-success);background:#0c1a17;color:var(--color-success-text)}
+#toast.t-warn{border-color:var(--color-warning);background:#1c1917;color:var(--color-warning-text)}
+#toast.t-err{border-color:var(--color-danger);background:#7f1d1d;color:var(--color-danger-text)}
+
+.muted{color:var(--color-text-muted);font-size:var(--fs-label)}
+.off{color:var(--color-text-muted)}
+.mono{font-family:var(--font-mono)}
+.divider{height:1px;background:var(--color-border);margin:var(--space-xl) 0}
+
+@media(pointer:coarse){
+  .tab-btn{padding:10px 14px;min-height:44px}
+  .stepbtn{min-height:42px;padding:8px 4px;font-size:0.82rem}
+  .sim-pill-btn{min-height:38px;padding:7px 12px;font-size:0.78rem}
+  .btn{min-height:44px}
+}
+
 @media(prefers-reduced-motion:reduce){
   #estop{animation:none}
   *{transition-duration:0.01ms!important;animation-duration:0.01ms!important}
 }
-
-/* ---- Toast ---- */
-#toast{
-  position:fixed;bottom:16px;left:16px;z-index:var(--z-toast);
-  background:var(--color-surface);border:1px solid var(--color-border);
-  border-left-width:4px;border-radius:var(--radius-sm);padding:10px 14px;
-  font-size:0.84rem;color:var(--color-text-secondary);display:none;max-width:70vw;
-  box-shadow:var(--shadow-toast);animation:toastIn 0.15s var(--ease-out);
-}
-@keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.t-ok{border-left-color:var(--color-success)}
-.t-warn{border-left-color:var(--color-warning)}
-.t-err{border-left-color:var(--color-danger)}
-
-.muted{color:var(--color-text-dim);font-size:var(--fs-label)}
-.off{color:var(--color-text-dim)}
-.mono{font-family:var(--font-mono)}
-.divider{height:1px;background:var(--color-border);margin:var(--space-xl) 0}
 
 ::-webkit-scrollbar{width:8px;height:8px}
 ::-webkit-scrollbar-thumb{background:var(--color-border-strong);border-radius:4px}
@@ -355,48 +376,48 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
 </style>
 </head>
 <body>
-<div class="app">
+<main class="app" id="main-content">
   <header class="header">
     <div class="brand"><h1>6-Axis <b>Arm</b></h1><span class="ver">NEMA-6AXIS DIGITAL CLONE</span></div>
     <div class="connline" id="conn"><span class="dot"></span><span id="sub">Đang kết nối...</span></div>
   </header>
 
-  <nav class="tabs" role="tablist" aria-label="Điều khiển cánh tay">
-    <button class="tab-btn active" data-t="dash" role="tab" aria-selected="true">Dashboard</button>
-    <button class="tab-btn" data-t="sim" role="tab" aria-selected="false">3D Simulation</button>
-    <button class="tab-btn" data-t="joints" role="tab" aria-selected="false">Joints</button>
-    <button class="tab-btn" data-t="home" role="tab" aria-selected="false">Homing</button>
-    <button class="tab-btn" data-t="cart" role="tab" aria-selected="false">Cartesian</button>
-    <button class="tab-btn" data-t="draw" role="tab" aria-selected="false">Draw</button>
-    <button class="tab-btn" data-t="wifi" role="tab" aria-selected="false">WiFi</button>
+  <nav class="tabs" role="tablist" aria-label="Các trang điều khiển cánh tay">
+    <button id="tab-dash" class="tab-btn active" data-t="dash" role="tab" aria-selected="true" aria-controls="dash">Dashboard</button>
+    <button id="tab-sim" class="tab-btn" data-t="sim" role="tab" aria-selected="false" aria-controls="sim">3D Simulation</button>
+    <button id="tab-joints" class="tab-btn" data-t="joints" role="tab" aria-selected="false" aria-controls="joints">Joints</button>
+    <button id="tab-home" class="tab-btn" data-t="home" role="tab" aria-selected="false" aria-controls="home">Homing</button>
+    <button id="tab-cart" class="tab-btn" data-t="cart" role="tab" aria-selected="false" aria-controls="cart">Cartesian</button>
+    <button id="tab-draw" class="tab-btn" data-t="draw" role="tab" aria-selected="false" aria-controls="draw">Draw</button>
+    <button id="tab-wifi" class="tab-btn" data-t="wifi" role="tab" aria-selected="false" aria-controls="wifi">WiFi</button>
   </nav>
 
   <!-- ============ DASHBOARD ============ -->
-  <div id="dash" class="tab-pane active" role="tabpanel">
+  <div id="dash" class="tab-pane active" role="tabpanel" aria-labelledby="tab-dash">
     <div class="dash-grid">
-      <div class="card">
+      <section class="card" aria-labelledby="headingDash3D">
         <div class="card-head">
-          <h2>Mô hình cánh tay 3D (Thời gian thực)</h2>
+          <h2 id="headingDash3D">Mô hình cánh tay 3D (Thời gian thực)</h2>
           <span class="meta mono" id="poseNow">--</span>
         </div>
         <div class="sim-viewport-box">
           <div class="sim-overlay-bar">
-            <div class="sim-pill-group">
+            <div class="sim-pill-group" role="group" aria-label="Góc nhìn 3D Dashboard">
               <button class="sim-pill-btn active" onclick="setDashView('3d', this)">3D Orbit</button>
               <button class="sim-pill-btn" onclick="setDashView('side', this)">Side (X-Z)</button>
               <button class="sim-pill-btn" onclick="setDashView('top', this)">Top (X-Y)</button>
             </div>
             <div class="sim-pill-group">
-              <button class="sim-pill-btn" onclick="resetDashCam()">Reset View</button>
+              <button class="sim-pill-btn" onclick="resetDashCam()" aria-label="Đặt lại góc camera Dashboard">Reset View</button>
             </div>
           </div>
-          <canvas id="poseCanvas" class="sim-canvas" width="640" height="380"></canvas>
+          <canvas id="poseCanvas" class="sim-canvas" width="640" height="380" role="img" aria-label="Khung vẽ mô hình 3D cánh tay robot thời gian thực"></canvas>
         </div>
-        <div class="sim-hud-box" id="dashHud">TELEMETRY: Đang tải...</div>
-      </div>
+        <div class="sim-hud-box" id="dashHud" aria-live="polite">TELEMETRY: Đang tải...</div>
+      </section>
 
-      <div class="card">
-        <div class="card-head"><h2>Trạng thái hệ thống</h2><span class="meta">300 ms</span></div>
+      <section class="card" aria-labelledby="headingSysState">
+        <div class="card-head"><h2 id="headingSysState">Trạng thái hệ thống</h2><span class="meta">300 ms</span></div>
         <div class="mode-block">
           <span class="mode-label">Chế độ hoạt động</span>
           <div class="mode-line"><span class="mode-word" id="modeWord">--</span><span id="mode" class="badge b-idle">idle</span></div>
@@ -413,76 +434,76 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
           <button class="btn ghost" onclick="clearFault()">CLEAR FAULT</button>
         </div>
         <p class="muted" style="margin-top:10px">HOME ALL chạy tuần tự J1→J2→J3→J4. J5/J6 dùng Set-Home thủ công ở tab Homing.</p>
-      </div>
+      </section>
     </div>
   </div>
 
   <!-- ============ 3D SIMULATION STUDIO ============ -->
-  <div id="sim" class="tab-pane" role="tabpanel">
-    <div class="card">
+  <div id="sim" class="tab-pane" role="tabpanel" aria-labelledby="tab-sim">
+    <section class="card" aria-labelledby="headingSimStudio">
       <div class="card-head">
-        <h2>3D Digital Clone Studio (Exact Craig MDH Kinematics)</h2>
+        <h2 id="headingSimStudio">3D Digital Clone Studio (Exact Craig MDH Kinematics)</h2>
         <span class="meta" id="simSourceLabel">[CHẾ ĐỘ MÔ PHỎNG]</span>
       </div>
 
       <div class="sim-viewport-box">
         <div class="sim-overlay-bar">
-          <div class="sim-pill-group">
+          <div class="sim-pill-group" role="group" aria-label="Góc nhìn mô phỏng">
             <button class="sim-pill-btn active" onclick="setSimView('3d', this)">3D Orbit</button>
             <button class="sim-pill-btn" onclick="setSimView('side', this)">Side (X-Z)</button>
             <button class="sim-pill-btn" onclick="setSimView('top', this)">Top (X-Y)</button>
           </div>
-          <div class="sim-pill-group">
+          <div class="sim-pill-group" role="group" aria-label="Nguồn dữ liệu mô phỏng">
             <button class="sim-pill-btn src-live" id="btnSrcLive" onclick="setSimSource('live')">🔴 Live Robot</button>
             <button class="sim-pill-btn src-sim active" id="btnSrcSim" onclick="setSimSource('sim')">🟢 Interactive Sim</button>
-            <button class="sim-pill-btn" onclick="resetSimCam()">Reset Cam</button>
+            <button class="sim-pill-btn" onclick="resetSimCam()" aria-label="Đặt lại camera mô phỏng">Reset Cam</button>
           </div>
         </div>
-        <canvas id="simCanvas" class="sim-canvas" width="680" height="400"></canvas>
+        <canvas id="simCanvas" class="sim-canvas" width="680" height="400" role="img" aria-label="Khung vẽ mô phỏng 3D tương tác theo động học Craig MDH"></canvas>
       </div>
 
-      <div class="sim-hud-box" id="simHud">TELEMETRY HUD | Đang tính toán động học...</div>
-    </div>
+      <div class="sim-hud-box" id="simHud" aria-live="polite">TELEMETRY HUD | Đang tính toán động học...</div>
+    </section>
 
     <div class="sim-ctrl-grid">
       <!-- Card A: Cartesian Target -->
-      <div class="card">
+      <section class="card" aria-labelledby="headingSimCart">
         <div class="card-head">
-          <h2>1. Tọa độ Cartesian IK (mm)</h2>
+          <h2 id="headingSimCart">1. Tọa độ Cartesian IK (mm)</h2>
           <span class="badge b-run" id="simIkBadge">IK OK</span>
         </div>
         <div class="sim-slider-row">
-          <label>Target X:</label>
-          <input type="range" id="simX" min="-250" max="250" step="1" value="160" oninput="onSimCartChange()">
+          <label for="simX">Target X:</label>
+          <input type="range" id="simX" min="-250" max="250" step="1" value="160" oninput="onSimCartChange()" aria-label="Tọa độ mục tiêu X">
           <span class="val" id="simXVal">160 mm</span>
         </div>
         <div class="sim-slider-row">
-          <label>Target Y:</label>
-          <input type="range" id="simY" min="-250" max="250" step="1" value="0" oninput="onSimCartChange()">
+          <label for="simY">Target Y:</label>
+          <input type="range" id="simY" min="-250" max="250" step="1" value="0" oninput="onSimCartChange()" aria-label="Tọa độ mục tiêu Y">
           <span class="val" id="simYVal">0 mm</span>
         </div>
         <div class="sim-slider-row">
-          <label>Target Z:</label>
-          <input type="range" id="simZ" min="-10" max="350" step="1" value="10" oninput="onSimCartChange()">
+          <label for="simZ">Target Z:</label>
+          <input type="range" id="simZ" min="-10" max="350" step="1" value="10" oninput="onSimCartChange()" aria-label="Tọa độ mục tiêu Z">
           <span class="val" id="simZVal">10 mm</span>
         </div>
         <div class="row" style="margin-top:10px">
           <button class="btn primary need-idle" onclick="sendSimPoseToRobot()">⚡ NẠP VỊ TRÍ XUỐNG ROBOT</button>
         </div>
-      </div>
+      </section>
 
       <!-- Card B: Joint Angles -->
-      <div class="card">
+      <section class="card" aria-labelledby="headingSimJoints">
         <div class="card-head">
-          <h2>2. Góc khớp Joint (Độ)</h2>
+          <h2 id="headingSimJoints">2. Góc khớp Joint (Độ)</h2>
           <span class="meta">Đồng bộ 2 chiều</span>
         </div>
         <div id="simJointSliders"></div>
-      </div>
+      </section>
 
       <!-- Card C: Presets -->
-      <div class="card">
-        <div class="card-head"><h2>3. Tư thế mẫu (Presets)</h2></div>
+      <section class="card" aria-labelledby="headingSimPresets">
+        <div class="card-head"><h2 id="headingSimPresets">3. Tư thế mẫu (Presets)</h2></div>
         <div class="preset-grid">
           <button class="btn ghost" onclick="applySimPreset('home')">Home (0°)</button>
           <button class="btn ghost" onclick="applySimPreset('draw')">Draw Ready</button>
@@ -490,38 +511,38 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
           <button class="btn ghost" onclick="applySimPreset('reach_back')">Reach -X</button>
           <button class="btn ghost" onclick="applySimPreset('fold')">Folded</button>
         </div>
-      </div>
+      </section>
 
       <!-- Card D: Trajectory Animator -->
-      <div class="card">
-        <div class="card-head"><h2>4. Mô phỏng vẽ (Trajectory Animator)</h2></div>
+      <section class="card" aria-labelledby="headingSimAnimator">
+        <div class="card-head"><h2 id="headingSimAnimator">4. Mô phỏng vẽ (Trajectory Animator)</h2></div>
         <div class="row" style="margin-bottom:8px">
           <button class="btn ghost active" id="btnSimLine" onclick="setSimPathType('line')">Draw Line</button>
           <button class="btn ghost" id="btnSimCirc" onclick="setSimPathType('circle')">Draw Circle</button>
           <button class="btn primary" id="btnSimPlay" onclick="toggleSimPlay()">▶ Play</button>
         </div>
         <div class="sim-slider-row">
-          <label>Scrub:</label>
-          <input type="range" id="simScrub" min="0" max="100" step="1" value="0" oninput="onSimScrubChange(this.value)">
+          <label for="simScrub">Scrub:</label>
+          <input type="range" id="simScrub" min="0" max="100" step="1" value="0" oninput="onSimScrubChange(this.value)" aria-label="Thanh trượt xem trước quỹ đạo vẽ">
           <span class="val" id="simScrubVal">0%</span>
         </div>
-      </div>
+      </section>
     </div>
   </div>
 
   <!-- ============ JOINTS ============ -->
-  <div id="joints" class="tab-pane" role="tabpanel">
-    <div class="card">
-      <div class="card-head"><h2>Điều khiển khớp thủ công</h2><span class="meta">jog tương đối theo bước</span></div>
-      <div class="step-label"><span class="lbl">Bước jog:</span><div class="stepsel" id="stepSel" role="group"></div><span class="muted" id="stepVal">1.0°</span></div>
+  <div id="joints" class="tab-pane" role="tabpanel" aria-labelledby="tab-joints">
+    <section class="card" aria-labelledby="headingJointCtrl">
+      <div class="card-head"><h2 id="headingJointCtrl">Điều khiển khớp thủ công</h2><span class="meta">jog tương đối theo bước</span></div>
+      <div class="step-label"><span class="lbl">Bước jog:</span><div class="stepsel" id="stepSel" role="group" aria-label="Chọn bước góc Jog"></div><span class="muted" id="stepVal">1.0°</span></div>
       <div class="grid-joints" id="jointGrid" role="list"></div>
-    </div>
+    </section>
   </div>
 
   <!-- ============ HOMING ============ -->
-  <div id="home" class="tab-pane" role="tabpanel">
-    <div class="card">
-      <div class="card-head"><h2>Homing tự động (TMC J1–J4)</h2></div>
+  <div id="home" class="tab-pane" role="tabpanel" aria-labelledby="tab-home">
+    <section class="card" aria-labelledby="headingAutoHome">
+      <div class="card-head"><h2 id="headingAutoHome">Homing tự động (TMC J1–J4)</h2></div>
       <div class="row">
         <button class="btn primary need-idle" onclick="api('/api/home/all')">HOME ALL</button>
         <span class="muted">Từng khớp:</span>
@@ -531,80 +552,80 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
         <button class="btn ghost need-idle" onclick="api('/api/home/axis?axis=3')">Home J4</button>
       </div>
       <p class="muted" style="margin-top:10px">J1/J2: min-stop → về GIỮA hành trình. J3/J4: min-stop/stall + lùi 2°.</p>
-    </div>
-    <div class="card">
-      <div class="card-head"><h2>Set-Home &amp; Calibration</h2><span class="meta">lưu NVS</span></div>
+    </section>
+    <section class="card" aria-labelledby="headingSetHome">
+      <div class="card-head"><h2 id="headingSetHome">Set-Home &amp; Calibration</h2><span class="meta">lưu NVS</span></div>
       <div class="grid-joints" id="setHomeGrid" role="list"></div>
-    </div>
+    </section>
   </div>
 
   <!-- ============ CARTESIAN ============ -->
-  <div id="cart" class="tab-pane" role="tabpanel">
-    <div class="card">
-      <div class="card-head"><h2>Di chuyển TCP (bút hướng xuống)</h2><span class="meta mono" id="poseNow2">--</span></div>
+  <div id="cart" class="tab-pane" role="tabpanel" aria-labelledby="tab-cart">
+    <section class="card" aria-labelledby="headingCartMove">
+      <div class="card-head"><h2 id="headingCartMove">Di chuyển TCP (bút hướng xuống)</h2><span class="meta mono" id="poseNow2">--</span></div>
       <p class="muted" style="margin-bottom:12px">Yêu cầu đã HOME J1–J4. Home TCP = (146, 0, 365). Giấy vẽ đặt dưới bút, Z nhỏ hơn khi hạ.</p>
       <div class="row">
-        <input type="number" id="mvX" step="any" placeholder="X mm" value="160">
-        <input type="number" id="mvY" step="any" placeholder="Y mm" value="0">
-        <input type="number" id="mvZ" step="any" placeholder="Z mm" value="10">
-        <input type="number" id="mvFeed" step="any" placeholder="feed mm/s" value="30">
-        <button class="btn primary need-idle" onclick="moveTo()">MOVE</button>
+        <div class="input-group"><label for="mvX">X (mm)</label><input type="number" id="mvX" step="any" placeholder="X" value="160" aria-label="Tọa độ đích X (mm)"></div>
+        <div class="input-group"><label for="mvY">Y (mm)</label><input type="number" id="mvY" step="any" placeholder="Y" value="0" aria-label="Tọa độ đích Y (mm)"></div>
+        <div class="input-group"><label for="mvZ">Z (mm)</label><input type="number" id="mvZ" step="any" placeholder="Z" value="10" aria-label="Tọa độ đích Z (mm)"></div>
+        <div class="input-group"><label for="mvFeed">Feed (mm/s)</label><input type="number" id="mvFeed" step="any" placeholder="feed" value="30" aria-label="Tốc độ di chuyển feedrate (mm/s)"></div>
+        <button class="btn primary need-idle" onclick="moveTo()" style="align-self:flex-end">MOVE</button>
       </div>
-    </div>
+    </section>
   </div>
 
   <!-- ============ DRAW ============ -->
-  <div id="draw" class="tab-pane" role="tabpanel">
-    <div class="card">
-      <div class="card-head"><h2>Vẽ hình (bút trên giấy)</h2></div>
-      <canvas id="cv" width="420" height="260" style="background:#090d16;border:1px solid var(--color-border);border-radius:var(--radius-sm);display:block;margin-bottom:12px;max-width:100%;height:auto"></canvas>
+  <div id="draw" class="tab-pane" role="tabpanel" aria-labelledby="tab-draw">
+    <section class="card" aria-labelledby="headingDrawShape">
+      <div class="card-head"><h2 id="headingDrawShape">Vẽ hình (bút trên giấy)</h2></div>
+      <canvas id="cv" width="420" height="260" role="img" aria-label="Bản vẽ 2D xem trước nét vẽ" style="background:#090d16;border:1px solid var(--color-border);border-radius:var(--radius-sm);display:block;margin-bottom:12px;max-width:100%;height:auto"></canvas>
       <label for="dwShape">Hình</label>
-      <select id="dwShape">
-        <option value="line">Line</option>
-        <option value="circle">Circle</option>
+      <select id="dwShape" onchange="onDrawShapeChange()">
+        <option value="line">Line (Đoạn thẳng)</option>
+        <option value="circle">Circle (Đường tròn)</option>
       </select>
       <div class="row" style="margin-bottom:10px">
-        <input type="number" step="any" id="dwA1" placeholder="x1 / cx" value="100">
-        <input type="number" step="any" id="dwA2" placeholder="y1 / cy" value="-70">
-        <input type="number" step="any" id="dwA3" placeholder="x2 / r" value="180">
-        <input type="number" step="any" id="dwA4" placeholder="y2" value="70">
-        <input type="number" step="any" id="dwZ" placeholder="z giấy" value="10">
-        <input type="number" step="any" id="dwFeed" placeholder="feed" value="20">
+        <div class="input-group"><label for="dwA1" id="dwA1Lbl">X1</label><input type="number" step="any" id="dwA1" placeholder="100" value="100" aria-labelledby="dwA1Lbl"></div>
+        <div class="input-group"><label for="dwA2" id="dwA2Lbl">Y1</label><input type="number" step="any" id="dwA2" placeholder="-70" value="-70" aria-labelledby="dwA2Lbl"></div>
+        <div class="input-group"><label for="dwA3" id="dwA3Lbl">X2</label><input type="number" step="any" id="dwA3" placeholder="180" value="180" aria-labelledby="dwA3Lbl"></div>
+        <div class="input-group" id="dwA4Group"><label for="dwA4" id="dwA4Lbl">Y2</label><input type="number" step="any" id="dwA4" placeholder="70" value="70" aria-labelledby="dwA4Lbl"></div>
+        <div class="input-group"><label for="dwZ">Z giấy</label><input type="number" step="any" id="dwZ" placeholder="10" value="10" aria-label="Cao độ mặt giấy Z (mm)"></div>
+        <div class="input-group"><label for="dwFeed">Feed</label><input type="number" step="any" id="dwFeed" placeholder="20" value="20" aria-label="Tốc độ vẽ feedrate (mm/s)"></div>
       </div>
       <div class="row">
         <button class="btn ok need-idle" onclick="startDraw()">START DRAW</button>
         <button class="btn danger" onclick="api('/api/stop')">ABORT</button>
         <button class="btn ghost" onclick="previewShape()">PREVIEW</button>
       </div>
-    </div>
+    </section>
   </div>
 
   <!-- ============ WIFI ============ -->
-  <div id="wifi" class="tab-pane" role="tabpanel">
+  <div id="wifi" class="tab-pane" role="tabpanel" aria-labelledby="tab-wifi">
     <div class="dash-grid">
-      <div class="card">
-        <div class="card-head"><h2>Kết nối hiện tại</h2></div>
+      <section class="card" aria-labelledby="headingWifiNow">
+        <div class="card-head"><h2 id="headingWifiNow">Kết nối hiện tại</h2></div>
         <div class="stat-line"><span class="k">Chế độ</span><span class="v" id="wfMode" class="badge b-info">-</span></div>
         <div class="stat-line"><span class="k">IP</span><span class="v mono" id="wfIp">-</span></div>
         <div class="stat-line"><span class="k">SSID</span><span class="v" id="wfSsidNow">-</span></div>
         <div class="stat-line"><span class="k">RSSI</span><span class="v" id="wfRssi">-</span></div>
-      </div>
-      <div class="card">
-        <div class="card-head"><h2>Cấu hình WiFi</h2></div>
+      </section>
+      <section class="card" aria-labelledby="headingWifiCfg">
+        <div class="card-head"><h2 id="headingWifiCfg">Cấu hình WiFi</h2></div>
         <label for="wfSsid">SSID</label>
-        <input type="text" id="wfSsid" placeholder="tên wifi" autocomplete="off">
+        <input type="text" id="wfSsid" placeholder="Tên mạng WiFi" autocomplete="off">
         <label for="wfPass">Mật khẩu</label>
-        <input type="password" id="wfPass" placeholder="mật khẩu" autocomplete="current-password">
+        <input type="password" id="wfPass" placeholder="Mật khẩu WiFi" autocomplete="current-password">
         <div class="row" style="margin-top:8px">
-          <button class="btn ok" onclick="saveWifi()">SAVE &amp; REBOOT</button>
+          <button class="btn ok" onclick="saveWifi()">LƯU &amp; KHỞI ĐỘNG LẠI</button>
         </div>
-      </div>
+      </section>
     </div>
   </div>
-</div>
+</main>
 
-<button id="estop" class="btn danger" onclick="api('/api/stop')">&#9888; E-STOP</button>
-<div id="toast" role="status"></div>
+<button id="estop" class="btn danger" onclick="api('/api/stop')" aria-label="Dừng khẩn cấp toàn bộ động cơ">&#9888; E-STOP</button>
+<div id="toast" role="status" aria-live="assertive"></div>
 
 <script>
 /* =============================================================================
@@ -624,6 +645,19 @@ const JOINT_LIMITS = [
   [-360.0, 360.0]
 ];
 const AXES = ["J1 Base Yaw", "J2 Shoulder", "J3 Elbow", "J4 Wrist Pan", "J5 Wrist Tilt", "J6 Tool Roll"];
+
+const THEME_PALETTE = {
+  grid: '#1e293b',
+  axisPlane: '#06b6d4',
+  linkBase: '#64748b',
+  linkUpper: '#0ea5e9',
+  linkFore1: '#10b981',
+  linkFore2: '#059669',
+  penTool: '#f43f5e',
+  jointFill: '#f59e0b',
+  jointBorder: '#0f172a',
+  reachCircle: '#38bdf8'
+};
 
 /* =============================================================================
    2. MATRIX MATH & FORWARD KINEMATICS
@@ -717,8 +751,8 @@ function ikPenDown(tx, ty, tz){
   const dist = Math.hypot(r, h);
   const maxR = A2 + L_FORE, minR = Math.abs(A2 - L_FORE);
 
-  if(dist > maxR) return { ok: false, reason: "Vượt tầm" };
-  if(dist < minR) return { ok: false, reason: "Vùng chết" };
+  if(dist > maxR) return { ok: false, reason: "Vượt tầm với tối đa" };
+  if(dist < minR) return { ok: false, reason: "Vào vùng chết cơ học" };
 
   let cb = (A2*A2 + dist*dist - L_FORE*L_FORE) / (2.0 * A2 * dist);
   cb = Math.max(-1.0, Math.min(1.0, cb));
@@ -751,7 +785,7 @@ function ikPenDown(tx, ty, tz){
     }
   }
 
-  if(!best) return { ok: false, reason: "Ngoài giới hạn" };
+  if(!best) return { ok: false, reason: "Ngoài giới hạn góc quay khớp" };
   return { ok: true, angles: best };
 }
 
@@ -761,7 +795,7 @@ function ikPenDown(tx, ty, tz){
 function auditPose(angles, lm){
   const flaws = [], warns = [];
   for(let i=0; i<6; i++){
-    if(angles[i] < JOINT_LIMITS[i][0] - 0.1 || angles[i] > JOINT_LIMITS[i][1] + 0.1) flaws.push(`J${i+1} Limit`);
+    if(angles[i] < JOINT_LIMITS[i][0] - 0.1 || angles[i] > JOINT_LIMITS[i][1] + 0.1) flaws.push(`J${i+1} Vượt giới hạn`);
   }
   return { flaws, warns };
 }
@@ -772,13 +806,13 @@ function auditPose(angles, lm){
 class Canvas3DRenderer {
   constructor(canvasId) {
     this.canvas = document.getElementById(canvasId);
-    this.ctx = this.canvas.getContext('2d');
+    this.ctx = this.canvas ? this.canvas.getContext('2d') : null;
     this.viewMode = '3d';
     this.cam = { yaw: -45, pitch: 25, zoom: 1.15, panX: 0, panY: 0 };
     this.isDragging = false;
     this.lastX = 0;
     this.lastY = 0;
-    this.initEvents();
+    if(this.canvas) this.initEvents();
   }
 
   initEvents() {
@@ -816,13 +850,14 @@ class Canvas3DRenderer {
   }
 
   render(landmarks, pathPts) {
+    if(!this.ctx) return;
     this.lastLm = landmarks; this.lastPath = pathPts;
     const ctx = this.ctx, W = this.canvas.width, H = this.canvas.height;
     ctx.clearRect(0, 0, W, H);
 
     // 1. Grid & Floor
     if(this.viewMode === '3d'){
-      ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1;
+      ctx.strokeStyle = THEME_PALETTE.grid; ctx.lineWidth = 1;
       for(let g = -250; g <= 250; g += 50){
         const p1 = this.project([g, -250, 0]), p2 = this.project([g, 250, 0]);
         ctx.beginPath(); ctx.moveTo(p1.u, p1.v); ctx.lineTo(p2.u, p2.v); ctx.stroke();
@@ -830,7 +865,7 @@ class Canvas3DRenderer {
         ctx.beginPath(); ctx.moveTo(q1.u, q1.v); ctx.lineTo(q2.u, q2.v); ctx.stroke();
       }
     } else if(this.viewMode === 'side'){
-      ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1;
+      ctx.strokeStyle = THEME_PALETTE.grid; ctx.lineWidth = 1;
       for(let g = -100; g <= 300; g += 50){
         const p1 = this.project([g, 0, -20]), p2 = this.project([g, 0, 400]);
         ctx.beginPath(); ctx.moveTo(p1.u, p1.v); ctx.lineTo(p2.u, p2.v); ctx.stroke();
@@ -840,10 +875,10 @@ class Canvas3DRenderer {
         ctx.beginPath(); ctx.moveTo(p1.u, p1.v); ctx.lineTo(p2.u, p2.v); ctx.stroke();
       }
       const t1 = this.project([-120, 0, 0]), t2 = this.project([300, 0, 0]);
-      ctx.strokeStyle = '#06b6d4'; ctx.lineWidth = 1.5;
+      ctx.strokeStyle = THEME_PALETTE.axisPlane; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(t1.u, t1.v); ctx.lineTo(t2.u, t2.v); ctx.stroke();
     } else if(this.viewMode === 'top'){
-      ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1;
+      ctx.strokeStyle = THEME_PALETTE.grid; ctx.lineWidth = 1;
       for(let g = -250; g <= 250; g += 50){
         const p1 = this.project([g, -250, 0]), p2 = this.project([g, 250, 0]);
         ctx.beginPath(); ctx.moveTo(p1.u, p1.v); ctx.lineTo(p2.u, p2.v); ctx.stroke();
@@ -854,7 +889,7 @@ class Canvas3DRenderer {
       for(let a=0; a<=Math.PI*2+0.1; a+=0.2){
         cMax.push(this.project([(A2+L_FORE)*Math.cos(a), (A2+L_FORE)*Math.sin(a), 0]));
       }
-      ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 1.2; ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = THEME_PALETTE.reachCircle; ctx.lineWidth = 1.2; ctx.setLineDash([4, 4]);
       ctx.beginPath(); cMax.forEach((p, i) => i === 0 ? ctx.moveTo(p.u, p.v) : ctx.lineTo(p.u, p.v)); ctx.stroke();
       ctx.setLineDash([]);
     }
@@ -863,7 +898,7 @@ class Canvas3DRenderer {
 
     // 2. Trajectory Waypoints
     if(pathPts && pathPts.length > 0){
-      ctx.strokeStyle = '#f43f5e'; ctx.lineWidth = 2.5;
+      ctx.strokeStyle = THEME_PALETTE.penTool; ctx.lineWidth = 2.5;
       ctx.beginPath();
       let first = true;
       for(const wp of pathPts){
@@ -877,21 +912,21 @@ class Canvas3DRenderer {
 
     // 3. Robot Arm Skeleton
     const pBase = this.project(landmarks.base), pSh = this.project(landmarks.shoulder), pEl = this.project(landmarks.elbow), pBend = this.project(landmarks.fore_bend), pWr = this.project(landmarks.wrist), pTcp = this.project(landmarks.tcp);
-    ctx.strokeStyle = '#64748b'; ctx.lineWidth = 7; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(pBase.u, pBase.v); ctx.lineTo(pSh.u, pSh.v); ctx.stroke();
-    ctx.strokeStyle = '#0ea5e9'; ctx.lineWidth = 5.5; ctx.beginPath(); ctx.moveTo(pSh.u, pSh.v); ctx.lineTo(pEl.u, pEl.v); ctx.stroke();
-    ctx.strokeStyle = '#10b981'; ctx.lineWidth = 4.5; ctx.beginPath(); ctx.moveTo(pEl.u, pEl.v); ctx.lineTo(pBend.u, pBend.v); ctx.stroke();
-    ctx.strokeStyle = '#059669'; ctx.lineWidth = 4.5; ctx.beginPath(); ctx.moveTo(pBend.u, pBend.v); ctx.lineTo(pWr.u, pWr.v); ctx.stroke();
-    ctx.strokeStyle = '#f43f5e'; ctx.lineWidth = 3.5; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(pWr.u, pWr.v); ctx.lineTo(pTcp.u, pTcp.v); ctx.stroke();
+    ctx.strokeStyle = THEME_PALETTE.linkBase; ctx.lineWidth = 7; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(pBase.u, pBase.v); ctx.lineTo(pSh.u, pSh.v); ctx.stroke();
+    ctx.strokeStyle = THEME_PALETTE.linkUpper; ctx.lineWidth = 5.5; ctx.beginPath(); ctx.moveTo(pSh.u, pSh.v); ctx.lineTo(pEl.u, pEl.v); ctx.stroke();
+    ctx.strokeStyle = THEME_PALETTE.linkFore1; ctx.lineWidth = 4.5; ctx.beginPath(); ctx.moveTo(pEl.u, pEl.v); ctx.lineTo(pBend.u, pBend.v); ctx.stroke();
+    ctx.strokeStyle = THEME_PALETTE.linkFore2; ctx.lineWidth = 4.5; ctx.beginPath(); ctx.moveTo(pBend.u, pBend.v); ctx.lineTo(pWr.u, pWr.v); ctx.stroke();
+    ctx.strokeStyle = THEME_PALETTE.penTool; ctx.lineWidth = 3.5; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(pWr.u, pWr.v); ctx.lineTo(pTcp.u, pTcp.v); ctx.stroke();
     ctx.setLineDash([]);
 
     // 4. Joint Markers
     const joints = [pSh, pEl, pBend, pWr];
-    ctx.fillStyle = '#f59e0b'; ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1.5;
+    ctx.fillStyle = THEME_PALETTE.jointFill; ctx.strokeStyle = THEME_PALETTE.jointBorder; ctx.lineWidth = 1.5;
     for(const j of joints){
       ctx.beginPath(); ctx.arc(j.u, j.v, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     }
     // TCP Pen Tip
-    ctx.fillStyle = '#f43f5e'; ctx.beginPath(); ctx.arc(pTcp.u, pTcp.v, 5.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = THEME_PALETTE.penTool; ctx.beginPath(); ctx.arc(pTcp.u, pTcp.v, 5.5, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = 'rgba(244,63,94,0.3)'; ctx.beginPath(); ctx.arc(pTcp.u, pTcp.v, 11.0, 0, Math.PI * 2); ctx.fill();
   }
 
@@ -906,9 +941,11 @@ let simAngles = [0, 0, 0, 0, 0, 0];
 let simSource = 'sim';
 let simPathType = 'line';
 let simWaypoints = [];
-let simPlayTimer = null;
+let simPlayAnimId = null;
+let simLastAnimTime = 0;
 let simScrubIdx = 0;
 let stepSize = 1.0, pollTimer = null, failN = 0, toastTimer = null, lastPose = null;
+let lastJointFlagsStr = '';
 
 function initSimulationUI() {
   dashRenderer = new Canvas3DRenderer('poseCanvas');
@@ -921,8 +958,8 @@ function initSimulationUI() {
       const lim = JOINT_LIMITS[i];
       jContainer.insertAdjacentHTML('beforeend', `
         <div class="sim-slider-row">
-          <label>J${i+1} (${AXES[i].split(' ')[1]}):</label>
-          <input type="range" id="simJ${i}" min="${lim[0]}" max="${lim[1]}" step="0.5" value="${simAngles[i]}" oninput="onSimJointChange(${i}, this.value)">
+          <label for="simJ${i}">J${i+1} (${AXES[i].split(' ')[1]}):</label>
+          <input type="range" id="simJ${i}" min="${lim[0]}" max="${lim[1]}" step="0.5" value="${simAngles[i]}" oninput="onSimJointChange(${i}, this.value)" aria-label="Góc khớp J${i+1}">
           <span class="val" id="simJ${i}Val">${simAngles[i].toFixed(1)}°</span>
         </div>
       `);
@@ -961,9 +998,12 @@ function resetSimCam(){
 
 function setSimSource(src){
   simSource = src;
-  document.getElementById('btnSrcLive').classList.toggle('active', src === 'live');
-  document.getElementById('btnSrcSim').classList.toggle('active', src === 'sim');
-  document.getElementById('simSourceLabel').textContent = src === 'live' ? '[GƯƠNG ROBOT THẬT (LIVE)]' : '[CHẾ ĐỘ MÔ PHỎNG]';
+  const bLive = document.getElementById('btnSrcLive');
+  const bSim = document.getElementById('btnSrcSim');
+  if(bLive) bLive.classList.toggle('active', src === 'live');
+  if(bSim) bSim.classList.toggle('active', src === 'sim');
+  const lbl = document.getElementById('simSourceLabel');
+  if(lbl) lbl.textContent = (src === 'live') ? '[GƯƠNG ROBOT THẬT (LIVE)]' : '[CHẾ ĐỘ MÔ PHỎNG]';
   if(src === 'live' && window.lastRobotAngles){
     updateSimFromAngles(window.lastRobotAngles);
   }
@@ -992,14 +1032,14 @@ function updateSimFromAngles(angles){
 
   simRenderer.render(lm, simWaypoints);
 
-  const statusBadge = audit.flaws.length === 0 && audit.warns.length === 0 ? '[OK: NORMAL]' :
-                     (audit.flaws.length > 0 ? '[CRITICAL FAULT]' : '[WARNING]');
+  const statusBadge = audit.flaws.length === 0 && audit.warns.length === 0 ? '[OK: BÌNH THƯỜNG]' :
+                     (audit.flaws.length > 0 ? '[LỖI CẢNH BÁO]' : '[CẢNH BÁO]');
   let hudText = `TELEMETRY HUD | ${statusBadge}\n` +
-                `TCP Position: X=${lm.tcp[0].toFixed(1)} mm  Y=${lm.tcp[1].toFixed(1)} mm  Z=${lm.tcp[2].toFixed(1)} mm  |  Wrist: X=${lm.wrist[0].toFixed(1)} Y=${lm.wrist[1].toFixed(1)} Z=${lm.wrist[2].toFixed(1)} mm\n` +
+                `TCP Position: X=${lm.tcp[0].toFixed(1)} mm  Y=${lm.tcp[1].toFixed(1)} mm  Z=${lm.tcp[2].toFixed(1)} mm  |  Wrist: (${lm.wrist[0].toFixed(1)}, ${lm.wrist[1].toFixed(1)}, ${lm.wrist[2].toFixed(1)})\n` +
                 `Joint Angles: J1:${simAngles[0].toFixed(1)}° | J2:${simAngles[1].toFixed(1)}° | J3:${simAngles[2].toFixed(1)}° | J4:${simAngles[3].toFixed(1)}° | J5:${simAngles[4].toFixed(1)}° | J6:${simAngles[5].toFixed(1)}°\n`;
   if(audit.flaws.length > 0) hudText += `FLAWS: ${audit.flaws.join(' ; ')}`;
   else if(audit.warns.length > 0) hudText += `WARNINGS: ${audit.warns.join(' ; ')}`;
-  else hudText += `STATUS: Kinematics hợp lệ, an toàn không va chạm.`;
+  else hudText += `STATUS: Động học hợp lệ, an toàn không va chạm.`;
 
   const hudEl = document.getElementById('simHud');
   if(hudEl) hudEl.textContent = hudText;
@@ -1084,20 +1124,28 @@ function onSimScrubChange(val){
   }
 }
 
+function simAnimStep(now){
+  if(!simPlayAnimId) return;
+  if(!document.hidden && now - simLastAnimTime >= 45){
+    simLastAnimTime = now;
+    simScrubIdx = (simScrubIdx + 1) % simWaypoints.length;
+    const scrubEl = document.getElementById('simScrub');
+    if(scrubEl) scrubEl.value = simScrubIdx;
+    onSimScrubChange(simScrubIdx);
+  }
+  simPlayAnimId = requestAnimationFrame(simAnimStep);
+}
+
 function toggleSimPlay(){
   const btn = document.getElementById('btnSimPlay');
-  if(simPlayTimer){
-    clearInterval(simPlayTimer);
-    simPlayTimer = null;
+  if(simPlayAnimId){
+    cancelAnimationFrame(simPlayAnimId);
+    simPlayAnimId = null;
     if(btn) btn.textContent = '▶ Play';
   } else {
     if(btn) btn.textContent = '⏸ Pause';
-    simPlayTimer = setInterval(() => {
-      simScrubIdx = (simScrubIdx + 1) % simWaypoints.length;
-      const scrubEl = document.getElementById('simScrub');
-      if(scrubEl) scrubEl.value = simScrubIdx;
-      onSimScrubChange(simScrubIdx);
-    }, 45);
+    simLastAnimTime = performance.now();
+    simPlayAnimId = requestAnimationFrame(simAnimStep);
   }
 }
 
@@ -1122,13 +1170,13 @@ function api(url){
   return fetch(url).then(r => r.text()).then(t => {
     toast((t === 'OK' ? '✓ ' : '') + t, t === 'OK' ? 'ok' : 'warn');
     return t;
-  }).catch(() => toast('Lỗi mạng / mất kết nối', 'err'));
+  }).catch(() => toast('Lỗi mạng / Mất kết nối tới robot', 'err'));
 }
 function post(url, body){
   return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })
     .then(r => r.text())
     .then(t => toast((t === 'OK' ? '✓ ' : '') + t, t === 'OK' ? 'ok' : 'warn'))
-    .catch(() => toast('Lỗi mạng / mất kết nối', 'err'));
+    .catch(() => toast('Lỗi mạng / Mất kết nối tới robot', 'err'));
 }
 function clearFault(){ post('/api/jog', 'fault_clear=1'); }
 
@@ -1148,6 +1196,7 @@ document.querySelectorAll('.tab-btn[data-t]').forEach(b => {
   const b = document.createElement('button');
   b.className = 'stepbtn' + (s === stepSize ? ' active' : '');
   b.textContent = s + '°';
+  b.setAttribute('aria-label', `Bước jog ${s} độ`);
   b.onclick = () => {
     stepSize = s;
     document.querySelectorAll('.stepbtn').forEach(x => x.classList.remove('active'));
@@ -1158,6 +1207,12 @@ document.querySelectorAll('.tab-btn[data-t]').forEach(b => {
   if(stepSel) stepSel.appendChild(b);
 });
 
+function confirmClearCalib(axisIdx){
+  if(confirm(`Xóa cân chỉnh vị trí J${axisIdx + 1}? Giá trị zero đã lưu trong NVS sẽ bị xóa.`)){
+    api(`/api/clearcalib?axis=${axisIdx}`);
+  }
+}
+
 function buildCards(){
   const g = document.getElementById('jointGrid');
   const sg = document.getElementById('setHomeGrid');
@@ -1165,23 +1220,23 @@ function buildCards(){
   if(sg) sg.innerHTML = '';
   for(let i=0; i<6; i++){
     if(g) g.insertAdjacentHTML('beforeend',
-     `<div class="jcard">
+     `<div class="jcard" role="region" aria-label="Điều khiển khớp ${AXES[i]}">
         <div class="jname"><span>${AXES[i]}</span><span class="jdeg" id="jd${i}">--</span></div>
         <div class="jenc" id="je${i}">encoder: --</div>
         <div class="jflags" id="jf${i}"></div>
         <div class="jctrl">
           <div class="jbtns">
-            <button class="btn danger" onclick="jog(${i},-1)">&#8630; &minus;</button>
-            <button class="btn primary" onclick="jog(${i},1)">+ &#8634;</button>
+            <button class="btn danger" onclick="jog(${i},-1)" aria-label="Jog ${AXES[i]} âm">&#8630; &minus;</button>
+            <button class="btn primary" onclick="jog(${i},1)" aria-label="Jog ${AXES[i]} dương">+ &#8634;</button>
           </div>
         </div>
       </div>`);
     if(sg) sg.insertAdjacentHTML('beforeend',
-     `<div class="jcard">
+     `<div class="jcard" role="region" aria-label="Cân chỉnh ${AXES[i]}">
         <div class="jname"><span>${AXES[i]}</span></div>
         <div class="jbtns">
-          <button class="btn ok need-idle" onclick="api('/api/sethome?axis=${i}')">Set Home</button>
-          <button class="btn warn" onclick="if(confirm('Xóa calib J${i+1}? Sẽ mất vị trí đã lưu trong NVS.'))api('/api/clearcalib?axis=${i}')">Clear Calib</button>
+          <button class="btn ok need-idle" onclick="api('/api/sethome?axis=${i}')" aria-label="Đặt vị trí zero cho ${AXES[i]}">Set Home</button>
+          <button class="btn warn" onclick="confirmClearCalib(${i})" aria-label="Xóa dữ liệu zero NVS cho ${AXES[i]}">Clear Calib</button>
         </div>
       </div>`);
   }
@@ -1195,10 +1250,34 @@ function moveTo(){
 }
 function saveWifi(){
   const s = document.getElementById('wfSsid').value.trim(), p = document.getElementById('wfPass').value;
-  if(!s){ toast('Nhập SSID', 'warn'); return; }
+  if(!s){ toast('Vui lòng nhập tên mạng WiFi (SSID)', 'warn'); return; }
   post('/api/wifi', `ssid=${encodeURIComponent(s)}&pass=${encodeURIComponent(p)}`)
-    .then(() => { document.getElementById('sub').textContent = 'Đã lưu. Đang restart...'; });
+    .then(() => {
+      const sub = document.getElementById('sub');
+      if(sub) sub.textContent = 'Đã lưu cấu hình. Robot đang khởi động lại...';
+      toast('Đã lưu WiFi. Khởi động lại sau 1s...', 'ok');
+    });
 }
+
+function onDrawShapeChange(){
+  const sh = document.getElementById('dwShape').value;
+  const a1Lbl = document.getElementById('dwA1Lbl');
+  const a2Lbl = document.getElementById('dwA2Lbl');
+  const a3Lbl = document.getElementById('dwA3Lbl');
+  const a4Group = document.getElementById('dwA4Group');
+  if(sh === 'circle'){
+    if(a1Lbl) a1Lbl.textContent = 'Tâm CX';
+    if(a2Lbl) a2Lbl.textContent = 'Tâm CY';
+    if(a3Lbl) a3Lbl.textContent = 'Bán kính R';
+    if(a4Group) a4Group.style.display = 'none';
+  } else {
+    if(a1Lbl) a1Lbl.textContent = 'X1';
+    if(a2Lbl) a2Lbl.textContent = 'Y1';
+    if(a3Lbl) a3Lbl.textContent = 'X2';
+    if(a4Group) a4Group.style.display = 'flex';
+  }
+}
+
 function startDraw(){
   const sh = document.getElementById('dwShape').value;
   const v = id => parseFloat(document.getElementById(id).value) || 0;
@@ -1275,7 +1354,8 @@ function updateUI(d){
       f.push(`<span class="${j.homed ? 'f-h' : 'f-e'}">${j.homed ? (j.restored ? 'HOMED (NVS)' : 'HOMED') : 'CHƯA HOME'}</span>`);
       if(j.drift) f.push('<span class="f-d">DRIFT!</span>');
       if(!j.encOK) f.push('<span class="f-e">ENC ERR</span>');
-      jf.innerHTML = f.join(' · ');
+      const fHtml = f.join(' · ');
+      if(jf.innerHTML !== fHtml) jf.innerHTML = fHtml;
     }
   });
 }
@@ -1284,7 +1364,7 @@ function setOnline(on){
   const c = document.getElementById('conn');
   if(c) c.classList.toggle('offline', !on);
   const s = document.getElementById('sub');
-  if(!on && s) s.textContent = 'MẤT KẾT NỐI — đang thử lại...';
+  if(!on && s) s.textContent = 'MẤT KẾT NỐI — Đang thử lại...';
 }
 function pollOnce(){
   fetch('/api/status').then(r => r.json())
@@ -1298,8 +1378,6 @@ pollOnce();
 </script>
 </body>
 </html>
-
-
 )rawliteral";
 
 namespace {
@@ -1308,6 +1386,7 @@ ArmController* armPtr = nullptr;
 WifiManager* wifiPtr = nullptr;
 JointModel* jointsPtr = nullptr;
 NvsStore* nvsPtr = nullptr;
+WorkPlane* workPlanePtr = nullptr;
 
 void sendJson(int code, const String& body) { srv->send(code, "application/json", body); }
 
@@ -1323,25 +1402,21 @@ void handleStatus() {
 
 void handleJog() {
     if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
-
     if (srv->hasArg("fault_clear")) {
         ArmCommand c;
         c.type = ArmCommand::CLEAR_FAULT;
         srv->send(200, "text/plain", armPtr->submit(c) ? "OK" : "busy");
         return;
     }
-
     const int axis = srv->arg("axis").toInt();
     const float deg = srv->arg("deg").toFloat();
-    if (axis < 0 || axis >= NUM_MOTORS || deg == 0.0f ||
-        fabsf(deg) > 45.0f) { // giới hạn an toàn mỗi lệnh jog
-        srv->send(400, "text/plain", "bad args");
-        return;
-    }
+    if (axis < 0 || axis >= NUM_MOTORS) { srv->send(400, "text/plain", "bad axis"); return; }
+    if (fabsf(deg) < 0.01f || fabsf(deg) > 180.0f) { srv->send(400, "text/plain", "bad deg"); return; }
     ArmCommand c;
     c.type = ArmCommand::JOG_REL;
     c.axis = static_cast<uint8_t>(axis);
     c.value = deg;
+    if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
     const bool ok = armPtr->submit(c, 20);
     srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
 }
@@ -1350,7 +1425,6 @@ void handleStop() {
     if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
     ArmCommand c;
     c.type = ArmCommand::STOP_ALL;
-    // STOP luôn được chấp nhận: đợi tối đa 50ms cho slot queue
     const bool ok = armPtr->submit(c, 50);
     srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "queue full");
 }
@@ -1444,6 +1518,11 @@ void handleSetHome() {
 
 void handleClearCalib() {
     if (jointsPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    // Flash Write Isolation Guard: Cáº¥m xÃ³a NVS khi robot Ä‘ang chuyá»ƒn Ä‘á»™ng
+    if (armPtr != nullptr && armPtr->busy()) {
+        srv->send(409, "text/plain", "CANNOT_WRITE_FLASH_WHILE_MOVING");
+        return;
+    }
     const int axis = srv->arg("axis").toInt();
     if (axis < 0 || axis >= NUM_MOTORS) { srv->send(400, "text/plain", "bad axis"); return; }
     jointsPtr->forgetHome(static_cast<uint8_t>(axis));
@@ -1452,6 +1531,11 @@ void handleClearCalib() {
 
 void handleWifiSave() {
     if (wifiPtr == nullptr || nvsPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    // Flash Write Isolation Guard: Cáº¥m ghi NVS khi robot Ä‘ang chuyá»ƒn Ä‘á»™ng
+    if (armPtr != nullptr && armPtr->busy()) {
+        srv->send(409, "text/plain", "CANNOT_WRITE_FLASH_WHILE_MOVING");
+        return;
+    }
     String ssid = srv->arg("ssid");
     String pass = srv->arg("pass");
     ssid.trim();
@@ -1464,20 +1548,54 @@ void handleWifiSave() {
         return;
     }
     srv->send(200, "application/json", "{\"saved\":true,\"reboot\":true}");
-    Serial.println("[WEB] WiFi creds moi da luu — restart sau 1s...");
+    Serial.println("[WEB] WiFi creds moi da luu â€” restart sau 1s...");
     delay(1000);
     ESP.restart();
+}
+
+void handleWorkPlaneCalib() {
+    if (workPlanePtr == nullptr) { srv->send(500, "text/plain", "WorkPlane not initialized"); return; }
+    const Point3D p1{srv->arg("p1x").toFloat(), srv->arg("p1y").toFloat(), srv->arg("p1z").toFloat()};
+    const Point3D p2{srv->arg("p2x").toFloat(), srv->arg("p2y").toFloat(), srv->arg("p2z").toFloat()};
+    const Point3D p3{srv->arg("p3x").toFloat(), srv->arg("p3y").toFloat(), srv->arg("p3z").toFloat()};
+    if (workPlanePtr->setThreePointCalibration(p1, p2, p3)) {
+        srv->send(200, "application/json", "{\"calibrated\":true,\"error\":\"\"}");
+    } else {
+        String json = "{\"calibrated\":false,\"error\":\"" + workPlanePtr->getLastError() + "\"}";
+        srv->send(400, "application/json", json);
+    }
+}
+
+void handleWorkPlaneToggle() {
+    if (workPlanePtr == nullptr) { srv->send(500, "text/plain", "WorkPlane not initialized"); return; }
+    const bool en = (srv->arg("en").toInt() != 0);
+    workPlanePtr->setEnabled(en);
+    srv->send(200, "application/json", workPlanePtr->isEnabled() ? "{\"enabled\":true}" : "{\"enabled\":false}");
+}
+
+void handleWorkPlaneStatus() {
+    if (workPlanePtr == nullptr) { srv->send(500, "text/plain", "WorkPlane not initialized"); return; }
+    const Point3D o = workPlanePtr->getOrigin();
+    const Point3D n = workPlanePtr->getNormal();
+    char buf[256];
+    snprintf(buf, sizeof(buf),
+             "{\"isCalibrated\":%s,\"isEnabled\":%s,\"origin\":[%.2f,%.2f,%.2f],\"normal\":[%.3f,%.3f,%.3f],\"error\":\"%s\"}",
+             workPlanePtr->isCalibrated() ? "true" : "false",
+             workPlanePtr->isEnabled() ? "true" : "false",
+             o.x, o.y, o.z, n.x, n.y, n.z, workPlanePtr->getLastError().c_str());
+    sendJson(200, buf);
 }
 
 } // namespace
 
 void webBegin(WebServer& server, ArmController* arm, WifiManager* wifi,
-              JointModel* joints, NvsStore* nvs) {
+              JointModel* joints, NvsStore* nvs, WorkPlane* workPlane) {
     srv = &server;
     armPtr = arm;
     wifiPtr = wifi;
     jointsPtr = joints;
     nvsPtr = nvs;
+    workPlanePtr = workPlane;
 
     server.on("/", HTTP_GET, handleRoot);
     server.on("/api/status", HTTP_GET, handleStatus);
@@ -1490,6 +1608,9 @@ void webBegin(WebServer& server, ArmController* arm, WifiManager* wifi,
     server.on("/api/sethome", HTTP_GET, handleSetHome);
     server.on("/api/clearcalib", HTTP_GET, handleClearCalib);
     server.on("/api/wifi", HTTP_POST, handleWifiSave);
+    server.on("/api/workplane/calib", HTTP_POST, handleWorkPlaneCalib);
+    server.on("/api/workplane/toggle", HTTP_POST, handleWorkPlaneToggle);
+    server.on("/api/workplane/status", HTTP_GET, handleWorkPlaneStatus);
 
     server.begin();
     Serial.printf("[WEB] HTTP server on port %u\n", WEB_SERVER_PORT);

@@ -3,6 +3,7 @@
 #include "joint_model.h"
 #include "kinematics.h"
 #include "motor.h"
+#include "work_plane.h"
 
 namespace {
 constexpr float DEG2RAD = 0.017453292519943295f;
@@ -71,8 +72,9 @@ bool Planner::submit(const Job& job) {
     const char* shapeName = (job_.shape == Shape::LINE)    ? "LINE"
                             : (job_.shape == Shape::CIRCLE) ? "CIRCLE"
                                                             : "POINT";
-    Serial.printf("[PLAN] Job %s: len=%.1fmm feed=%.1fmm/s\n",
-                  shapeName, totalLen_, job_.feedMmS);
+    Serial.printf("[PLAN] Job %s: len=%.1fmm feed=%.1fmm/s (WorkPlane: %s)\n",
+                  shapeName, totalLen_, job_.feedMmS,
+                  (workPlane && workPlane->isEnabled()) ? "ENABLED" : "OFF");
     return true;
 }
 
@@ -85,10 +87,21 @@ void Planner::stop() {
 }
 
 bool Planner::startMoveTo(float x, float y, float z, float feedMmS) {
+    float rx = x;
+    float ry = y;
+    float rz = z;
+    if (workPlane != nullptr && workPlane->isEnabled()) {
+        const Point3D robotP = workPlane->toRobotXYZ(x, y, z - job_.z);
+        rx = robotP.x;
+        ry = robotP.y;
+        rz = robotP.z;
+    }
+
     float target[6];
-    kin::Pose p{x, y, z};
+    kin::Pose p{rx, ry, rz};
     if (!kin::ikPenDown(p, target)) {
-        Serial.printf("[PLAN] LOI: diem (%.1f, %.1f, %.1f) ngoai vung lam viec\n", x, y, z);
+        Serial.printf("[PLAN] LOI: diem (%.1f, %.1f, %.1f) [Robot: %.1f, %.1f, %.1f] ngoai vung lam viec\n",
+                      x, y, z, rx, ry, rz);
         stop();
         return false;
     }

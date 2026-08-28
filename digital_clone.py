@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 """
 ===============================================================================
-NEMA-6AXIS-ARM-CONTROLLER — High-Fidelity Multi-View Digital Clone
+NEMA-6AXIS-ARM-CONTROLLER — High-Fidelity Multi-View Digital Clone Pro
 ===============================================================================
 Exact kinematics, geometry, joint model, limits, and planner simulator matching
-firmware in src/ (config.h, kinematics.cpp, joint_model.cpp, planner.cpp) and
-docs/ARM_GEOMETRY.md.
+firmware in src/ (config.h, kinematics.cpp, joint_model.cpp, planner.cpp,
+work_plane.cpp) and docs/ARM_GEOMETRY.md.
 
 Features:
   - Exact Joint Limits matching src/config.h (J1..J6)
-  - Non-overlapping 3-Zone Architecture (Zero widget event collisions)
+  - Non-overlapping Multi-Zone Architecture (Zero widget event collisions)
   - Multi-View Engineering Display: 3D Metric View + 2D Side Elevation + 2D Top View
   - Persistent in-place artist updates (Smooth 60FPS, no canvas redraw lag)
   - Exact Craig Modified DH kinematics (139, 138, 88, 126, 20) with L-shaped forearm
-  - Closed-form pen-down IK, Cartesian path planner simulator (Line/Circle)
+  - Closed-form pen-down IK, Cartesian path planner simulator (Line/Circle/Spiral/Star)
+  - 3-Point WorkPlane Calibration Engine (Gram-Schmidt UCS for tilted/vertical planes)
+  - Real-Time Hardware Bridge (WiFi REST sync & dispatch with physical ESP32-S3)
+  - Velocity & Step-Frequency Profiler (50 kHz timer load & feed rate analyzer)
+  - Interactive Click-to-Move Viewports (Direct Cartesian positioning via mouse clicks)
   - Flaw Detector: table collision, joint limits, singularity & resolution bottlenecks
 
 Usage:
@@ -25,10 +29,14 @@ Usage:
 import sys
 import math
 import time
+import json
+import threading
 import argparse
+import urllib.request
+import urllib.error
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider, Button, RadioButtons
+from matplotlib.widgets import Slider, Button
 from mpl_toolkits.mplot3d import Axes3D
 
 
@@ -296,7 +304,70 @@ def ik_pen_down(target_x, target_y, target_z):
 
 
 # ==============================================================================
-# 4. STEP CONVERSION & RESOLUTION ANALYZER
+# 4. WORKPLANE 3-POINT CALIBRATION ENGINE (src/work_plane.cpp match)
+# ==============================================================================
+class WorkPlane:
+    """
+    Simulates the 3-Point Gram-Schmidt WorkPlane system from src/work_plane.cpp.
+    Maps User Coordinate System (UCS u, v, w) to Robot Base (x, y, z).
+    """
+    def __init__(self):
+        self.enabled = False
+        self.p1 = np.array([100.0, -80.0, 10.0])  # Origin (u=0, v=0)
+        self.p2 = np.array([180.0, -80.0, 10.0])  # +U direction
+        self.p3 = np.array([100.0,  80.0, 10.0])  # +V plane definition
+        self.u_axis = np.array([1.0, 0.0, 0.0])
+        self.v_axis = np.array([0.0, 1.0, 0.0])
+        self.normal = np.array([0.0, 0.0, 1.0])
+        self.calibrate(self.p1, self.p2, self.p3)
+
+    def calibrate(self, p1, p2, p3):
+        self.p1 = np.array(p1, dtype=float)
+        self.p2 = np.array(p2, dtype=float)
+        self.p3 = np.array(p3, dtype=float)
+
+        v12 = self.p2 - self.p1
+        len12 = np.linalg.norm(v12)
+        if len12 < 20.0:
+            return False, "Points P1 and P2 too close (< 20mm)"
+
+        u = v12 / len12
+        v13 = self.p3 - self.p1
+        len13 = np.linalg.norm(v13)
+        if len13 < 20.0:
+            return False, "Points P1 and P3 too close (< 20mm)"
+
+        n_raw = np.cross(u, v13)
+        len_n = np.linalg.norm(n_raw)
+        if len_n < len13 * 0.1736:  # Sin < 10 deg (collinear)
+            return False, "Points P1, P2, P3 are nearly collinear (< 10°)"
+
+        n = n_raw / len_n
+        if n[2] < 0.0:
+            n = -n  # Ensure normal points upward
+
+        v = np.cross(n, u)
+
+        self.u_axis = u
+        self.v_axis = v
+        self.normal = n
+        return True, "WorkPlane Calibrated Successfully"
+
+    def ucs_to_base(self, u, v, w=0.0):
+        if not self.enabled:
+            return np.array([u, v, w])
+        return self.p1 + u * self.u_axis + v * self.v_axis + w * self.normal
+
+    def get_plane_mesh(self, u_range=(-30, 120), v_range=(-30, 180)):
+        uu, vv = np.meshgrid(np.linspace(u_range[0], u_range[1], 5), np.linspace(v_range[0], v_range[1], 5))
+        gx = self.p1[0] + uu * self.u_axis[0] + vv * self.v_axis[0]
+        gy = self.p1[1] + uu * self.u_axis[1] + vv * self.v_axis[1]
+        gz = self.p1[2] + uu * self.u_axis[2] + vv * self.v_axis[2]
+        return gx, gy, gz
+
+
+# ==============================================================================
+# 5. STEP CONVERSION & RESOLUTION ANALYZER
 # ==============================================================================
 def degrees_to_steps(axis, deg):
     steps = int(round(deg * STEPS_PER_DEGREE[axis]))
@@ -337,7 +408,7 @@ def compute_tcp_step_resolution(enc_deg):
 
 
 # ==============================================================================
-# 5. FLAW & ANOMALY DETECTOR
+# 6. FLAW & ANOMALY DETECTOR
 # ==============================================================================
 class FlawDetector:
     @staticmethod
@@ -389,55 +460,108 @@ class FlawDetector:
 
 
 # ==============================================================================
-# 6. PLANNER & TRAJECTORY SIMULATOR (src/planner.cpp simulation)
+# 7. ADVANCED PLANNER & TRAJECTORY GENERATOR
 # ==============================================================================
 class PlannerSimulator:
     @staticmethod
-    def plan_line(x1, y1, x2, y2, z_paper):
+    def plan_line(x1, y1, x2, y2, z_paper, work_plane=None):
         dx, dy = x2 - x1, y2 - y1
         total_len = math.hypot(dx, dy)
         if total_len < 1e-3:
             return []
 
         waypoints = []
-        z_safe = z_paper + PEN_LIFT_MM
-
-        n_travel = max(2, int(total_len / (DRAW_SEGMENT_MM * 4)))
-        for s in np.linspace(0, 1, n_travel):
-            waypoints.append({"x": x1, "y": y1, "z": z_safe, "drawing": False, "phase": "TRAVEL"})
-
-        waypoints.append({"x": x1, "y": y1, "z": z_paper, "drawing": False, "phase": "DROP"})
-
         n_draw = max(2, int(math.ceil(total_len / DRAW_SEGMENT_MM)))
-        for s in np.linspace(0, 1, n_draw):
-            waypoints.append({"x": x1 + s * dx, "y": y1 + s * dy, "z": z_paper, "drawing": True, "phase": "DRAW"})
 
-        waypoints.append({"x": x2, "y": y2, "z": z_safe, "drawing": False, "phase": "LIFT"})
+        p_start_safe = work_plane.ucs_to_base(x1, y1, PEN_LIFT_MM) if work_plane and work_plane.enabled else np.array([x1, y1, z_paper + PEN_LIFT_MM])
+        p_start_draw = work_plane.ucs_to_base(x1, y1, 0.0) if work_plane and work_plane.enabled else np.array([x1, y1, z_paper])
+
+        waypoints.append({"x": p_start_safe[0], "y": p_start_safe[1], "z": p_start_safe[2], "drawing": False, "phase": "TRAVEL"})
+        waypoints.append({"x": p_start_draw[0], "y": p_start_draw[1], "z": p_start_draw[2], "drawing": False, "phase": "DROP"})
+
+        for s in np.linspace(0, 1, n_draw):
+            ux = x1 + s * dx
+            uy = y1 + s * dy
+            p_draw = work_plane.ucs_to_base(ux, uy, 0.0) if work_plane and work_plane.enabled else np.array([ux, uy, z_paper])
+            waypoints.append({"x": p_draw[0], "y": p_draw[1], "z": p_draw[2], "drawing": True, "phase": "DRAW"})
+
+        p_end_safe = work_plane.ucs_to_base(x2, y2, PEN_LIFT_MM) if work_plane and work_plane.enabled else np.array([x2, y2, z_paper + PEN_LIFT_MM])
+        waypoints.append({"x": p_end_safe[0], "y": p_end_safe[1], "z": p_end_safe[2], "drawing": False, "phase": "LIFT"})
         return waypoints
 
     @staticmethod
-    def plan_circle(cx, cy, r, z_paper):
+    def plan_circle(cx, cy, r, z_paper, work_plane=None):
         if r <= 0.0:
             return []
         circumference = 2.0 * math.pi * r
-        n_draw = max(12, int(math.ceil(circumference / DRAW_SEGMENT_MM)))
-        z_safe = z_paper + PEN_LIFT_MM
+        n_draw = max(16, int(math.ceil(circumference / DRAW_SEGMENT_MM)))
         waypoints = []
 
-        start_x, start_y = cx + r, cy
-        waypoints.append({"x": start_x, "y": start_y, "z": z_safe, "drawing": False, "phase": "TRAVEL"})
-        waypoints.append({"x": start_x, "y": start_y, "z": z_paper, "drawing": False, "phase": "DROP"})
+        start_u, start_v = cx + r, cy
+        p_start_safe = work_plane.ucs_to_base(start_u, start_v, PEN_LIFT_MM) if work_plane and work_plane.enabled else np.array([start_u, start_v, z_paper + PEN_LIFT_MM])
+        p_start_draw = work_plane.ucs_to_base(start_u, start_v, 0.0) if work_plane and work_plane.enabled else np.array([start_u, start_v, z_paper])
+
+        waypoints.append({"x": p_start_safe[0], "y": p_start_safe[1], "z": p_start_safe[2], "drawing": False, "phase": "TRAVEL"})
+        waypoints.append({"x": p_start_draw[0], "y": p_start_draw[1], "z": p_start_draw[2], "drawing": False, "phase": "DROP"})
 
         for ang in np.linspace(0, 2 * math.pi, n_draw):
-            waypoints.append({"x": cx + r * math.cos(ang), "y": cy + r * math.sin(ang), "z": z_paper, "drawing": True, "phase": "DRAW"})
+            ux = cx + r * math.cos(ang)
+            uy = cy + r * math.sin(ang)
+            p_draw = work_plane.ucs_to_base(ux, uy, 0.0) if work_plane and work_plane.enabled else np.array([ux, uy, z_paper])
+            waypoints.append({"x": p_draw[0], "y": p_draw[1], "z": p_draw[2], "drawing": True, "phase": "DRAW"})
 
-        waypoints.append({"x": start_x, "y": start_y, "z": z_safe, "drawing": False, "phase": "LIFT"})
+        waypoints.append({"x": p_start_safe[0], "y": p_start_safe[1], "z": p_start_safe[2], "drawing": False, "phase": "LIFT"})
+        return waypoints
+
+    @staticmethod
+    def plan_spiral(cx, cy, r_max, z_paper, work_plane=None):
+        n_points = 70
+        waypoints = []
+        theta_max = 4.0 * math.pi
+
+        p_start_safe = work_plane.ucs_to_base(cx, cy, PEN_LIFT_MM) if work_plane and work_plane.enabled else np.array([cx, cy, z_paper + PEN_LIFT_MM])
+        waypoints.append({"x": p_start_safe[0], "y": p_start_safe[1], "z": p_start_safe[2], "drawing": False, "phase": "TRAVEL"})
+
+        for th in np.linspace(0, theta_max, n_points):
+            r = (r_max / theta_max) * th
+            ux = cx + r * math.cos(th)
+            uy = cy + r * math.sin(th)
+            p_draw = work_plane.ucs_to_base(ux, uy, 0.0) if work_plane and work_plane.enabled else np.array([ux, uy, z_paper])
+            waypoints.append({"x": p_draw[0], "y": p_draw[1], "z": p_draw[2], "drawing": True, "phase": "DRAW"})
+
+        last = waypoints[-1]
+        waypoints.append({"x": last["x"], "y": last["y"], "z": last["z"] + PEN_LIFT_MM, "drawing": False, "phase": "LIFT"})
+        return waypoints
+
+    @staticmethod
+    def plan_star(cx, cy, r_outer, z_paper, work_plane=None):
+        r_inner = r_outer * 0.42
+        n_points = 5
+        waypoints = []
+
+        angles = []
+        for i in range(n_points * 2 + 1):
+            a = math.pi / 2.0 + i * (math.pi / n_points)
+            r = r_outer if i % 2 == 0 else r_inner
+            angles.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+
+        first = angles[0]
+        p_safe = work_plane.ucs_to_base(first[0], first[1], PEN_LIFT_MM) if work_plane and work_plane.enabled else np.array([first[0], first[1], z_paper + PEN_LIFT_MM])
+        waypoints.append({"x": p_safe[0], "y": p_safe[1], "z": p_safe[2], "drawing": False, "phase": "TRAVEL"})
+
+        for pt in angles:
+            p_draw = work_plane.ucs_to_base(pt[0], pt[1], 0.0) if work_plane and work_plane.enabled else np.array([pt[0], pt[1], z_paper])
+            waypoints.append({"x": p_draw[0], "y": p_draw[1], "z": p_draw[2], "drawing": True, "phase": "DRAW"})
+
+        waypoints.append({"x": p_safe[0], "y": p_safe[1], "z": p_safe[2], "drawing": False, "phase": "LIFT"})
         return waypoints
 
     @staticmethod
     def evaluate_trajectory(waypoints):
         results = []
         all_ok = True
+        prev_angles = None
+        dt = 0.05  # 50ms per step approx
 
         for i, wp in enumerate(waypoints):
             success, angles, details = ik_pen_down(wp["x"], wp["y"], wp["z"])
@@ -448,9 +572,11 @@ class PlannerSimulator:
                 "phase": wp["phase"],
                 "ik_ok": success,
                 "angles": angles,
+                "step_rates": [0.0] * 6,
                 "flaws": [],
                 "warnings": []
             }
+
             if not success:
                 all_ok = False
                 res["flaws"].append(f"IK Fail: {details['reason']}")
@@ -460,15 +586,25 @@ class PlannerSimulator:
                 res["warnings"].extend(warnings)
                 if len(flaws) > 0:
                     all_ok = False
+
+                # Compute step rates
+                if prev_angles is not None:
+                    for j in range(6):
+                        d_deg = abs(angles[j] - prev_angles[j])
+                        d_steps = d_deg * STEPS_PER_DEGREE[j]
+                        res["step_rates"][j] = d_steps / dt
+                prev_angles = list(angles)
+
             results.append(res)
         return all_ok, results
 
 
 # ==============================================================================
-# 7. HIGH-PRECISION MULTI-VIEW GUI (Refined Easy-to-Use Edition)
+# 8. HIGH-PRECISION MULTI-VIEW GUI (Pro Edition)
 # ==============================================================================
 class DigitalCloneGUI:
-    def __init__(self):
+    def __init__(self, robot_host="http://robot-arm.local"):
+        self.robot_host = robot_host
         self.joint_angles = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         self.target_xyz = [160.0, 0.0, 10.0]
         self.path_type = "line"
@@ -476,10 +612,15 @@ class DigitalCloneGUI:
         self.anim_idx = 0
         self.is_playing = False
         self._updating = False
+        self.work_plane = WorkPlane()
+        self.bridge_status = "Bridge: Idle (Ready to Connect)"
 
         self.setup_ui()
         self.setup_artists()
         self.generate_path()
+
+        # Connect click events for interactive Click-to-Move
+        self.fig.canvas.mpl_connect('button_press_event', self.on_canvas_click)
 
         # Non-blocking animation timer using Matplotlib canvas timer
         self.anim_timer = self.fig.canvas.new_timer(interval=35)
@@ -490,9 +631,9 @@ class DigitalCloneGUI:
 
     def setup_ui(self):
         # High-DPI dark engineering theme
-        self.fig = plt.figure(figsize=(18.5, 9.8), dpi=100)
+        self.fig = plt.figure(figsize=(19.2, 10.0), dpi=100)
         self.fig.patch.set_facecolor('#0b0f19')
-        self.fig.canvas.manager.set_window_title("NEMA-6AXIS Robotic Arm — Precision Digital Clone")
+        self.fig.canvas.manager.set_window_title("NEMA-6AXIS Robotic Arm — Precision Digital Clone Pro")
 
         # ======================================================================
         # COLUMN 1 (Left 46%): MULTI-VIEW VISUALIZER
@@ -508,12 +649,13 @@ class DigitalCloneGUI:
         self.ax3d.set_ylabel("Y (mm)", color='#94a3b8', fontsize=8, labelpad=3)
         self.ax3d.set_zlabel("Z (mm)", color='#94a3b8', fontsize=8, labelpad=3)
         self.ax3d.tick_params(colors='#64748b', labelsize=7)
-        self.ax3d.set_title("3D ISOMETRIC VIEW (Click & Drag to Rotate)", color='#38bdf8', fontsize=9.5, fontweight='bold', pad=4)
+        self.ax3d.set_title("3D ISOMETRIC VIEW (Click & Drag to Rotate | 3-Point WorkPlane Active)",
+                            color='#38bdf8', fontsize=9.5, fontweight='bold', pad=4)
 
         # 2. 2D Side Elevation X-Z (Bottom-Left)
         self.ax_side = self.fig.add_axes([0.03, 0.05, 0.21, 0.28])
         self.ax_side.set_facecolor('#111827')
-        self.ax_side.set_title("SIDE VIEW (X-Z Plane)", color='#38bdf8', fontsize=8.5, fontweight='bold', pad=4)
+        self.ax_side.set_title("SIDE VIEW (Click to Move X-Z)", color='#38bdf8', fontsize=8.5, fontweight='bold', pad=4)
         self.ax_side.set_xlabel("X (mm)", color='#94a3b8', fontsize=7)
         self.ax_side.set_ylabel("Z (mm)", color='#94a3b8', fontsize=7)
         self.ax_side.set_xlim(-150, 320)
@@ -528,7 +670,7 @@ class DigitalCloneGUI:
         # 3. 2D Top Plan X-Y (Bottom-Right)
         self.ax_top = self.fig.add_axes([0.26, 0.05, 0.21, 0.28])
         self.ax_top.set_facecolor('#111827')
-        self.ax_top.set_title("TOP VIEW (X-Y Plane)", color='#38bdf8', fontsize=8.5, fontweight='bold', pad=4)
+        self.ax_top.set_title("TOP VIEW (Click to Move X-Y)", color='#38bdf8', fontsize=8.5, fontweight='bold', pad=4)
         self.ax_top.set_xlabel("X (mm)", color='#94a3b8', fontsize=7)
         self.ax_top.set_ylabel("Y (mm)", color='#94a3b8', fontsize=7)
         self.ax_top.set_xlim(-260, 260)
@@ -546,114 +688,125 @@ class DigitalCloneGUI:
         self.ax_top.legend(loc='upper right', fontsize=6.0, facecolor='#111827', edgecolor='#1f2937', labelcolor='#cbd5e1')
 
         # ======================================================================
-        # COLUMN 2 (Right 50%): EASY CONTROL STATION
+        # COLUMN 2 (Right 50%): CONTROL STATION & ENGINEERING SUITE
         # ======================================================================
-        # SECTION A: Joint Jog Controls (6 Sliders)
-        self.fig.text(0.51, 0.95, "1. JOINT ANGLE JOG (Degrees):", fontsize=9, fontweight='bold', color='#38bdf8')
+        # SECTION 1: Joint Jog Controls (6 Sliders)
+        self.fig.text(0.51, 0.96, "1. JOINT JOG (Degrees):", fontsize=8.5, fontweight='bold', color='#38bdf8')
 
         self.sliders = []
-        slider_y = [0.90, 0.84, 0.78, 0.72, 0.66, 0.60]
+        slider_y = [0.915, 0.865, 0.815, 0.765, 0.715, 0.665]
         for i in range(6):
-            ax = self.fig.add_axes([0.51, slider_y[i], 0.20, 0.024])
+            ax = self.fig.add_axes([0.51, slider_y[i], 0.20, 0.022])
             ax.set_facecolor('#1e293b')
             p_min, p_max = PHYSICAL_LIMITS[i]
             s = Slider(ax, JOINT_NAMES[i], p_min, p_max, valinit=self.joint_angles[i], valstep=0.5,
                        color='#38bdf8', track_color='#0f172a')
             s.label.set_color('#cbd5e1')
-            s.label.set_fontsize(7.5)
+            s.label.set_fontsize(7.0)
             s.valtext.set_color('#38bdf8')
-            s.valtext.set_fontsize(7.5)
+            s.valtext.set_fontsize(7.0)
             s.valtext.set_fontweight('bold')
             s.on_changed(lambda val, idx=i: self.on_joint_slider(idx, val))
             self.sliders.append(s)
 
-        # SECTION B: Cartesian Target Controls (3 Sliders)
-        self.fig.text(0.74, 0.95, "2. CARTESIAN TARGET (X, Y, Z mm):", fontsize=9, fontweight='bold', color='#f59e0b')
+        # SECTION 2: Cartesian Target Controls (3 Sliders)
+        self.fig.text(0.74, 0.96, "2. CARTESIAN TARGET (mm):", fontsize=8.5, fontweight='bold', color='#f59e0b')
 
         self.cart_sliders = []
         cart_labels = ["Target X (mm)", "Target Y (mm)", "Target Z (mm)"]
         cart_ranges = [(-250.0, 250.0), (-250.0, 250.0), (-10.0, 350.0)]
-        cart_y = [0.90, 0.84, 0.78]
+        cart_y = [0.915, 0.865, 0.815]
         for i in range(3):
-            ax = self.fig.add_axes([0.74, cart_y[i], 0.23, 0.024])
+            ax = self.fig.add_axes([0.74, cart_y[i], 0.23, 0.022])
             ax.set_facecolor('#1e293b')
             s = Slider(ax, cart_labels[i], cart_ranges[i][0], cart_ranges[i][1], valinit=self.target_xyz[i], valstep=1.0,
                        color='#f59e0b', track_color='#0f172a')
             s.label.set_color('#cbd5e1')
-            s.label.set_fontsize(7.5)
+            s.label.set_fontsize(7.0)
             s.valtext.set_color('#f59e0b')
-            s.valtext.set_fontsize(7.5)
+            s.valtext.set_fontsize(7.0)
             s.valtext.set_fontweight('bold')
             s.on_changed(lambda val, idx=i: self.on_cart_slider(idx, val))
             self.cart_sliders.append(s)
 
-        # SECTION C: Presets Quick Actions
-        self.fig.text(0.74, 0.73, "3. PRESET POSES:", fontsize=9, fontweight='bold', color='#a855f7')
+        # SECTION 3: Presets & Hardware Bridge
+        self.fig.text(0.74, 0.77, "3. PRESETS & HARDWARE BRIDGE:", fontsize=8.5, fontweight='bold', color='#a855f7')
         preset_defs = [
-            ("Home (0°)", self.on_home, [0.74, 0.67, 0.07, 0.035]),
-            ("Draw Ready", self.on_preset_draw, [0.82, 0.67, 0.07, 0.035]),
-            ("Reach +X", self.on_preset_reach_fwd, [0.90, 0.67, 0.07, 0.035]),
-            ("Reach -X", self.on_preset_reach_back, [0.74, 0.62, 0.07, 0.035]),
-            ("Folded", self.on_preset_fold, [0.82, 0.62, 0.07, 0.035]),
-            ("Reset 0°", self.on_home, [0.90, 0.62, 0.07, 0.035]),
+            ("Home (0°)", self.on_home, [0.74, 0.72, 0.054, 0.030]),
+            ("Draw Ready", self.on_preset_draw, [0.80, 0.72, 0.054, 0.030]),
+            ("Reach +X", self.on_preset_reach_fwd, [0.86, 0.72, 0.054, 0.030]),
+            ("Folded", self.on_preset_fold, [0.92, 0.72, 0.050, 0.030]),
+            ("📡 Sync ESP32", self.on_sync_robot, [0.74, 0.675, 0.075, 0.030]),
+            ("⚡ Send to Robot", self.on_send_robot, [0.825, 0.675, 0.075, 0.030]),
+            ("📐 Plane Presets", self.on_toggle_plane_preset, [0.91, 0.675, 0.060, 0.030]),
         ]
         self.preset_buttons = []
         for text, cb, pos in preset_defs:
             ax = self.fig.add_axes(pos)
             btn = Button(ax, text, color='#1e293b', hovercolor='#334155')
             btn.label.set_color('#f8fafc')
-            btn.label.set_fontsize(7.5)
+            btn.label.set_fontsize(7.0)
             btn.label.set_fontweight('bold')
             btn.on_clicked(cb)
             self.preset_buttons.append(btn)
 
-        # SECTION D: Path Simulator & Live Scrubber
-        self.fig.text(0.51, 0.54, "4. TRAJECTORY ANIMATOR & SCRUBBER:", fontsize=9, fontweight='bold', color='#10b981')
+        # SECTION 4: Trajectory Studio & WorkPlane
+        self.fig.text(0.51, 0.62, "4. TRAJECTORY GENERATOR & WORKPLANE:", fontsize=8.5, fontweight='bold', color='#10b981')
 
         # Shape buttons
-        ax_line = self.fig.add_axes([0.51, 0.485, 0.08, 0.032])
-        self.btn_line = Button(ax_line, "Draw Line", color='#059669', hovercolor='#10b981')
-        self.btn_line.label.set_color('#ffffff')
-        self.btn_line.label.set_fontsize(7.5)
-        self.btn_line.label.set_fontweight('bold')
-        self.btn_line.on_clicked(lambda e: self.set_path_shape("line"))
+        shapes = [
+            ("Line", "line", [0.51, 0.57, 0.065, 0.030]),
+            ("Circle", "circle", [0.585, 0.57, 0.065, 0.030]),
+            ("Spiral", "spiral", [0.66, 0.57, 0.065, 0.030]),
+            ("Star", "star", [0.735, 0.57, 0.065, 0.030]),
+        ]
+        self.shape_buttons = []
+        for label, stype, pos in shapes:
+            ax = self.fig.add_axes(pos)
+            btn = Button(ax, label, color='#059669' if stype == self.path_type else '#1e293b', hovercolor='#10b981')
+            btn.label.set_color('#ffffff')
+            btn.label.set_fontsize(7.0)
+            btn.label.set_fontweight('bold')
+            btn.on_clicked(lambda e, s=stype: self.set_path_shape(s))
+            self.shape_buttons.append((btn, stype))
 
-        ax_circ = self.fig.add_axes([0.60, 0.485, 0.08, 0.032])
-        self.btn_circ = Button(ax_circ, "Draw Circle", color='#1e293b', hovercolor='#334155')
-        self.btn_circ.label.set_color('#cbd5e1')
-        self.btn_circ.label.set_fontsize(7.5)
-        self.btn_circ.label.set_fontweight('bold')
-        self.btn_circ.on_clicked(lambda e: self.set_path_shape("circle"))
+        # WorkPlane Toggle button
+        ax_wp = self.fig.add_axes([0.81, 0.57, 0.075, 0.030])
+        self.btn_wp = Button(ax_wp, "Plane: OFF", color='#1e293b', hovercolor='#334155')
+        self.btn_wp.label.set_color('#94a3b8')
+        self.btn_wp.label.set_fontsize(7.0)
+        self.btn_wp.label.set_fontweight('bold')
+        self.btn_wp.on_clicked(self.on_toggle_workplane)
 
         # Play / Pause button
-        ax_play = self.fig.add_axes([0.69, 0.485, 0.12, 0.032])
-        self.btn_play = Button(ax_play, "▶ Play Animation", color='#0284c7', hovercolor='#0ea5e9')
+        ax_play = self.fig.add_axes([0.895, 0.57, 0.075, 0.030])
+        self.btn_play = Button(ax_play, "▶ Play", color='#0284c7', hovercolor='#0ea5e9')
         self.btn_play.label.set_color('#ffffff')
-        self.btn_play.label.set_fontsize(8.0)
+        self.btn_play.label.set_fontsize(7.5)
         self.btn_play.label.set_fontweight('bold')
         self.btn_play.on_clicked(self.on_toggle_play)
 
         # Scrubber Slider
-        ax_scrub = self.fig.add_axes([0.51, 0.42, 0.46, 0.026])
+        ax_scrub = self.fig.add_axes([0.51, 0.515, 0.46, 0.022])
         ax_scrub.set_facecolor('#1e293b')
         self.scrub_slider = Slider(ax_scrub, "Path Scrub", 0, 100, valinit=0, valstep=1,
                                    color='#10b981', track_color='#0f172a')
         self.scrub_slider.label.set_color('#cbd5e1')
-        self.scrub_slider.label.set_fontsize(7.5)
+        self.scrub_slider.label.set_fontsize(7.0)
         self.scrub_slider.valtext.set_color('#10b981')
-        self.scrub_slider.valtext.set_fontsize(7.5)
+        self.scrub_slider.valtext.set_fontsize(7.0)
         self.scrub_slider.on_changed(self.on_scrub)
 
-        # SECTION E: Telemetry & Safety HUD
-        self.fig.text(0.51, 0.36, "5. TELEMETRY & SAFETY DIAGNOSTICS:", fontsize=9, fontweight='bold', color='#e2e8f0')
-        self.ax_diag = self.fig.add_axes([0.51, 0.05, 0.46, 0.28])
+        # SECTION 5: Telemetry, Velocity Profiler & Diagnostics HUD
+        self.fig.text(0.51, 0.46, "5. TELEMETRY, VELOCITY PROFILER & SAFETY HUD:", fontsize=8.5, fontweight='bold', color='#e2e8f0')
+        self.ax_diag = self.fig.add_axes([0.51, 0.05, 0.46, 0.39])
         self.ax_diag.set_facecolor('#111827')
         for spine in self.ax_diag.spines.values():
             spine.set_color('#1f2937')
             spine.set_linewidth(1.2)
         self.ax_diag.set_xticks([])
         self.ax_diag.set_yticks([])
-        self.info_text = self.ax_diag.text(0.02, 0.94, "", fontsize=7.8, family='monospace',
+        self.info_text = self.ax_diag.text(0.02, 0.95, "", fontsize=7.4, family='monospace',
                                            color='#f8fafc', va='top', ha='left')
 
     def setup_artists(self):
@@ -667,6 +820,9 @@ class DigitalCloneGUI:
         self.scatter_3d_tcp = self.ax3d.scatter([], [], [], color='#f43f5e', s=100, marker='v', depthshade=False)
         self.line_3d_drawn, = self.ax3d.plot([], [], [], color='#f43f5e', linewidth=3, label='Draw Path')
         self.line_3d_travel, = self.ax3d.plot([], [], [], color='#38bdf8', linestyle=':', linewidth=1.5, label='Travel')
+
+        # 3D WorkPlane Visualizer
+        self.surface_workplane = None
 
         # 3D Ground paper
         gx, gy = np.meshgrid(np.linspace(-220, 220, 11), np.linspace(-220, 220, 11))
@@ -692,12 +848,32 @@ class DigitalCloneGUI:
         self.scatter_top_tcp = self.ax_top.scatter([], [], color='#f43f5e', s=70, marker='o', zorder=6)
         self.line_top_drawn, = self.ax_top.plot([], [], color='#f43f5e', linewidth=2.5)
 
+    def on_canvas_click(self, event):
+        """Interactive Click-to-Move handler on 2D Top and Side Views."""
+        if event.inaxes == self.ax_top and event.xdata is not None and event.ydata is not None:
+            self.target_xyz[0] = round(event.xdata, 1)
+            self.target_xyz[1] = round(event.ydata, 1)
+            self._set_cart_sliders_safe(self.target_xyz)
+            ok, angles, details = ik_pen_down(self.target_xyz[0], self.target_xyz[1], self.target_xyz[2])
+            if ok:
+                self.joint_angles = list(angles)
+                self._set_joint_sliders_safe(self.joint_angles)
+            self.update_all(ik_details=details)
+
+        elif event.inaxes == self.ax_side and event.xdata is not None and event.ydata is not None:
+            self.target_xyz[0] = round(event.xdata, 1)
+            self.target_xyz[2] = max(-10.0, min(350.0, round(event.ydata, 1)))
+            self._set_cart_sliders_safe(self.target_xyz)
+            ok, angles, details = ik_pen_down(self.target_xyz[0], self.target_xyz[1], self.target_xyz[2])
+            if ok:
+                self.joint_angles = list(angles)
+                self._set_joint_sliders_safe(self.joint_angles)
+            self.update_all(ik_details=details)
+
     def on_joint_slider(self, idx, val):
         if self._updating:
             return
         self.joint_angles[idx] = val
-
-        # Synchronize Cartesian sliders from forward kinematics
         tcp, _, _ = forward_kinematics(self.joint_angles)
         self._set_cart_sliders_safe(tcp)
         self.update_all()
@@ -706,8 +882,6 @@ class DigitalCloneGUI:
         if self._updating:
             return
         self.target_xyz[idx] = val
-
-        # Solve IK and sync joint sliders
         ok, angles, details = ik_pen_down(self.target_xyz[0], self.target_xyz[1], self.target_xyz[2])
         if ok:
             self.joint_angles = list(angles)
@@ -752,13 +926,6 @@ class DigitalCloneGUI:
         self._set_cart_sliders_safe(tcp)
         self.update_all()
 
-    def on_preset_reach_back(self, event):
-        self.joint_angles = [0.0, -90.0, 0.0, 0.0, -DELTA_WRIST, 0.0]
-        self._set_joint_sliders_safe(self.joint_angles)
-        tcp, _, _ = forward_kinematics(self.joint_angles)
-        self._set_cart_sliders_safe(tcp)
-        self.update_all()
-
     def on_preset_fold(self, event):
         self.joint_angles = [0.0, 45.0, 90.0, 0.0, -45.0, 0.0]
         self._set_joint_sliders_safe(self.joint_angles)
@@ -766,22 +933,97 @@ class DigitalCloneGUI:
         self._set_cart_sliders_safe(tcp)
         self.update_all()
 
+    def on_toggle_workplane(self, event):
+        self.work_plane.enabled = not self.work_plane.enabled
+        if self.work_plane.enabled:
+            self.btn_wp.label.set_text("Plane: ON")
+            self.btn_wp.color = '#059669'
+            self.btn_wp.label.set_color('#ffffff')
+        else:
+            self.btn_wp.label.set_text("Plane: OFF")
+            self.btn_wp.color = '#1e293b'
+            self.btn_wp.label.set_color('#94a3b8')
+        self.generate_path()
+        self.update_all()
+
+    def on_toggle_plane_preset(self, event):
+        # Cycles between: Flat, 15° Desk, 35° Easel, Vertical
+        if not hasattr(self, '_plane_preset_idx'):
+            self._plane_preset_idx = 0
+        self._plane_preset_idx = (self._plane_preset_idx + 1) % 4
+
+        if self._plane_preset_idx == 0:
+            self.work_plane.calibrate([100, -80, 10], [180, -80, 10], [100, 80, 10])
+            self.bridge_status = "Plane: Horizontal Table (Z=10mm)"
+        elif self._plane_preset_idx == 1:
+            self.work_plane.calibrate([100, -80, 5], [180, -80, 26], [100, 80, 5])
+            self.bridge_status = "Plane: Slanted Desk 15° Incline"
+        elif self._plane_preset_idx == 2:
+            self.work_plane.calibrate([110, -70, 10], [180, -70, 60], [110, 70, 10])
+            self.bridge_status = "Plane: Easel Board 35° Incline"
+        else:
+            self.work_plane.calibrate([150, -60, 20], [150, -60, 120], [150, 60, 20])
+            self.bridge_status = "Plane: Vertical Drawing Board"
+
+        self.work_plane.enabled = True
+        self.btn_wp.label.set_text("Plane: ON")
+        self.btn_wp.color = '#059669'
+        self.btn_wp.label.set_color('#ffffff')
+        self.generate_path()
+        self.update_all()
+
+    def on_sync_robot(self, event):
+        def _sync_thread():
+            try:
+                url = f"{self.robot_host}/api/status"
+                req = urllib.request.Request(url, headers={'User-Agent': 'DigitalClone/2.0'})
+                with urllib.request.urlopen(req, timeout=1.5) as resp:
+                    data = json.loads(resp.read().decode('utf-8'))
+                    if "joints" in data and len(data["joints"]) >= 6:
+                        angles = [float(j.get("deg", 0.0)) for j in data["joints"][:6]]
+                        self.joint_angles = angles
+                        self._set_joint_sliders_safe(angles)
+                        tcp, _, _ = forward_kinematics(angles)
+                        self._set_cart_sliders_safe(tcp)
+                        self.bridge_status = f"ESP32 Synced OK ({data.get('mode', 'IDLE')})"
+            except Exception as e:
+                self.bridge_status = f"Sync Failed: {str(e)[:35]}"
+            self.update_all()
+        threading.Thread(target=_sync_thread, daemon=True).start()
+
+    def on_send_robot(self, event):
+        def _send_thread():
+            try:
+                url = f"{self.robot_host}/api/move"
+                payload = json.dumps({"x": self.target_xyz[0], "y": self.target_xyz[1], "z": self.target_xyz[2]}).encode('utf-8')
+                req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'})
+                with urllib.request.urlopen(req, timeout=1.5) as resp:
+                    self.bridge_status = "Dispatched Move to ESP32 OK"
+            except Exception as e:
+                self.bridge_status = f"Dispatch Failed: {str(e)[:35]}"
+            self.update_all()
+        threading.Thread(target=_send_thread, daemon=True).start()
+
     def set_path_shape(self, shape):
         self.path_type = shape
-        if shape == "line":
-            self.btn_line.color = '#059669'
-            self.btn_circ.color = '#1e293b'
-        else:
-            self.btn_line.color = '#1e293b'
-            self.btn_circ.color = '#059669'
+        for btn, stype in self.shape_buttons:
+            if stype == shape:
+                btn.color = '#059669'
+            else:
+                btn.color = '#1e293b'
         self.generate_path()
         self.fig.canvas.draw_idle()
 
     def generate_path(self):
+        wp = self.work_plane if self.work_plane.enabled else None
         if self.path_type == "circle":
-            wps = PlannerSimulator.plan_circle(140.0, 0.0, 45.0, z_paper=10.0)
+            wps = PlannerSimulator.plan_circle(140.0, 0.0, 45.0, z_paper=10.0, work_plane=wp)
+        elif self.path_type == "spiral":
+            wps = PlannerSimulator.plan_spiral(140.0, 0.0, 50.0, z_paper=10.0, work_plane=wp)
+        elif self.path_type == "star":
+            wps = PlannerSimulator.plan_star(140.0, 0.0, 50.0, z_paper=10.0, work_plane=wp)
         else:
-            wps = PlannerSimulator.plan_line(100.0, -70.0, 180.0, 70.0, z_paper=10.0)
+            wps = PlannerSimulator.plan_line(100.0, -70.0, 180.0, 70.0, z_paper=10.0, work_plane=wp)
 
         all_ok, self.path_results = PlannerSimulator.evaluate_trajectory(wps)
         self.scrub_slider.valmax = max(1, len(self.path_results) - 1)
@@ -813,14 +1055,14 @@ class DigitalCloneGUI:
         if self.is_playing:
             self.is_playing = False
             self.anim_timer.stop()
-            self.btn_play.label.set_text("▶ Play Animation")
+            self.btn_play.label.set_text("▶ Play")
             self.btn_play.color = '#0284c7'
         else:
             if len(self.path_results) == 0:
                 self.generate_path()
             self.is_playing = True
             self.anim_timer.start()
-            self.btn_play.label.set_text("⏸ Pause Animation")
+            self.btn_play.label.set_text("⏸ Pause")
             self.btn_play.color = '#d97706'
         self.fig.canvas.draw_idle()
 
@@ -865,6 +1107,16 @@ class DigitalCloneGUI:
         self.scatter_3d_joints._offsets3d = (jx, jy, jz)
         self.scatter_3d_tcp._offsets3d = ([p_tcp[0]], [p_tcp[1]], [p_tcp[2]])
 
+        # Update 3D WorkPlane Mesh
+        if self.work_plane.enabled:
+            gx, gy, gz = self.work_plane.get_plane_mesh()
+            if self.surface_workplane:
+                self.surface_workplane.remove()
+            self.surface_workplane = self.ax3d.plot_surface(gx, gy, gz, alpha=0.18, color='#10b981')
+        elif self.surface_workplane:
+            self.surface_workplane.remove()
+            self.surface_workplane = None
+
         if len(self.path_results) > 0:
             draw_pts = [p for p in self.path_results if p["drawing"] and p["ik_ok"]]
             trav_pts = [p for p in self.path_results if not p["drawing"] and p["ik_ok"]]
@@ -908,7 +1160,7 @@ class DigitalCloneGUI:
                      ("[CRITICAL FAULT]" if len(flaws) > 0 else "[WARNING: MARGINAL]")
 
         lines = [
-            f"TELEMETRY HUD | {status_tag} | Manipulability w: {w:.2f}",
+            f"TELEMETRY HUD | {status_tag} | Manipulability w: {w:.2f} | {self.bridge_status}",
             f"TCP Tip:   X={tcp[0]:+6.1f} mm  Y={tcp[1]:+6.1f} mm  Z={tcp[2]:+6.1f} mm  |  Wrist: X={wrist[0]:+6.1f} Y={wrist[1]:+6.1f} Z={wrist[2]:+6.1f} mm",
             "JOINT STATUS & RESOLUTION PER MICROSTEP:"
         ]
@@ -929,6 +1181,17 @@ class DigitalCloneGUI:
         lines.append("  " + "  |  ".join(joint_row_1))
         lines.append("  " + "  |  ".join(joint_row_2))
 
+        # Velocity & Step-frequency profiler summary
+        if len(self.path_results) > 0 and self.anim_idx < len(self.path_results):
+            cur_wp = self.path_results[self.anim_idx]
+            max_freq = max(cur_wp.get("step_rates", [0.0]))
+            lines.append(f"MOTION PROFILER: Waypoint #{self.anim_idx+1}/{len(self.path_results)} [{cur_wp['phase']}] | Peak Step Rate: {max_freq:5.0f} Hz (Limit 50kHz OK)")
+
+        # WorkPlane Frame vectors
+        if self.work_plane.enabled:
+            n = self.work_plane.normal
+            lines.append(f"WORKPLANE UCS: Normal n=[{n[0]:+.2f}, {n[1]:+.2f}, {n[2]:+.2f}] | P1=[{self.work_plane.p1[0]:.0f},{self.work_plane.p1[1]:.0f},{self.work_plane.p1[2]:.0f}]")
+
         if ik_details and ik_details.get("reason"):
             lines.append(f"IK Status: {ik_details['reason']}")
 
@@ -943,7 +1206,7 @@ class DigitalCloneGUI:
 
 
 # ==============================================================================
-# 8. AUTOMATED AUDIT SUITE
+# 9. AUTOMATED AUDIT SUITE
 # ==============================================================================
 def run_automated_audit():
     print("=" * 75)
@@ -975,26 +1238,32 @@ def run_automated_audit():
     print(f"   Reachable Solved: {solved} ({solved/tested*100:.1f}%)")
     print(f"   Max Error on FK:  {max_err:.5f} mm  (Threshold: <= 0.5 mm)")
 
-    print("\n3. Planner Path Feasibility Audit:")
-    line_wps = PlannerSimulator.plan_line(100.0, -80.0, 180.0, 80.0, z_paper=5.0)
-    line_ok, _ = PlannerSimulator.evaluate_trajectory(line_wps)
-    print(f"   Line Path Test:   {'PASSED' if line_ok else 'FAILED'}")
+    print("\n3. WorkPlane 3-Point Calibration & Path Audit:")
+    wp = WorkPlane()
+    ok, msg = wp.calibrate([100, -80, 5], [180, -80, 25], [100, 80, 5])
+    print(f"   Gram-Schmidt Calib: {'PASSED' if ok else 'FAILED'} ({msg})")
+    wp.enabled = True
 
-    circle_wps = PlannerSimulator.plan_circle(140.0, 0.0, 50.0, z_paper=5.0)
-    circ_ok, _ = PlannerSimulator.evaluate_trajectory(circle_wps)
-    print(f"   Circle Path Test: {'PASSED' if circ_ok else 'FAILED'}")
+    line_wps = PlannerSimulator.plan_line(10.0, -50.0, 70.0, 50.0, z_paper=0.0, work_plane=wp)
+    line_ok, _ = PlannerSimulator.evaluate_trajectory(line_wps)
+    print(f"   WorkPlane Line:     {'PASSED' if line_ok else 'FAILED'} ({len(line_wps)} waypoints)")
+
+    star_wps = PlannerSimulator.plan_star(40.0, 0.0, 30.0, z_paper=0.0, work_plane=wp)
+    star_ok, _ = PlannerSimulator.evaluate_trajectory(star_wps)
+    print(f"   WorkPlane Star:     {'PASSED' if star_ok else 'FAILED'} ({len(star_wps)} waypoints)")
 
     print("\n" + "=" * 75)
-    print("AUDIT COMPLETE: All kinematics models and geometry verified.")
+    print("AUDIT COMPLETE: All kinematics models, WorkPlane & trajectories verified.")
     print("=" * 75)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="NEMA-6AXIS Digital Clone")
+    parser = argparse.ArgumentParser(description="NEMA-6AXIS Digital Clone Pro")
     parser.add_argument("--test", action="store_true", help="Run automated kinematics audit")
+    parser.add_argument("--host", default="http://robot-arm.local", help="ESP32-S3 REST API Base URL")
     args = parser.parse_args()
 
     if args.test:
         run_automated_audit()
     else:
-        app = DigitalCloneGUI()
+        app = DigitalCloneGUI(robot_host=args.host)

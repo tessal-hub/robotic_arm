@@ -286,11 +286,28 @@ tr:hover td{background:#243247}
     </details>
 
     <details class="mod">
-      <summary>motor.* — điều khiển stepper thống nhất TMC2209/A4988 <span class="file">src/motor.h/.cpp</span></summary>
+      <summary>spsc_queue.h &amp; motion_block.h — Lock-free SPSC Ring Buffer &amp; Q32.32 DDA <span class="file">src/spsc_queue.h, src/motion_block.h</span></summary>
+      <div class="body">
+        <span class="tag">SPSC Queue</span> Ring buffer lock-free chuẩn Single-Producer Single-Consumer (Motion Task đẩy block, Step ISR rút block). Cache-line separation <code>alignas(64)</code> chống false sharing giữa 2 nhân CPU ESP32-S3. Quản lý Epoch flush <code>m_flushEpoch</code> bảo toàn bất biến Single-Writer khi Motion Task cần huỷ hàng đợi.<br>
+        <span class="tag">MotionBlock</span> Struct mô tả chuyển động 6 trục thời gian thực dùng tích phân số nguyên cố định Q32.32 (64-bit). Cung cấp <code>ddaStepFraction</code>, <code>ddaStepAccel</code>, <code>ddaStepJerk</code> và <code>targetAbsSteps</code> chống tích lũy trôi bước (exact snap-to-target).
+      </div>
+    </details>
+
+    <details class="mod">
+      <summary>work_plane.* — 3-point calibration &amp; mặt phẳng vẽ tự do <span class="file">src/work_plane.h/.cpp</span></summary>
+      <div class="body">
+        <span class="tag">UCS Transform</span> Hệ toạ độ làm việc người dùng (User Coordinate System) cho phép vẽ trên mặt phẳng nghiêng bất kỳ (bảng nghiêng, tường, mặt bàn lệch).<br>
+        <span class="tag">3-Point Calib</span> Xác định gốc toạ độ $P_1$ (Origin), vector trục hoành $P_2$ ($+U$), điểm định hướng mặt phẳng $P_3$ ($+V$). Tự động tính hệ cơ sở trực chuẩn Gram-Schmidt $(\vec{u}, \vec{v}, \vec{n})$.<br>
+        <span class="tag">Kiểm tra suy biến</span> Từ chối calib nếu 3 điểm thẳng hàng ($\sin\phi < 0.1736 \Leftrightarrow \phi < 10^\circ$) hoặc khoảng cách quá ngắn ($< 20\,\text{mm}$). Hỗ trợ chuyển đổi thuận nghịch $\text{UCS} \leftrightarrow \text{Robot Base}$.
+      </div>
+    </details>
+
+    <details class="mod">
+      <summary>motor.* — điều khiển stepper thống nhất TMC2209/A4988 &amp; 50kHz DDA Engine <span class="file">src/motor.h/.cpp</span></summary>
       <div class="body">
         Một class cho cả hai loại driver (<code>isTmc()</code> phân biệt).<br>
-        <span class="tag">step engine</span> esp_timer one-shot nối chuỗi; S-curve smoothstep theo vận tốc
-        (v = vStart + s·(vTarget−vStart), s = x²(3−2x)); accel/decel ≤ 100 bước hoặc nửa chừng với move ngắn.<br>
+        <span class="tag">step engine</span> esp_timer 50 kHz (chu kỳ 20 µs) tích phân DDA Q32.32 trực tiếp trong IRAM. Rút block từ <code>g_motionQueue</code> không dùng mutex.<br>
+        <span class="tag">fail-fast e-stop</span> Kiểm tra trực tiếp cờ <code>g_emergencyStop</code> tại dòng đầu của Step ISR — dừng phát xung trong $\le 20\,\mu\text{s}$ mà không phụ thuộc RTOS context switch.<br>
         <span class="tag">position</span> <code>absSteps</code> atomic int64, tăng/giảm theo hướng mỗi xung — nguồn chân lý vị trí.<br>
         <span class="tag">direction</span> A4988: chân DIR. TMC2209 không DIR: ghi register <code>shaft()</code> qua UART (cache <code>lastShaftDir</code>, chỉ ghi khi đổi).<br>
         <span class="tag">config TMC</span> rms_current, microsteps, spreadCycle (+pwm_autoscale off), ihold/iholddelay, toff=4 luôn enable, pdn_disable, mstep_reg_select.<br>
@@ -356,9 +373,10 @@ tr:hover td{background:#243247}
     </details>
 
     <details class="mod">
-      <summary>planner.* — thực thi chuyển động Cartesian <span class="file">src/planner.h/.cpp</span></summary>
+      <summary>planner.* — thực thi chuyển động Cartesian &amp; WorkPlane <span class="file">src/planner.h/.cpp</span></summary>
       <div class="body">
         Job: POINT (tới điểm, travel-only) / LINE (x1,y1 → x2,y2) / CIRCLE (tâm, r, quét CCW đủ vòng từ góc hiện tại).
+        Tích hợp <code>WorkPlane</code>: tự động chuyển đổi toạ độ nét vẽ UCS $(u, v, w) \to \text{Robot Base} (x, y, z)$ trước khi tính Inverse Kinematics.<br>
         Sinh waypoint on-the-fly ~1 mm — không buffer lớn. Kiểm tra r &gt; 0 chống chia 0.<br>
         <span class="tag">segment sync</span> IK pen-down → delta 6 trục; trục nhiều bước nhất (dominant) đặt
         <code>interval = 1e6·segLen/(feed·steps_max)</code>; trục khác scale nghịch đảo để cùng kết thúc đúng lúc.<br>
@@ -396,11 +414,13 @@ tr:hover td{background:#243247}
     </details>
 
     <details class="mod">
-      <summary>web_server.* — web app + REST API <span class="file">src/web_server.h/.cpp</span></summary>
+      <summary>web_server.* — web app + REST API &amp; Flash Isolation <span class="file">src/web_server.h/.cpp</span></summary>
       <div class="body">
         Trang single-page nhúng PROGMEM (dark Mission Sky: nền <code>#0b0f19</code>, surface <code>#111827</code>, accent <code>#38bdf8</code>),
         tabs: Dashboard | 3D Simulation | Joints | Homing | Cartesian | Draw | WiFi + nút E-STOP nổi.
         Polling <code>/api/status</code> mỗi 300 ms.<br>
+        <b>WorkPlane Studio</b>: Giao diện căn chỉnh 3 điểm $P_1, P_2, P_3$ trực tiếp qua web, bật/tắt vẽ trên mặt phẳng nghiêng, hiển thị vector pháp tuyến và gốc toạ độ UCS.<br>
+        <b>Flash Write Isolation Guard</b>: Toàn bộ API ghi flash NVS/LittleFS (<code>/api/wifi</code>, <code>/api/clearcalib</code>) bị chặn (trả HTTP 409) nếu robot đang chuyển động (<code>arm->busy()</code>) nhằm ngăn CPU stall và xung STEP bị glitch.<br>
         <b>Dashboard</b> (Operate): canvas 3D pose thời gian thực (orbit/side/top viewports, link robot đa màu, TCP tip rose glow) + cột
         trạng thái glanceable — chế độ hoạt động (mode word + badge màu theo trạng thái), WiFi, số khớp đã
         home, trạng thái endstop (J#MIN/MAX đang nhấn), phase homing, và tiến độ J1→J4 theo chip highlight.<br>
@@ -678,8 +698,11 @@ tr:hover td{background:#243247}
       <tr><td>GET</td><td><code>/api/home/all</code></td><td>—</td><td>HOME_ALL chuỗi J1→J4; busy → 409</td></tr>
       <tr><td>GET</td><td><code>/api/home/axis</code></td><td><code>axis</code> 0–3</td><td>HOME_AXIS 1 khớp (J5/J6 không hỗ trợ auto-home)</td></tr>
       <tr><td>GET</td><td><code>/api/sethome</code></td><td><code>axis</code> 0–5</td><td>SET_HOME tại chỗ + persist NVS (mọi khớp kể cả J5/J6)</td></tr>
-      <tr><td>GET</td><td><code>/api/clearcalib</code></td><td><code>axis</code> 0–5</td><td>forgetHome: xoá cờ home + NVS</td></tr>
-      <tr><td>POST</td><td><code>/api/wifi</code></td><td><code>ssid</code> ≤32, <code>pass</code> ≤64</td><td>Lưu NVS → delay 1 s → ESP.restart()</td></tr>
+      <tr><td>GET</td><td><code>/api/clearcalib</code></td><td><code>axis</code> 0–5</td><td>forgetHome: xoá cờ home + NVS (chặn khi motor running → 409)</td></tr>
+      <tr><td>POST</td><td><code>/api/wifi</code></td><td><code>ssid</code> ≤32, <code>pass</code> ≤64</td><td>Lưu NVS → delay 1 s → ESP.restart() (chặn khi motor running → 409)</td></tr>
+      <tr><td>POST</td><td><code>/api/workplane/calib</code></td><td><code>p1x..p3z</code></td><td>Căn chỉnh mặt phẳng 3 điểm; từ chối suy biến (thẳng hàng / khoảng cách ngắn)</td></tr>
+      <tr><td>POST</td><td><code>/api/workplane/toggle</code></td><td><code>en</code> (0|1)</td><td>Bật / tắt chế độ chiếu toạ độ UCS lên WorkPlane</td></tr>
+      <tr><td>GET</td><td><code>/api/workplane/status</code></td><td>—</td><td>Lấy trạng thái calib, enabled, origin, normal vector, lỗi gần nhất</td></tr>
     </table>
     <h3>Cấu trúc JSON <code>/api/status</code></h3>
     <ul style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.75rem">
@@ -693,7 +716,7 @@ tr:hover td{background:#243247}
     </ul>
     <h3>Mã lỗi HTTP</h3>
     <ul>
-      <li><b>400</b> bad args (ngoài range validation) · <b>409</b> busy (arm đang làm việc khác) · <b>503</b> queue full · <b>500</b> not ready (module null)</li>
+      <li><b>400</b> bad args (ngoài range validation) · <b>409</b> busy / CANNOT_WRITE_FLASH_WHILE_MOVING · <b>503</b> queue full · <b>500</b> not ready (module null)</li>
     </ul>
   </div>
 </div>
@@ -715,6 +738,8 @@ tr:hover td{background:#243247}
       <li><b>10.</b> Mọi giao dịch UART TMC qua mutex với timeout ngắn — fail thì skip, không treo.</li>
       <li><b>11.</b> Driver luôn enabled — không có EN pin; <code>toff=4</code> bình thường, 0 khi disable.</li>
       <li><b>12.</b> Planner gate: điểm ngoài vùng với ⇒ stop toàn job (kể cả giữa chừng).</li>
+      <li><b>13.</b> <b>Flash Write Isolation Guard:</b> Cấm ghi/xoá NVS/LittleFS khi motor đang chạy (<code>arm->busy()</code>) để tránh <code>spi_flash_op_lock()</code> làm stall CPU và gây glitch phát xung STEP thời gian thực.</li>
+      <li><b>14.</b> <b>Fail-fast Direct ISR E-Stop &amp; 2-Pipeline Safety:</b> Ngắt motor 50kHz kiểm tra trực tiếp <code>g_emergencyStop</code> ($\le 20\,\mu\text{s}$). Pipeline A bù vi sai realtime 200Hz ($|\Delta\theta| \le 3.0^\circ$), Pipeline B phân loại lỗi sâu sau $t_{\text{settle}} = 150\,\text{ms}$ kết hợp tỉ số truyền 20:1 ($\Delta\theta_{\text{raw}} > 90^\circ$ tại trục encoder).</li>
     </ul>
   </div>
 
@@ -738,6 +763,7 @@ tr:hover td{background:#243247}
     <ul>
       <li>Build firmware: <code>pio run</code> — gate bắt buộc trước khi commit</li>
       <li>Test kinematics host: <code>tools/run_kin_tests.sh</code> (g++ trực tiếp — PIO native env bị lỗi Core 6.1.19 "Nothing to build")</li>
+      <li>Mô phỏng Digital Clone Pro: <code>py -3 digital_clone.py</code> (hoặc <code>--test</code> để kiểm toán tự động)</li>
       <li>Monitor serial: <code>pio device monitor</code> @115200 (filter esp32_exception_decoder bật sẵn)</li>
       <li>Web app: http://robot-arm.local hoặc IP hiển thị trong log setup</li>
     </ul>
@@ -745,7 +771,7 @@ tr:hover td{background:#243247}
 </div>
 
 <div class="footer">
-   Generated 2026-08-28 (tích hợp 3D Digital Clone Simulation studio vào web server: Craig MDH FK/IK client-side, 3D orbit/side/top viewports, trajectory animator & live robot mirror) · File này là <b>bản đồ hệ thống sống</b> — AI agent PHẢI cập nhật nó cùng
+   Generated 2026-08-28 (Digital Clone Pro Upgrade: 3-Point WorkPlane Calib, ESP32-S3 WiFi REST Bridge, Velocity/Step Profiler, Multi-Shape Generator, Click-to-Move Viewports) · File này là <b>bản đồ hệ thống sống</b> — AI agent PHẢI cập nhật nó cùng
   docs/IMPLEMENTATION_LOG.md sau mỗi thay đổi (quy tắc trong AGENTS.md)
 </div>
 

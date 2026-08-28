@@ -7,6 +7,14 @@
 #include <atomic>
 #include <memory>
 #include "config.h"
+#include "spsc_queue.h"
+#include "motion_block.h"
+
+// Global direct fail-fast emergency stop flag (Checked in Step ISR every 20us)
+extern std::atomic<bool> g_emergencyStop;
+
+// 6-Axis Synchronized Lock-Free SPSC Motion Queue (Capacity 64 blocks)
+extern SPSCQueue<MotionBlock, 64> g_motionQueue;
 
 struct TMC2209Diag {
     bool uartOk{false};

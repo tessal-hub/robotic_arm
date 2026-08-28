@@ -12,6 +12,7 @@
 #include "sensor.h"
 #include "web_server.h"
 #include "wifi_manager.h"
+#include "work_plane.h"
 
 // ---- Đối tượng toàn cục (static allocation, không heap cho module chính) ----
 static SemaphoreHandle_t g_uartMutex = nullptr;
@@ -30,6 +31,7 @@ static Endstops g_endstops;
 static NvsStore g_nvs;
 static JointModel g_joints;
 static HomingController g_homing;
+static WorkPlane g_workPlane;
 static Planner g_planner;
 static WifiManager g_wifi;
 static WebServer g_server(WEB_SERVER_PORT);
@@ -74,6 +76,7 @@ void setup() {
     // 6) Homing FSM + Planner + Arm arbiter (motion task core 1)
     g_homing.begin(motorPtrs, &g_endstops, &g_joints);
     g_planner.begin(motorPtrs, &g_joints);
+    g_planner.setWorkPlane(&g_workPlane);
     armSetWifiProvider(&g_wifi);
     g_arm.begin(motorPtrs, &g_sensor, &g_endstops, &g_joints, &g_homing, &g_planner);
 
@@ -87,7 +90,7 @@ void setup() {
     }
 
     // 9) Web app
-    webBegin(g_server, &g_arm, &g_wifi, &g_joints, &g_nvs);
+    webBegin(g_server, &g_arm, &g_wifi, &g_joints, &g_nvs, &g_workPlane);
 
     Serial.printf("[MAIN] San sang! IP: %s\n", g_wifi.ipString().c_str());
 }

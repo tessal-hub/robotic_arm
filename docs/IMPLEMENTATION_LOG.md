@@ -812,5 +812,127 @@ hiện tại trừ khi thí nghiệm trên buộc phải đổi mô hình.
 - Cú pháp HTML/CSS/JS PROGMEM sạch sẽ, khớp toàn diện với chuẩn thiết kế Mission Sky dark theme.
 - Đã đồng bộ tài liệu `docs/SYSTEM_OVERVIEW.html` và `docs/IMPLEMENTATION_LOG.md` theo quy chuẩn `AGENTS.md`.
 
+---
+
+## 2026-08-28 — Tối đa hóa sức mạnh phần cứng ESP32-S3 & Kiến trúc Real-time 6 trục
+
+### Việc đã làm
+- What: Thiết kế và triển khai toàn diện giải pháp "Maximize ESP32-S3 Power" theo 5 giai đoạn:
+  1. **Lock-Free SPSC Ring Buffer (`src/spsc_queue.h`)**:
+     - Cấu trúc hàng đợi Single-Producer Single-Consumer lock-free giữa Motion Task (Core 1) và Step Timer ISR (50 kHz).
+     - Cách ly cache line `alignas(64)` triệt tiêu hoàn toàn false sharing giữa 2 nhân CPU Xtensa LX7.
+     - Quản lý Epoch flush `m_flushEpoch` bảo toàn tuyệt đối bất biến Single-Writer (chỉ Step ISR ghi `m_tail`, chỉ Motion Task ghi `m_head` và `m_flushEpoch`).
+  2. **Khối chuyển động Q32.32 Fixed-Point (`src/motion_block.h`) & Engine 50kHz DDA (`src/motor.cpp`)**:
+     - Thay thế tính toán floating-point online bằng tích phân số nguyên cố định Q32.32 (64-bit).
+     - Cung cấp vận tốc ban đầu (`ddaStepFraction`), gia tốc (`ddaStepAccel`), độ giật jerk (`ddaStepJerk`), và cơ chế chốt bước đích (`targetAbsSteps` snap-to-target) chống sai lệch tích lũy.
+  3. **Hệ thống an toàn Fail-Fast $\le 20\,\mu\text{s}$ & Phân loại 2 Pipeline (`src/motor.cpp`, `src/sensor.cpp`)**:
+     - Step ISR kiểm tra trực tiếp cờ atomic `g_emergencyStop` tại dòng đầu tiên để ngắt xung motor ngay trong $\le 20\,\mu\text{s}$.
+     - Pipeline A (Real-time Online 200 Hz): Bù vi sai góc liên tục ($|\Delta\theta| \le 3.0^\circ$), kích hoạt E-Stop ngay khi vượt ngưỡng.
+     - Pipeline B (Phân loại sau dừng $t_{\text{settle}} = 150\,\text{ms}$): Lấy mẫu trung bình 4 chu kỳ $\bar{\theta}_{\text{settle}}$, đối chiếu độ nhảy góc tại trục encoder trước hộp số ($\Delta\theta_{\text{raw}} > 90^\circ$) để tránh nhầm lẫn do tỉ số truyền 20:1 của J1–J3.
+  4. **Module căn chỉnh mặt phẳng 3 điểm WorkPlane (`src/work_plane.h`, `src/work_plane.cpp`)**:
+     - Cho phép robot vẽ tự do trên bất kỳ mặt phẳng nghiêng/bất kỳ nào (bảng nghiêng, tường, mặt bàn lệch).
+     - Thuật toán trực chuẩn hóa Gram-Schmidt $(\vec{u}, \vec{v}, \vec{n})$ từ 3 điểm $P_1, P_2, P_3$.
+     - Kiểm tra suy biến: từ chối 3 điểm thẳng hàng ($\sin\phi < 0.1736 \Leftrightarrow \phi < 10^\circ$) hoặc khoảng cách quá gần ($< 20\,\text{mm}$).
+     - Tích hợp vào Planner (`src/planner.cpp`) để chuyển đổi toạ độ UCS $(u, v, w) \to \text{Robot Base} (x, y, z)$ trước khi giải IK.
+  5. **Flash Write Isolation Guard & Web Studio UI (`src/web_server.cpp`, `src/main.cpp`)**:
+     - Chặn toàn bộ thao tác ghi Flash/NVS/LittleFS khi motor đang chạy (`arm->busy()`) để ngăn `spi_flash_op_lock()` gây stall CPU làm glitch xung STEP.
+     - Bổ sung UI căn chỉnh 3 điểm WorkPlane trên giao diện web và các endpoint REST API (`/api/workplane/calib`, `/api/workplane/toggle`, `/api/workplane/status`).
+- Why: Người dùng yêu cầu tối đa hóa năng lực xử lý của ESP32-S3, chuyển sang kiến trúc deterministic real-time, giải quyết triệt để xung đột SPI Flash vs Timer ISR, và hỗ trợ vẽ trên mặt phẳng nghiêng tùy ý.
+- How: Tuân thủ nghiêm ngặt mô hình toán học Craig Modified DH, chuẩn C++17, RAII và quy tắc bất biến trong `AGENTS.md`.
+
+### Build gate
+- `pio run` $\to$ **SUCCESS** (RAM: 17.8% 58,356 B, Flash: 26.5% 884,945 B, 0 errors, 0 warnings).
+- `tools/run_kin_tests.sh` (g++ host test) $\to$ **ALL KINEMATICS TESTS PASSED** (`IK roundtrip: ok=2050 fail=0`).
+
+---
+
+## 2026-08-28 — Impeccable Web UI Quality Audit & Production Pass (`src/web_server.cpp`)
+
+### Việc đã làm
+- What: Thực hiện toàn diện các lệnh tinh chỉnh chất lượng giao diện web (`clarify`, `harden`, `adapt`, `colorize`, `optimize`, `polish`) theo quy chuẩn thiết kế `impeccable`:
+  1. **Clarify (Xóa bỏ Mojibake & Chuẩn hóa Copy)**:
+     - Sửa triệt để các chuỗi UTF-8 bị lỗi ký tự kép/ANSI (`XÃ³a calib`, `Sáº½ máº¥t`, `Nháº­p SSID`, `Ä Ã£ lÆ°u`, `Máº¤T Káº¾T Ná» I`, `Â°`, `Â·`).
+     - Chuẩn hóa thông báo hành động rõ ràng: `Xóa cân chỉnh vị trí J#? Giá trị zero đã lưu trong NVS sẽ bị xóa.`, `Vui lòng nhập tên mạng WiFi (SSID)`, `Đã lưu WiFi. Khởi động lại sau 1s...`.
+  2. **Harden (Khả năng chống chịu & Accessibility)**:
+     - Bổ sung cấu trúc landmark chuẩn HTML5 (`<main class="app" id="main-content">`, `<section class="card" aria-labelledby="...">`).
+     - Thêm đầy đủ `<label for="...">` và `aria-label` cho các trường nhập Cartesian Target X/Y/Z/Feed, Draw Shape parameters (X1/Y1/X2/Y2, CX/CY/R), WiFi SSID/Pass, thanh trượt Simulation và nút Jog `aria-label="Jog J1 âm/dương"`.
+     - Bổ sung thuộc tính `role="img"` và `aria-label` cho tất cả các Canvas (Dashboard 3D, Sim Studio 3D, 2D Draw Preview).
+     - Thêm `aria-controls` và `aria-labelledby` cho toàn bộ hệ thống Tabs và TabPanes.
+  3. **Adapt (Tương thích thiết bị cảm ứng & Mobile Viewport)**:
+     - Tối ưu kích thước touch target cho `@media (pointer: coarse)`: nâng chiều cao `.stepbtn`, `.sim-pill-btn`, `.tab-btn`, `.btn` lên $\ge 40 - 44\,\text{px}$.
+     - Bổ sung hỗ trợ Safe Area Inset (`viewport-fit=cover`, `env(safe-area-inset-*)`) cho các thiết bị di động có tai thỏ/home bar.
+     - Sắp xếp co giãn động `.input-group` và `.row` dạng wrap linh hoạt chống tràn ngang trên màn hình nhỏ.
+  4. **Colorize (Độ tương phản WCAG AA)**:
+     - Nâng màu `--color-text-dim` từ `#64748b` lên `#94a3b8` giúp các nhãn phụ `.meta`, `.ver`, `.muted`, `.off` đạt tỷ lệ tương phản chuẩn $\ge 4.5:1$ trên nền dark `#111827`.
+     - Giữ nguyên bộ palette màu phân biệt an toàn cho người mù màu (`homed` xanh lục, `run` xanh lam/xanh lục, `fault` đỏ, `warn` hổ phách).
+  5. **Optimize (Hiệu năng Runtime & Canvas 3D)**:
+     - Chuyển đổi vòng lặp hoạt họa Trajectory Animator từ `setInterval` sang `requestAnimationFrame` với delta time $45\,\text{ms}$, tự động tạm dừng khi tab trình duyệt bị ẩn (`document.hidden`).
+     - Tối ưu hóa cập nhật DOM trong `updateUI`: kiểm tra chuỗi HTML cờ trạng thái trước khi gán `innerHTML`, giảm tải reflow/repaint không cần thiết.
+  6. **Polish (Xóa bỏ Anti-pattern & Đồng bộ Tokens)**:
+     - Loại bỏ hoàn toàn anti-pattern viền dày một bên (`border-left-width: 4px`) trên `#toast`, thay bằng HUD badge viền đồng nhất bo tròn `var(--radius-md)`.
+     - Tạo bảng hằng số màu tập trung `THEME_PALETTE` trong JS khớp hoàn toàn với design tokens trong CSS.
+- Why: Người dùng yêu cầu triển khai đồng loạt các giải pháp từ báo cáo audit để nâng cao độ tin cậy, tính tiện dụng trong xưởng và độ sắc nét thẩm mỹ.
+- How: Tuân thủ nghiêm ngặt chuẩn thiết kế `PRODUCT.md` (Product register), `DESIGN.md` và quy tắc `AGENTS.md`.
+
+### Build gate
+- `pio run` $\to$ **SUCCESS** (RAM: 17.8% 58,356 B, Flash: 26.7% 891,825 B, 0 errors, 0 warnings).
+
+### Việc còn lại
+- Không còn vấn đề giao diện tồn đọng. Ready to deploy và vận hành thực tế.
+
+---
+
+## 2026-08-28 — Nâng cấp Digital Clone Pro: 3-Point WorkPlane, WiFi Hardware Bridge, Velocity Profiler & Click-to-Move
+
+### Việc đã làm
+- What: Bổ sung 5 tính năng kỹ thuật nâng cao vào công cụ mô phỏng động học `digital_clone.py`:
+  1. **Hệ thống mặt phẳng căn chỉnh 3 điểm WorkPlane (`WorkPlane`)**:
+     - Đồng bộ thuật toán trực chuẩn hóa Gram-Schmidt $(\vec{u}, \vec{v}, \vec{n})$ khớp 1:1 với `src/work_plane.cpp`.
+     - Cho phép robot vẽ trên các mặt phẳng nghiêng tùy ý (Bàn nghiêng 15°, Giá vẽ Easel 35°, Bảng vẽ thẳng đứng Vertical).
+     - Trực quan hóa mặt phẳng nghiêng bán trong suốt (`plot_surface`) trong không gian 3D Isometric View.
+  2. **Bộ phát quỹ đạo nâng cao (Advanced Trajectory Generator)**:
+     - Bổ sung các hình vẽ tham số mới: `Spiral` (xoắn ốc Archimedes), `Star` (ngôi sao 5 cánh), cùng với `Line` và `Circle`.
+     - Tự động chiếu hình 2D $(u, v)$ lên mặt phẳng nghiêng UCS $(u, v, w) \to \text{Base } (x, y, z)$ trước khi giải IK.
+  3. **Cầu nối phần cứng thời gian thực (WiFi REST Bridge)**:
+     - Tích hợp client HTTP ngầm không block giao diện:
+       - `[📡 Sync ESP32]`: Lấy dữ liệu góc thực từ `http://<ip>/api/status` và phản chiếu tư thế cánh tay thật lên mô hình 3D.
+       - `[⚡ Send to Robot]`: Gửi tọa độ mục tiêu Cartesian xuống endpoint `/api/move` của ESP32-S3 để điều khiển cánh tay vật lý.
+  4. **Bộ phân tích vận tốc & tần số bước (Velocity & Motion Profiler)**:
+     - Tính toán vận tốc góc khớp $(\Delta\theta_i / \Delta t)$ và tần số xung bước $(\text{Hz})$ tại từng waypoint.
+     - Hiển thị giám sát tải timer ngắt 50 kHz trên thanh Telemetry HUD.
+  5. **Tương tác trực tiếp Click-to-Move trên 2D Viewports**:
+     - Bắt sự kiện click chuột trên 2D Top View (X-Y) $\to$ Đặt Target X/Y tức thì.
+     - Bắt sự kiện click chuột trên 2D Side View (X-Z) $\to$ Đặt Target X/Z tức thì và giải IK trong thời gian thực.
+- Why: Mở rộng khả năng của Digital Clone từ công cụ xem tĩnh thành môi trường mô phỏng động học tương tác toàn diện và CAM controller kết nối trực tiếp với ESP32-S3.
+
+### Build gate
+- `py -3 digital_clone.py --test` $\to$ **ALL PASSED**:
+  - `FK Verification at Home`: OK.
+  - `IK Roundtrip Sweep`: 2162/2250 (96.1% reachable), Max FK error = $0.00000\,\text{mm}$.
+  - `WorkPlane 3-Point Gram-Schmidt Calib`: PASSED.
+  - `WorkPlane Line & Star Paths`: PASSED.
+
+---
+
+## 2026-08-28 — Tái cấu trúc & Chuẩn hóa README.md cấp độ Kỹ thuật Công nghiệp
+
+### Việc đã làm
+- What: Viết lại toàn diện tài liệu [`README.md`](file:///E:/00.Project/04.robot-arm/robotic_arm/README.md) từ dạng ghi chép cá nhân thành tài liệu dự án mã nguồn kỹ thuật chuẩn mực:
+  1. **Hệ thống Badges & Thông tin Nhận diện Dự án**: PlatformIO (ESP32-S3), Arduino + FreeRTOS, C++17, Craig Modified DH.
+  2. **Sơ đồ Kiến trúc Hệ thống (Dual-Core SoC Architecture)**: Trực quan hóa phân luồng Core 0 (Sensor Pipeline 200 Hz) $\leftrightarrow$ Core 1 (Motion Arbiter 100 Hz & Web Server) $\leftrightarrow$ Lock-Free SPSC Ring Buffer $\leftrightarrow$ Hardware Timer ISR 50 kHz.
+  3. **Bảng Thông số Phần cứng Chi tiết**: Bảng pinout, chuẩn giao tiếp UART TMC2209 bus, driver A4988, encoder AS5600 qua PCA9548A, và tỉ số truyền các trục.
+  4. **Mô hình Động học Chuẩn Craig Modified DH**: Bảng tham số DH $a, \alpha, d, \theta_{\text{offset}}$, tầm với cực đại $R_{\text{max}}=291.69\,\text{mm}$, bán kính góc chết $R_{\text{min}}=15.69\,\text{mm}$.
+  5. **Hướng dẫn Khởi chạy & Mô phỏng Digital Twin**: Trình bày từng bước clone, build, flash, test kinematics host, và chạy giao diện mô phỏng 3D `digital_clone.py`.
+  6. **Tài liệu REST API & Quy trình Commissioning**: Bảng danh mục endpoint HTTP, tham số truyền vào và danh sách kiểm tra an toàn phần cứng.
+- Why: Người dùng yêu cầu chuẩn hóa lại `README.md` để bất kỳ kỹ sư, cộng tác viên nào khi đọc cũng nắm bắt được toàn diện hệ thống một cách khoa học, chuyên nghiệp.
+- How: Tuân thủ cấu trúc tài liệu công nghiệp, chuẩn Github Markdown và thỏa thuận `AGENTS.md`.
+
+### Build gate
+- Docs update — bảo toàn tính nhất quán và liên kết với toàn bộ codebase.
+
+
+
+
+
 
 
