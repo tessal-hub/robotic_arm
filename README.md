@@ -6,28 +6,28 @@
 [![Kinematics](https://img.shields.io/badge/Kinematics-Craig%20Modified%20DH-brightgreen.svg)](docs/ARM_GEOMETRY.md)
 [![License](https://img.shields.io/badge/License-Proprietary-red.svg)](#license)
 
-Production-grade firmware and companion 3D digital twin engineering suite for a 6-degree-of-freedom (6-DOF) articulated robotic arm with a coaxial drawing tool, powered by the **ESP32-S3 DevKitC-1** dual-core microcontroller.
+Firmware cấp production và bộ công cụ digital twin 3D cho cánh tay robot 6 bậc tự do (6-DOF) dùng bút vẽ đồng trục, chạy trên vi điều khiển **ESP32-S3 DevKitC-1** dual-core.
 
 ---
 
-## 📑 Table of Contents
+## 📑 Mục lục
 
-- [Overview & Architecture](#-overview--architecture)
-- [Key Features](#-key-features)
-- [Hardware Specifications & Complete Pinout](#-hardware-specifications--complete-pinout)
-- [Kinematics & Coordinate Systems](#-kinematics--coordinate-systems)
-- [Quick Start Guide](#-quick-start-guide)
-- [Digital Twin Simulator](#-digital-twin-simulator)
-- [Web Interface & REST API](#-web-interface--rest-api)
-- [Repository Structure](#-repository-structure)
-- [Hardware Commissioning Workflow](#-hardware-commissioning-workflow)
-- [Documentation & Technical References](#-documentation--technical-references)
+- Tổng quan & kiến trúc
+- Tính năng chính
+- Thông số phần cứng & pinout đầy đủ
+- Động học & hệ tọa độ
+- Hướng dẫn bắt đầu nhanh
+- Trình mô phỏng Digital Twin
+- Web interface & REST API
+- Cấu trúc repository
+- Quy trình commissioning phần cứng
+- Tài liệu tham chiếu kỹ thuật
 
 ---
 
-## 🔭 Overview & Architecture
+## 🔭 Tổng quan & kiến trúc
 
-This repository contains the embedded real-time firmware, embedded web studio, and Python 3D simulation twin for high-precision joint control, Cartesian trajectory execution, and 3D inclined plane drawing.
+Repository này chứa firmware thời gian thực, web studio nhúng và mô phỏng Python 3D để điều khiển chính xác từng khớp, chạy quỹ đạo Cartesian và vẽ trên mặt phẳng nghiêng.
 
 ```
                   ┌─────────────────────────────────────────────────────────┐
@@ -55,70 +55,70 @@ This repository contains the embedded real-time firmware, embedded web studio, a
                                                 [ 6x Stepper Motors ]
 ```
 
-### Core Execution Pipeline:
-1. **Core 0 — Sensor Task (200 Hz)**: Polls 6× AS5600 12-bit absolute magnetic encoders via a PCA9548A I2C multiplexer. Continuously updates accumulated joint angles and runs the real-time drift protection pipeline.
-2. **Core 1 — Motion Task (100 Hz) & Web Server**: Consumes command queue requests (`JOG`, `MOVE_CART`, `DRAW_LINE`, `DRAW_CIRCLE`), solves Craig Modified DH kinematics, executes Gram-Schmidt WorkPlane projections, and generates motion blocks.
-3. **Hardware Timer ISR (50 kHz)**: Lock-free Single-Producer Single-Consumer (SPSC) ring buffer with Q32.32 fixed-point DDA pulse generation and sub-20 µs hardware emergency stop response.
+### Pipeline thực thi chính
+1. **Core 0 — Sensor Task (200 Hz)**: Poll 6× encoder từ AS5600 qua mux PCA9548A, cập nhật góc tích lũy và chạy pipeline bảo vệ drift theo thời gian thực.
+2. **Core 1 — Motion Task (100 Hz) & Web Server**: Xử lý queue lệnh (`JOG`, `MOVE_CART`, `DRAW_LINE`, `DRAW_CIRCLE`), giải động học Craig Modified DH, chiếu WorkPlane Gram-Schmidt và tạo motion block.
+3. **Hardware Timer ISR (50 kHz)**: SPSC ring buffer lock-free + phát xung DDA fixed-point Q32.32, phản hồi E-Stop phần cứng dưới 20 µs.
 
 ---
 
-## ✨ Key Features
+## ✨ Tính năng chính
 
-- **Craig Modified DH Kinematics**:
-  - Forward Kinematics (FK) 4×4 transformation matrix chain.
-  - Analytical Closed-Form Inverse Kinematics (IK) for vertical tool posture ($\theta_4 = 0, \theta_6 = 0$).
-  - Full workspace boundary, inner deadzone, and singularity protection.
-- **3-Point WorkPlane Calibration**:
-  - Gram-Schmidt orthonormal coordinate frame $(\vec{u}, \vec{v}, \vec{n})$ calibrated from 3 physical points.
-  - Draw 2D trajectories (Lines, Circles, Custom shapes) on tilted tables, easel boards ($35^\circ$), or vertical walls without manual reprogramming.
-- **Deterministic 50 kHz Stepper Engine**:
-  - Lock-free cacheline-aligned (64B) ring buffer between FreeRTOS tasks and hardware timer ISR.
-  - Q32.32 fixed-point numerical integration with zero floating-point overhead in ISR.
-  - Target step snapping to eliminate cumulative discretization errors.
-- **Dual-Pipeline Closed-Loop Safety**:
-  - **Pipeline A (Online 200 Hz)**: Immediate E-Stop trigger if instantaneous joint error $|\Delta\theta| > 3.0^\circ$.
-  - **Pipeline B (Post-Stop Settlement 150 ms)**: 4-sample average filter to distinguish real motor stall from sensor noise/gear backlash.
-- **Embedded Web Management Studio**:
-  - 100% self-contained single-page application served directly from ESP32-S3 PROGMEM (zero external CDN dependencies).
-  - Real-time 3D interactive preview canvas computed locally via client-side JavaScript kinematics engine.
-  - Full mobile viewport adaptation (`pointer: coarse`, safe area insets) and WCAG AA contrast compliance.
-- **Non-Volatile Calibration (NVS)**:
-  - Stores WiFi credentials, measured homing direction signs, steps-per-degree ratios, and absolute encoder zero references in the `arm-cfg` partition.
+- **Động học Craig Modified DH**:
+  - Forward Kinematics (FK) bằng chuỗi ma trận biến đổi 4×4.
+  - Inverse Kinematics (IK) closed-form cho tư thế bút thẳng đứng ($\theta_4 = 0, \theta_6 = 0$).
+  - Bảo vệ biên workspace, vùng chết bên trong và singularity.
+- **Hiệu chuẩn WorkPlane 3 điểm**:
+  - Tạo hệ tọa độ trực chuẩn $(\vec{u}, \vec{v}, \vec{n})$ từ 3 điểm thực bằng Gram-Schmidt.
+  - Vẽ quỹ đạo 2D (line, circle, custom shape) trên mặt bàn nghiêng, giá vẽ ($35^\circ$) hoặc tường đứng mà không cần sửa code điều khiển.
+- **Engine stepper 50 kHz tính quyết định**:
+  - Ring buffer lock-free căn hàng cacheline 64B giữa task FreeRTOS và timer ISR.
+  - Tích phân Q32.32 fixed-point, không dùng floating-point trong ISR.
+  - Snap bước mục tiêu để triệt tiêu sai số rời rạc tích lũy.
+- **An toàn closed-loop hai pipeline**:
+  - **Pipeline A (online 200 Hz)**: E-Stop ngay khi sai số tức thời $|\Delta\theta| > 3.0^\circ$.
+  - **Pipeline B (sau dừng 150 ms)**: Lọc trung bình 4 mẫu để phân biệt kẹt motor thật với nhiễu sensor/backlash.
+- **Web studio nhúng**:
+  - SPA tự chứa 100% trong PROGMEM ESP32-S3 (không phụ thuộc CDN ngoài).
+  - Canvas preview 3D thời gian thực tính bằng JavaScript kinematics ở client.
+  - Tối ưu viewport mobile (`pointer: coarse`, safe area) và tương phản đạt WCAG AA.
+- **Hiệu chuẩn lưu bền NVS**:
+  - Lưu thông tin WiFi, dấu hướng homing đã đo, tỉ lệ steps-per-degree và zero encoder tuyệt đối trong partition `arm-cfg`.
 
 ---
 
-## 🔌 Hardware Specifications & Complete Pinout
+## 🔌 Thông số phần cứng & pinout đầy đủ
 
-### 1. Master Pinout Table (ESP32-S3 DevKitC-1 N8)
+### 1) Bảng pinout chính (ESP32-S3 DevKitC-1 N8)
 
-| GPIO Pin | Function / Net | Connected Component | Signal Type / Logic | Hardware Notes |
+| GPIO Pin | Chức năng / Net | Linh kiện kết nối | Loại tín hiệu / Logic | Ghi chú phần cứng |
 | :---: | :--- | :--- | :--- | :--- |
-| **GPIO 1** | `STEP_J1` | Motor 1 (J1 Base Yaw) TMC2209 | Digital Output (3.3V Pulse) | 50 kHz hardware timer DDA pulse |
-| **GPIO 2** | `STEP_J2` | Motor 2 (J2 Shoulder) TMC2209 | Digital Output (3.3V Pulse) | 50 kHz hardware timer DDA pulse |
-| **GPIO 41** | `STEP_J3` | Motor 3 (J3 Elbow) TMC2209 | Digital Output (3.3V Pulse) | 50 kHz hardware timer DDA pulse |
-| **GPIO 42** | `STEP_J4` | Motor 4 (J4 Wrist Pan) TMC2209 | Digital Output (3.3V Pulse) | 50 kHz hardware timer DDA pulse |
-| **GPIO 38** | `STEP_J5` | Motor 5 (J5 Wrist Tilt - Left) A4988 | Digital Output (3.3V Pulse) | 50 kHz hardware timer DDA pulse |
-| **GPIO 39** | `DIR_J5` | Motor 5 (J5 Wrist Tilt - Left) A4988 | Digital Output (3.3V Level) | CW/CCW direction control |
-| **GPIO 40** | `STEP_J6` | Motor 6 (J6 Tool Roll - Right) A4988 | Digital Output (3.3V Pulse) | 50 kHz hardware timer DDA pulse |
-| **GPIO 47** | `DIR_J6` | Motor 6 (J6 Tool Roll - Right) A4988 | Digital Output (3.3V Level) | CW/CCW direction control |
-| **GPIO 15** | `UART1_RX` | TMC2209 J1–J4 Shared Bus | Serial Input (115200 Baud) | Direct connection to single-wire PDN bus |
-| **GPIO 16** | `UART1_TX` | TMC2209 J1–J4 Shared Bus | Serial Output (115200 Baud) | Connect via $1\,\text{k}\Omega$ series resistor to PDN bus |
-| **GPIO 8** | `I2C_SDA` | PCA9548A 8-Ch I2C Mux | Open-Drain Bidirectional | $800\,\text{kHz}$ Fast-Mode+, $2.2\,\text{k}\Omega$ pull-up to 3.3V |
-| **GPIO 9** | `I2C_SCL` | PCA9548A 8-Ch I2C Mux | Open-Drain Output Clock | $800\,\text{kHz}$ Fast-Mode+, $2.2\,\text{k}\Omega$ pull-up to 3.3V |
-| **GPIO 5** | `LIMIT_J1_MIN` | J1 Min Endstop Switch | Digital Input (`INPUT_PULLUP`) | Active LOW, 50 ms debounced ISR |
-| **GPIO 6** | `LIMIT_J1_MAX` | J1 Max Endstop Switch | Digital Input (`INPUT_PULLUP`) | Active LOW, 50 ms debounced ISR |
-| **GPIO 7** | `LIMIT_J2_MIN` | J2 Min Endstop Switch | Digital Input (`INPUT_PULLUP`) | Active LOW, 50 ms debounced ISR |
-| **GPIO 10** | `LIMIT_J2_MAX` | J2 Max Endstop Switch | Digital Input (`INPUT_PULLUP`) | Active LOW, 50 ms debounced ISR |
-| **GPIO 11** | `LIMIT_J3_MIN` | J3 Min Endstop Switch | Digital Input (`INPUT_PULLUP`) | Active LOW, 50 ms debounced ISR |
-| **GPIO 12** | `LIMIT_J3_MAX` | J3 Max Endstop Switch | Digital Input (`INPUT_PULLUP`) | Active LOW, 50 ms debounced ISR |
-| **GPIO 19, 20** | `USB_D-`, `USB_D+` | Native USB OTG Port | USB Differential Data | Flashing, debugging & CDC Serial Monitor |
-| **GPIO 13, 14, 17, 18, 48** | `SPARE_GPIO` | Unused / Expansion Header | Tri-state / Floating | Reserved for future accessories (e.g. Gripper, Laser) |
+| **GPIO 1** | `STEP_J1` | Motor 1 (J1 Base Yaw) TMC2209 | Digital Output (3.3V Pulse) | Xung DDA từ timer 50 kHz |
+| **GPIO 2** | `STEP_J2` | Motor 2 (J2 Shoulder) TMC2209 | Digital Output (3.3V Pulse) | Xung DDA từ timer 50 kHz |
+| **GPIO 41** | `STEP_J3` | Motor 3 (J3 Elbow) TMC2209 | Digital Output (3.3V Pulse) | Xung DDA từ timer 50 kHz |
+| **GPIO 42** | `STEP_J4` | Motor 4 (J4 Wrist Pan) TMC2209 | Digital Output (3.3V Pulse) | Xung DDA từ timer 50 kHz |
+| **GPIO 38** | `STEP_J5` | Motor 5 (J5 Wrist Tilt - Left) A4988 | Digital Output (3.3V Pulse) | Xung DDA từ timer 50 kHz |
+| **GPIO 39** | `DIR_J5` | Motor 5 (J5 Wrist Tilt - Left) A4988 | Digital Output (3.3V Level) | Điều khiển hướng CW/CCW |
+| **GPIO 40** | `STEP_J6` | Motor 6 (J6 Tool Roll - Right) A4988 | Digital Output (3.3V Pulse) | Xung DDA từ timer 50 kHz |
+| **GPIO 47** | `DIR_J6` | Motor 6 (J6 Tool Roll - Right) A4988 | Digital Output (3.3V Level) | Điều khiển hướng CW/CCW |
+| **GPIO 15** | `UART1_RX` | TMC2209 J1–J4 Shared Bus | Serial Input (115200 Baud) | Nối trực tiếp bus PDN single-wire |
+| **GPIO 16** | `UART1_TX` | TMC2209 J1–J4 Shared Bus | Serial Output (115200 Baud) | Nối qua điện trở nối tiếp $1\,\text{k}\Omega$ tới bus PDN |
+| **GPIO 8** | `I2C_SDA` | PCA9548A 8-Ch I2C Mux | Open-Drain Bidirectional | $800\,\text{kHz}$ Fast-Mode+, pull-up $2.2\,\text{k}\Omega$ lên 3.3V |
+| **GPIO 9** | `I2C_SCL` | PCA9548A 8-Ch I2C Mux | Open-Drain Output Clock | $800\,\text{kHz}$ Fast-Mode+, pull-up $2.2\,\text{k}\Omega$ lên 3.3V |
+| **GPIO 5** | `LIMIT_J1_MIN` | Công tắc hành trình J1 Min | Digital Input (`INPUT_PULLUP`) | Active LOW, ISR debounce 50 ms |
+| **GPIO 6** | `LIMIT_J1_MAX` | Công tắc hành trình J1 Max | Digital Input (`INPUT_PULLUP`) | Active LOW, ISR debounce 50 ms |
+| **GPIO 7** | `LIMIT_J2_MIN` | Công tắc hành trình J2 Min | Digital Input (`INPUT_PULLUP`) | Active LOW, ISR debounce 50 ms |
+| **GPIO 10** | `LIMIT_J2_MAX` | Công tắc hành trình J2 Max | Digital Input (`INPUT_PULLUP`) | Active LOW, ISR debounce 50 ms |
+| **GPIO 11** | `LIMIT_J3_MIN` | Công tắc hành trình J3 Min | Digital Input (`INPUT_PULLUP`) | Active LOW, ISR debounce 50 ms |
+| **GPIO 12** | `LIMIT_J3_MAX` | Công tắc hành trình J3 Max | Digital Input (`INPUT_PULLUP`) | Active LOW, ISR debounce 50 ms |
+| **GPIO 19, 20** | `USB_D-`, `USB_D+` | Native USB OTG Port | USB Differential Data | Flash/debug/CDC serial monitor |
+| **GPIO 13, 14, 17, 18, 48** | `SPARE_GPIO` | Chưa dùng / Header mở rộng | Tri-state / Floating | Dành cho phụ kiện tương lai (gripper, laser...) |
 
 ---
 
-### 2. Stepper Motors, Drivers & Actuator Specifications
+### 2) Motor, driver và thông số chấp hành
 
-| Joint Axis | Kinematic Role | Motor Frame | Driver IC | Drive Mode | Hardware Address / Pins | Gear Ratio | Steps / Degree |
+| Trục khớp | Vai trò động học | Khung motor | Driver IC | Chế độ điều khiển | Địa chỉ / chân cứng | Tỉ số truyền | Steps / Degree |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **J1** | Base Yaw | NEMA 17 | TMC2209 | UART1 + StealthChop / SpreadCycle | Addr `0b00` (MS1=GND, MS2=GND) | **6:1** | 53.33 |
 | **J2** | Shoulder Pitch | NEMA 17 | TMC2209 | UART1 + StealthChop / SpreadCycle | Addr `0b01` (MS1=VIO, MS2=GND) | **20:1** | 177.78 |
@@ -128,12 +128,12 @@ This repository contains the embedded real-time firmware, embedded web studio, a
 | **J6** | Tool Roll (Spider) | NEMA 14 | A4988 | STEP + DIR (1/16 Microstepping) | STEP: GPIO 40, DIR: GPIO 47 | **3:1** | 26.67 |
 
 > [!NOTE]
-> - **TMC2209 Single-Wire UART**: Drivers J1–J4 share a single UART bus on `GPIO 15` (RX) and `GPIO 16` (TX). Direction reversal is managed over UART via the internal `shaft()` register — eliminating 4 physical DIR wires.
-> - **Driver Enable Line**: All driver `EN` pins are tied directly to GND (always active). Firmware never floats motor coils during runtime to prevent gravitational back-driving.
+> - **TMC2209 Single-Wire UART**: J1–J4 dùng chung một UART trên `GPIO 15` (RX) và `GPIO 16` (TX). Đảo chiều được xử lý qua thanh ghi `shaft()` nên không cần 4 dây DIR riêng.
+> - **Driver Enable Line**: Tất cả chân `EN` của driver nối thẳng GND (luôn bật). Firmware không thả cuộn motor trong runtime để tránh back-drive do trọng lực.
 
 ---
 
-### 3. I2C Magnetic Encoder Bus & Multiplexer Topology
+### 3) Topology bus I2C encoder từ tính và mux
 
 ```
                   ┌────────────────────────────────────────────────────────┐
@@ -156,7 +156,7 @@ This repository contains the embedded real-time firmware, embedded web studio, a
                    (Base Yaw)(Shoulder)(Elbow) (Wrist) (Tilt/Left)(Roll/Right)
 ```
 
-| Mux Sub-Bus | Target Sensor | Monitored Joint Axis | Magnet Airgap | Sensor Task Rate |
+| Kênh mux | Cảm biến đích | Trục khớp giám sát | Khe hở nam châm | Tần số sensor task |
 | :---: | :--- | :--- | :--- | :--- |
 | **Channel 0** | AS5600 12-bit (`0x36`) | Joint 1 (Base Yaw) | $1.0\text{ mm} - 2.0\text{ mm}$ diametric | 200 Hz (Core 0) |
 | **Channel 1** | AS5600 12-bit (`0x36`) | Joint 2 (Shoulder Pitch) | $1.0\text{ mm} - 2.0\text{ mm}$ diametric | 200 Hz (Core 0) |
@@ -167,35 +167,35 @@ This repository contains the embedded real-time firmware, embedded web studio, a
 
 ---
 
-### 4. Endstop Switches & Homing Architecture
+### 4) Endstop và kiến trúc homing
 
-| Joint Axis | Endstop Designation | GPIO Pin | Microswitch Type | Connection / Electrical Interface |
+| Trục khớp | Endstop | GPIO | Loại microswitch | Giao tiếp / điện |
 | :---: | :--- | :---: | :--- | :--- |
-| **J1** | `J1_MIN` | **GPIO 5** | Roller Lever Microswitch | Normally Open (NO) to GND, Internal Pull-Up, Active LOW |
-| **J1** | `J1_MAX` | **GPIO 6** | Roller Lever Microswitch | Normally Open (NO) to GND, Internal Pull-Up, Active LOW |
-| **J2** | `J2_MIN` | **GPIO 7** | Roller Lever Microswitch | Normally Open (NO) to GND, Internal Pull-Up, Active LOW |
-| **J2** | `J2_MAX` | **GPIO 10** | Roller Lever Microswitch | Normally Open (NO) to GND, Internal Pull-Up, Active LOW |
-| **J3** | `J3_MIN` | **GPIO 11** | Roller Lever Microswitch | Normally Open (NO) to GND, Internal Pull-Up, Active LOW |
-| **J3** | `J3_MAX` | **GPIO 12** | Roller Lever Microswitch | Normally Open (NO) to GND, Internal Pull-Up, Active LOW |
-| **J4** | Sensorless StallGuard | — | Integrated in TMC2209 | SG_RESULT current load monitoring over UART (`STALL_SG_LEVEL = 100`) |
-| **J5 / J6** | Coupled Differential Zero | — | Coaxial AS5600 Magnetic | 2-DOF differential angle decoupling from $E_L$ and $E_R$ encoders |
+| **J1** | `J1_MIN` | **GPIO 5** | Roller Lever Microswitch | NO xuống GND, pull-up nội, Active LOW |
+| **J1** | `J1_MAX` | **GPIO 6** | Roller Lever Microswitch | NO xuống GND, pull-up nội, Active LOW |
+| **J2** | `J2_MIN` | **GPIO 7** | Roller Lever Microswitch | NO xuống GND, pull-up nội, Active LOW |
+| **J2** | `J2_MAX` | **GPIO 10** | Roller Lever Microswitch | NO xuống GND, pull-up nội, Active LOW |
+| **J3** | `J3_MIN` | **GPIO 11** | Roller Lever Microswitch | NO xuống GND, pull-up nội, Active LOW |
+| **J3** | `J3_MAX` | **GPIO 12** | Roller Lever Microswitch | NO xuống GND, pull-up nội, Active LOW |
+| **J4** | Sensorless StallGuard | — | Tích hợp trong TMC2209 | Đọc tải SG_RESULT qua UART (`STALL_SG_LEVEL = 100`) |
+| **J5 / J6** | Differential Zero đồng trục | — | AS5600 từ tính | Tách góc 2-DOF từ 2 encoder $E_L$ và $E_R$ |
 
 ---
 
-### 5. Safety Invariants & ESP32-S3 Reserved Pin Reference
+### 5) Invariant an toàn & chân cấm ESP32-S3
 
 > [!CAUTION]
-> **ESP32-S3 Forbidden / Reserved Pin Invariants**:
-> - **Strapping Pins (DO NOT CONNECT TO PERIPHERALS)**: `GPIO 0` (Boot mode), `GPIO 3` (JTAG source), `GPIO 45` (VDD_SPI voltage level), `GPIO 46` (ROM log suppression).
-> - **Internal Octal SPI Flash & PSRAM**: `GPIO 26` through `GPIO 37` are bonded directly to the internal 8MB QD Flash memory. Connecting external signals to these lines will cause instant silicon bus lockup.
-> - **Bootloader Conflict**: `GPIO 4` is known to cause bootloop issues on ESP32-S3 and is strictly excluded.
-> - **Native USB OTG**: `GPIO 19` (D-) and `GPIO 20` (D+) are reserved for hardware debugging, flashing, and serial telemetry.
+> **Các chân cấm / dành riêng trên ESP32-S3**:
+> - **Strapping Pins (không nối ngoại vi)**: `GPIO 0` (boot mode), `GPIO 3` (JTAG source), `GPIO 45` (VDD_SPI), `GPIO 46` (tắt ROM log).
+> - **Flash & PSRAM nội bộ**: `GPIO 26` đến `GPIO 37` gắn trực tiếp với flash QD 8MB. Cắm tín hiệu ngoài vào các chân này có thể khóa bus silicon ngay lập tức.
+> - **Xung đột bootloader**: `GPIO 4` có thể gây bootloop trên ESP32-S3 nên bị loại bỏ hoàn toàn.
+> - **Native USB OTG**: `GPIO 19` (D-) và `GPIO 20` (D+) dành cho debug, nạp firmware và serial telemetry.
 
 ---
 
-## 📐 Kinematics & Coordinate Systems
+## 📐 Động học & hệ tọa độ
 
-Robot geometry is defined using the **Craig Modified Denavit-Hartenberg (MDH)** convention:
+Hình học robot dùng quy ước **Craig Modified Denavit-Hartenberg (MDH)**:
 $$^{i-1}T_i = R_x(\alpha_{i-1}) \cdot T_x(a_{i-1}) \cdot R_z(\theta_i) \cdot T_z(d_i)$$
 
 ```
@@ -206,9 +206,9 @@ $$^{i-1}T_i = R_x(\alpha_{i-1}) \cdot T_x(a_{i-1}) \cdot R_z(\theta_i) \cdot T_z
   Pen TCP ◄──[D_tool=20]── Tool Roll (J6) ◄── Wrist Center (J4/J5)
 ```
 
-### Craig Modified DH Parameter Table
+### Bảng tham số Craig Modified DH
 
-| Frame $i$ | Joint | Link Length $a_{i-1}$ | Link Twist $\alpha_{i-1}$ | Link Offset $d_i$ | Theta Offset $\theta_{\text{offset}}$ | Physical Range |
+| Frame $i$ | Khớp | Link Length $a_{i-1}$ | Link Twist $\alpha_{i-1}$ | Link Offset $d_i$ | Theta Offset $\theta_{\text{offset}}$ | Dải hoạt động |
 | :---: | :--- | :---: | :---: | :---: | :---: | :---: |
 | **1** | J1 (Base Yaw) | $0\,\text{mm}$ | $0^\circ$ | **$139\,\text{mm}$** | $0^\circ$ | $[-90^\circ, +90^\circ]$ |
 | **2** | J2 (Shoulder) | $0\,\text{mm}$ | $-90^\circ$ | $0\,\text{mm}$ | **$-90^\circ$** | $[-90^\circ, +90^\circ]$ |
@@ -216,162 +216,162 @@ $$^{i-1}T_i = R_x(\alpha_{i-1}) \cdot T_x(a_{i-1}) \cdot R_z(\theta_i) \cdot T_z
 | **4** | J4 (Wrist Pan) | **$88\,\text{mm}$** | $-90^\circ$ | **$126\,\text{mm}$** | $0^\circ$ | $[-180^\circ, +180^\circ]$ |
 | **5** | J5 (Wrist Tilt) | $0\,\text{mm}$ | $+90^\circ$ | $0\,\text{mm}$ | $0^\circ$ | $[-120^\circ, +120^\circ]$ |
 | **6** | J6 (Tool Roll) | $0\,\text{mm}$ | $-90^\circ$ | **$31\,\text{mm}$** | $0^\circ$ | $[-360^\circ, +360^\circ]$ |
-| **Tool**| Drawing Pen | $0\,\text{mm}$ | $0^\circ$ | **$20\,\text{mm}$** | $0^\circ$ | Fixed Tool Axis |
+| **Tool**| Bút vẽ | $0\,\text{mm}$ | $0^\circ$ | **$20\,\text{mm}$** | $0^\circ$ | Trục dụng cụ cố định |
 
-- **Home Reference Pose $(0^\circ, 0^\circ, 0^\circ, 0^\circ, 0^\circ, 0^\circ)$**:
+- **Pose home $(0^\circ, 0^\circ, 0^\circ, 0^\circ, 0^\circ, 0^\circ)$**:
   - Wrist Center (J5): $(X = 126.0\,\text{mm}, Y = 0.0\,\text{mm}, Z = 365.0\,\text{mm})$
-  - J6 Origin: $(X = 157.0\,\text{mm}, Y = 0.0\,\text{mm}, Z = 365.0\,\text{mm})$
-  - Tool Pen Tip: $(X = 177.0\,\text{mm}, Y = 0.0\,\text{mm}, Z = 365.0\,\text{mm})$
-- **Effective Tool Length (J5 $\to$ TCP)**: $D_{\text{tool\_eff}} = 31\,\text{mm} + 20\,\text{mm} = \mathbf{51\,\text{mm}}$
-- **Max Planar Reach (to J5)**: $R_{\text{max}} = A_2 + \sqrt{A_3^2 + D_4^2} = 138.0 + 153.69 = 291.69\,\text{mm}$
-- **Inner Deadzone**: $R_{\text{min}} = |A_2 - \sqrt{A_3^2 + D_4^2}| = |138.0 - 153.69| = 15.69\,\text{mm}$
+  - Gốc J6: $(X = 157.0\,\text{mm}, Y = 0.0\,\text{mm}, Z = 365.0\,\text{mm})$
+  - Đầu bút TCP: $(X = 177.0\,\text{mm}, Y = 0.0\,\text{mm}, Z = 365.0\,\text{mm})$
+- **Chiều dài tool hiệu dụng (J5 $\to$ TCP)**: $D_{\text{tool\_eff}} = 31\,\text{mm} + 20\,\text{mm} = \mathbf{51\,\text{mm}}$
+- **Tầm với phẳng tối đa (đến J5)**: $R_{\text{max}} = A_2 + \sqrt{A_3^2 + D_4^2} = 138.0 + 153.69 = 291.69\,\text{mm}$
+- **Vùng chết trong**: $R_{\text{min}} = |A_2 - \sqrt{A_3^2 + D_4^2}| = |138.0 - 153.69| = 15.69\,\text{mm}$
 
 ---
 
-## 🚀 Quick Start Guide
+## 🚀 Hướng dẫn bắt đầu nhanh
 
-### Prerequisites
-- [PlatformIO Core (CLI)](https://docs.platformio.org/page/core/index.html) or [PlatformIO IDE for VSCode](https://platformio.org/install/ide?install=vscode)
-- Python 3.10+ (for host tests and Digital Twin simulation)
+### Yêu cầu
+- [PlatformIO Core (CLI)](https://docs.platformio.org/page/core/index.html) hoặc [PlatformIO IDE cho VSCode](https://platformio.org/install/ide?install=vscode)
+- Python 3.10+ (cho host test và Digital Twin)
 - Git
 
-### 1. Clone & Build Firmware
+### 1) Clone & build firmware
 ```bash
-# Clone the repository
+# Clone repository
 git clone https://github.com/<your-username>/robotic_arm.git
 cd robotic_arm
 
-# Compile firmware
+# Biên dịch firmware
 pio run
 ```
 
-### 2. Flash to ESP32-S3
-Connect your ESP32-S3 DevKitC-1 via USB OTG / UART port:
+### 2) Nạp vào ESP32-S3
+Kết nối ESP32-S3 DevKitC-1 qua cổng USB OTG / UART:
 ```bash
-# Upload firmware image
+# Upload firmware
 pio run -t upload
 
-# Open serial telemetry monitor (115200 baud)
+# Mở serial monitor (115200 baud)
 pio device monitor
 ```
 
-### 3. Run Host Kinematics Unit Test Suite
-To verify the analytical kinematics engine against thousands of test coordinates:
+### 3) Chạy bộ test kinematics trên host
+Dùng để xác minh engine động học với hàng nghìn tọa độ:
 ```bash
-# Execute unit test runner via host g++
+# Chạy unit test bằng host g++
 bash tools/run_kin_tests.sh
 ```
 
 ---
 
-## 💻 Digital Twin Simulator
+## 💻 Trình mô phỏng Digital Twin
 
-The project includes a standalone desktop engineering simulator [`digital_clone.py`](file:///E:/00.Project/04.robot-arm/robotic_arm/digital_clone.py) implemented with Matplotlib and NumPy.
+Dự án có sẵn trình mô phỏng desktop độc lập tại [`digital_clone.py`](digital_clone.py), triển khai bằng Matplotlib và NumPy.
 
 ```bash
-# Launch interactive 3D/2D engineering interface
+# Chạy giao diện kỹ thuật 3D/2D tương tác
 py -3 digital_clone.py
 
-# Run automated kinematics, WorkPlane, and trajectory sweep audit
+# Chạy audit tự động kinematics, WorkPlane và trajectory
 py -3 digital_clone.py --test
 ```
 
-### Simulator Features:
-- **3-Viewport Engineering Layout**: 3D Perspective with rotation/zoom, 2D Side Elevation ($X-Z$), and 2D Top Plan ($X-Y$).
-- **Click-to-Move Positioning**: Click directly on the 2D Top or Side viewports to command Cartesian moves.
-- **WorkPlane Calibrator**: Visualizes 3D tilted surfaces and projects Line, Circle, Spiral, and Star paths onto the calibrated frame.
-- **Real-Time WiFi Bridge**:
-  - `[📡 Sync ESP32]`: Polls `/api/status` from the physical robot and mirrors its pose in real time.
-  - `[⚡ Send to Robot]`: Dispatches target positions directly to `/api/move` on the controller.
-- **Velocity & Stepper Rate Profiler**: Verifies joint angular velocities and step pulse frequencies against the 50 kHz hardware timer limit.
+### Tính năng mô phỏng
+- **Bố cục 3 viewport kỹ thuật**: 3D Perspective (xoay/zoom), 2D Side Elevation ($X-Z$), 2D Top Plan ($X-Y$).
+- **Click-to-Move**: Click trực tiếp lên viewport 2D Top hoặc Side để gửi lệnh di chuyển Cartesian.
+- **WorkPlane Calibrator**: Hiển thị bề mặt nghiêng 3D và chiếu đường Line/Circle/Spiral/Star lên hệ đã hiệu chuẩn.
+- **WiFi Bridge thời gian thực**:
+  - `[📡 Sync ESP32]`: Poll `/api/status` từ robot thật và phản chiếu pose ngay trên mô phỏng.
+  - `[⚡ Send to Robot]`: Gửi vị trí mục tiêu trực tiếp tới `/api/move` trên controller.
+- **Velocity & Stepper Rate Profiler**: Kiểm tra vận tốc góc và tần số xung step có nằm trong giới hạn timer 50 kHz hay không.
 
 ---
 
-## 🌐 Web Interface & REST API
+## 🌐 Web interface & REST API
 
-Upon powering up, the controller attempts to connect to the provisioned WiFi network (STA mode). If unavailable, it falls back to Access Point (AP) mode:
+Khi khởi động, controller sẽ kết nối WiFi đã provisioned (STA mode). Nếu thất bại, hệ thống tự chuyển sang AP mode:
 - **Fallback AP SSID**: `6AXIS-CONTROLLER`
 - **Fallback AP Password**: `12345678`
-- **mDNS Hostname**: `http://robot-arm.local` (or the IP logged on Serial)
+- **mDNS Hostname**: `http://robot-arm.local` (hoặc IP in trên Serial)
 
-### REST API Reference (Port 80)
+### REST API (Port 80)
 
-| Method | Endpoint | Payload / Query | Description |
+| Method | Endpoint | Payload / Query | Mô tả |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/` | — | Embedded single-page web application |
-| `GET` | `/api/status` | — | Full JSON telemetry snapshot (mode, joints, pose, homing, safety) |
-| `POST`| `/api/jog` | `{"axis": 0..5, "deg": float}` | Jog single joint angle by relative delta |
-| `POST`| `/api/move` | `{"x": float, "y": float, "z": float, "feed": float}` | Command Cartesian linear point move |
-| `POST`| `/api/draw` | `{"shape": "line"\|"circle", ...}` | Execute coordinated line or circular drawing trajectory |
-| `GET` | `/api/home/all`| — | Initiate automatic sequential homing (J1 $\to$ J4) |
-| `GET` | `/api/home/axis`| `?axis=0..3` | Initiate homing on a single designated axis |
-| `GET` | `/api/sethome` | `?axis=0..5` | Zero joint at current physical location & save to NVS |
-| `GET` | `/api/clearcalib`|`?axis=0..5` | Erase stored joint zero references from NVS |
-| `POST`| `/api/workplane/calib`|`{"p1": [...], "p2": [...], "p3": [...]}` | Calibrate 3-point inclined WorkPlane |
-| `POST`| `/api/workplane/toggle`|`{"enable": true\|false}` | Enable or disable WorkPlane UCS coordinate transformation |
-| `GET` | `/api/stop` | — | **Emergency Stop**: Immediately aborts all motor pulses |
-| `POST`| `/api/wifi` | `{"ssid": "...", "pass": "..."}` | Save WiFi credentials and restart controller |
+| `GET` | `/` | — | Trang web SPA nhúng |
+| `GET` | `/api/status` | — | Snapshot telemetry JSON đầy đủ (mode, joints, pose, homing, safety) |
+| `POST`| `/api/jog` | `{"axis": 0..5, "deg": float}` | Jog góc tương đối một khớp |
+| `POST`| `/api/move` | `{"x": float, "y": float, "z": float, "feed": float}` | Di chuyển điểm Cartesian tuyến tính |
+| `POST`| `/api/draw` | `{"shape": "line"\|"circle", ...}` | Chạy quỹ đạo vẽ line/circle phối hợp đa trục |
+| `GET` | `/api/home/all`| — | Homing tự động tuần tự (J1 $\to$ J4) |
+| `GET` | `/api/home/axis`| `?axis=0..3` | Homing một trục chỉ định |
+| `GET` | `/api/sethome` | `?axis=0..5` | Đặt zero tại vị trí hiện tại và lưu NVS |
+| `GET` | `/api/clearcalib`|`?axis=0..5` | Xóa zero đã lưu khỏi NVS |
+| `POST`| `/api/workplane/calib`|`{"p1": [...], "p2": [...], "p3": [...]}` | Hiệu chuẩn WorkPlane nghiêng từ 3 điểm |
+| `POST`| `/api/workplane/toggle`|`{"enable": true\|false}` | Bật/tắt biến đổi hệ tọa độ WorkPlane |
+| `GET` | `/api/stop` | — | **Emergency Stop**: dừng toàn bộ xung motor ngay lập tức |
+| `POST`| `/api/wifi` | `{"ssid": "...", "pass": "..."}` | Lưu WiFi credentials và restart controller |
 
 ---
 
-## 📁 Repository Structure
+## 📁 Cấu trúc repository
 
 ```
 .
-├── platformio.ini              # PlatformIO build configuration & ESP32-S3 environment
-├── digital_clone.py            # High-fidelity desktop 3D/2D digital twin simulator
+├── platformio.ini              # Cấu hình build PlatformIO & môi trường ESP32-S3
+├── digital_clone.py            # Trình mô phỏng desktop 3D/2D độ trung thực cao
 ├── src/
-│   ├── config.h                # Single source of truth for pins, DH geometry & limits
-│   ├── main.cpp                # System initialization, FreeRTOS tasks & web loop
-│   ├── arm.h / .cpp            # Motion arbiter, command queue & core 1 task loop
-│   ├── motor.h / .cpp          # 50kHz DDA pulse generator, TMC2209 UART & SPSC queue
-│   ├── kinematics.h / .cpp     # Craig Modified DH matrix FK & analytical closed-form IK
-│   ├── work_plane.h / .cpp     # 3-Point Gram-Schmidt coordinate transformation engine
-│   ├── planner.h / .cpp        # Multi-axis segment synchronizer (Line, Circle, Pen lift)
-│   ├── sensor.h / .cpp         # AS5600 ×6 over PCA9548A I2C mux (200Hz Core 0 task)
-│   ├── homing.h / .cpp         # Multi-phase sequential homing FSM (J1–J4)
-│   ├── joint_model.h / .cpp    # Degree-to-step conversion, NVS persistence & soft limits
-│   ├── endstop.h / .cpp        # Interrupt service routines (ISR) with hardware debouncing
-│   ├── web_server.h / .cpp     # Embedded PROGMEM SPA web UI & REST API handlers
-│   ├── spsc_queue.h            # Lock-free 64-byte cacheline aligned SPSC ring buffer
-│   ├── motion_block.h          # Q32.32 fixed-point motion segment definition
-│   ├── nvs_store.h / .cpp      # ESP-IDF Preferences wrapper for non-volatile storage
-│   ├── wifi_manager.h / .cpp   # Automatic STA / AP fallback network supervisor
-│   └── rtos_guard.h            # RAII FreeRTOS mutex lock guards
+│   ├── config.h                # Single source of truth cho pin, hình học DH và limits
+│   ├── main.cpp                # Khởi tạo hệ thống, task FreeRTOS và vòng lặp web
+│   ├── arm.h / .cpp            # Motion arbiter, command queue và task core 1
+│   ├── motor.h / .cpp          # Bộ phát xung DDA 50kHz, UART TMC2209 và SPSC queue
+│   ├── kinematics.h / .cpp     # FK ma trận Craig Modified DH và IK closed-form
+│   ├── work_plane.h / .cpp     # Engine biến đổi tọa độ Gram-Schmidt từ 3 điểm
+│   ├── planner.h / .cpp        # Đồng bộ segment đa trục (Line, Circle, Pen lift)
+│   ├── sensor.h / .cpp         # AS5600 ×6 qua PCA9548A I2C mux (task 200Hz Core 0)
+│   ├── homing.h / .cpp         # FSM homing nhiều pha tuần tự (J1–J4)
+│   ├── joint_model.h / .cpp    # Đổi degree-step, lưu NVS và soft limits
+│   ├── endstop.h / .cpp        # ISR + debounce phần cứng cho endstop
+│   ├── web_server.h / .cpp     # SPA PROGMEM nhúng và REST API handlers
+│   ├── spsc_queue.h            # SPSC ring buffer lock-free căn hàng cacheline 64-byte
+│   ├── motion_block.h          # Định nghĩa segment chuyển động fixed-point Q32.32
+│   ├── nvs_store.h / .cpp      # Wrapper Preferences ESP-IDF cho lưu trữ bền
+│   ├── wifi_manager.h / .cpp   # Supervisor mạng STA / AP fallback tự động
+│   └── rtos_guard.h            # RAII mutex guard cho FreeRTOS
 ├── test/
-│   └── kinematics/             # Analytical kinematics unit tests (host g++)
+│   └── kinematics/             # Unit test động học phân tích (host g++)
 ├── tools/
-│   └── run_kin_tests.sh        # Host test runner script
+│   └── run_kin_tests.sh        # Script chạy test trên host
 └── docs/
-    ├── ARM_GEOMETRY.md         # Mathematical derivation of DH matrices & kinematics
-    ├── SYSTEM_OVERVIEW.html    # Interactive system map (hardware, tasks, FSM, safety)
-    └── IMPLEMENTATION_LOG.md   # Append-only chronological engineering changelog
+    ├── ARM_GEOMETRY.md         # Đặc tả toán học DH matrices và động học
+    ├── SYSTEM_OVERVIEW.html    # Bản đồ hệ thống tương tác (hardware, tasks, FSM, safety)
+    └── IMPLEMENTATION_LOG.md   # Nhật ký kỹ thuật dạng append-only theo thời gian
 ```
 
 ---
 
-## 🛠 Hardware Commissioning Workflow
+## 🛠 Quy trình commissioning phần cứng
 
-When bringing up the physical robotic arm for the first time:
+Khi bring-up cánh tay robot thật lần đầu:
 
-1. **Driver Addressing**: Configure TMC2209 MS1/MS2 jumpers (J1=`0b00`, J2=`0b01`, J3=`0b10`, J4=`0b11`). Confirm `[TMC2209 OK] Ver 0x21` log on serial for each driver.
-2. **Current Tuning**: Measure and adjust Vref trimpots on J5/J6 A4988 modules to match motor coil ratings.
-3. **Open-Loop Jog Validation**: Jog each joint by small increments ($+1.0^\circ$). Verify direction matches physical convention; flip `AXIS_STEP_SIGN` in [`src/config.h`](file:///E:/00.Project/04.robot-arm/robotic_arm/src/config.h) if inverted.
-4. **Encoder Zeroing**: Confirm AS5600 magnet alignment (air gap 1–2 mm, centered over IC).
-5. **Homing Calibration**: Execute `/api/home/all`. Verify J1/J2 center calibration and J3 backoff.
-6. **Inclined Plane Test**: Calibrate WorkPlane with 3 corner points of a tilted drawing pad, then execute `/api/draw` to confirm accurate surface adherence.
+1. **Địa chỉ driver**: Cấu hình jumper MS1/MS2 của TMC2209 (J1=`0b00`, J2=`0b01`, J3=`0b10`, J4=`0b11`). Kiểm tra log serial có `[TMC2209 OK] Ver 0x21` cho cả 4 driver.
+2. **Chỉnh dòng**: Đo/chỉnh Vref trên module A4988 J5/J6 theo dòng coil định mức của motor.
+3. **Kiểm tra jog open-loop**: Jog từng trục bước nhỏ ($+1.0^\circ$), xác nhận đúng chiều vật lý; nếu ngược thì đảo `AXIS_STEP_SIGN` trong [`src/config.h`](src/config.h).
+4. **Zero encoder**: Xác nhận nam châm AS5600 đồng tâm đúng (air gap 1–2 mm).
+5. **Hiệu chuẩn homing**: Chạy `/api/home/all`, kiểm tra J1/J2 về center và J3 backoff đúng.
+6. **Test mặt phẳng nghiêng**: Hiệu chuẩn WorkPlane bằng 3 điểm góc của bề mặt vẽ, sau đó chạy `/api/draw` để xác nhận bám mặt chính xác.
 
 ---
 
-## 📚 Documentation & Technical References
+## 📚 Tài liệu & tham chiếu kỹ thuật
 
-- **[System Architecture & Interactive Map](docs/SYSTEM_OVERVIEW.html)**: Complete visual map of FreeRTOS tasks, hardware wiring, and safety interlocks.
-- **[Mathematical Kinematics Specification](docs/ARM_GEOMETRY.md)**: Analytical derivation of forward kinematics, closed-form IK equations, and coordinate frames.
-- **[Engineering Implementation Log](docs/IMPLEMENTATION_LOG.md)**: Append-only ledger of all design decisions, bug fixes, and hardware test results.
-- **[Agent Maintenance Contract](AGENTS.md)**: Rules and invariants for automated maintenance and code modifications.
+- **[System Architecture & Interactive Map](docs/SYSTEM_OVERVIEW.html)**: Bản đồ đầy đủ task FreeRTOS, wiring phần cứng và safety interlock.
+- **[Mathematical Kinematics Specification](docs/ARM_GEOMETRY.md)**: Suy luận FK, phương trình IK closed-form và hệ tọa độ.
+- **[Engineering Implementation Log](docs/IMPLEMENTATION_LOG.md)**: Nhật ký append-only cho quyết định thiết kế, bug fix và kết quả test hardware.
+- **[Agent Maintenance Contract](AGENTS.md)**: Quy tắc và bất biến dành cho agent khi bảo trì repo.
 
 ---
 
 ## 📄 License
 
-This repository is maintained for internal research and development. All rights reserved.
+Repository này phục vụ nghiên cứu và phát triển nội bộ. Mọi quyền được bảo lưu.
