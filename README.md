@@ -14,7 +14,7 @@ Production-grade firmware and companion 3D digital twin engineering suite for a 
 
 - [Overview & Architecture](#-overview--architecture)
 - [Key Features](#-key-features)
-- [Hardware Specifications](#-hardware-specifications)
+- [Hardware Specifications & Complete Pinout](#-hardware-specifications--complete-pinout)
 - [Kinematics & Coordinate Systems](#-kinematics--coordinate-systems)
 - [Quick Start Guide](#-quick-start-guide)
 - [Digital Twin Simulator](#-digital-twin-simulator)
@@ -87,32 +87,109 @@ This repository contains the embedded real-time firmware, embedded web studio, a
 
 ---
 
-## 🔌 Hardware Specifications
+## 🔌 Hardware Specifications & Complete Pinout
 
-### Actuators & Drive Electronics
+### 1. Master Pinout Table (ESP32-S3 DevKitC-1 N8)
 
-| Axis | Designation | Actuator | Driver IC | Control Interface | Gear Ratio | Steps / Degree |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **J1** | Base Yaw | NEMA 17 | TMC2209 | UART1 (Addr `0b00`) | **6:1** | 53.33 |
-| **J2** | Shoulder Pitch | NEMA 17 | TMC2209 | UART1 (Addr `0b01`) | **20:1** | 177.78 |
-| **J3** | Elbow Pitch | NEMA 17 | TMC2209 | UART1 (Addr `0b10`) | **20:1** | 177.78 |
-| **J4** | Wrist Pan | NEMA 17 | TMC2209 | UART1 (Addr `0b11`) | **4:1** | 35.56 |
-| **J5** | Wrist Tilt | NEMA 14 | A4988 | STEP (GPIO 38) + DIR (GPIO 39) | **3:1** | 26.67 |
-| **J6** | Tool Roll | NEMA 14 | A4988 | STEP (GPIO 40) + DIR (GPIO 47) | **3:1** | 26.67 |
+| GPIO Pin | Function / Net | Connected Component | Signal Type / Logic | Hardware Notes |
+| :---: | :--- | :--- | :--- | :--- |
+| **GPIO 1** | `STEP_J1` | Motor 1 (J1 Base Yaw) TMC2209 | Digital Output (3.3V Pulse) | 50 kHz hardware timer DDA pulse |
+| **GPIO 2** | `STEP_J2` | Motor 2 (J2 Shoulder) TMC2209 | Digital Output (3.3V Pulse) | 50 kHz hardware timer DDA pulse |
+| **GPIO 41** | `STEP_J3` | Motor 3 (J3 Elbow) TMC2209 | Digital Output (3.3V Pulse) | 50 kHz hardware timer DDA pulse |
+| **GPIO 42** | `STEP_J4` | Motor 4 (J4 Wrist Pan) TMC2209 | Digital Output (3.3V Pulse) | 50 kHz hardware timer DDA pulse |
+| **GPIO 38** | `STEP_J5` | Motor 5 (J5 Wrist Tilt - Left) A4988 | Digital Output (3.3V Pulse) | 50 kHz hardware timer DDA pulse |
+| **GPIO 39** | `DIR_J5` | Motor 5 (J5 Wrist Tilt - Left) A4988 | Digital Output (3.3V Level) | CW/CCW direction control |
+| **GPIO 40** | `STEP_J6` | Motor 6 (J6 Tool Roll - Right) A4988 | Digital Output (3.3V Pulse) | 50 kHz hardware timer DDA pulse |
+| **GPIO 47** | `DIR_J6` | Motor 6 (J6 Tool Roll - Right) A4988 | Digital Output (3.3V Level) | CW/CCW direction control |
+| **GPIO 15** | `UART1_RX` | TMC2209 J1–J4 Shared Bus | Serial Input (115200 Baud) | Direct connection to single-wire PDN bus |
+| **GPIO 16** | `UART1_TX` | TMC2209 J1–J4 Shared Bus | Serial Output (115200 Baud) | Connect via $1\,\text{k}\Omega$ series resistor to PDN bus |
+| **GPIO 8** | `I2C_SDA` | PCA9548A 8-Ch I2C Mux | Open-Drain Bidirectional | $800\,\text{kHz}$ Fast-Mode+, $2.2\,\text{k}\Omega$ pull-up to 3.3V |
+| **GPIO 9** | `I2C_SCL` | PCA9548A 8-Ch I2C Mux | Open-Drain Output Clock | $800\,\text{kHz}$ Fast-Mode+, $2.2\,\text{k}\Omega$ pull-up to 3.3V |
+| **GPIO 5** | `LIMIT_J1_MIN` | J1 Min Endstop Switch | Digital Input (`INPUT_PULLUP`) | Active LOW, 50 ms debounced ISR |
+| **GPIO 6** | `LIMIT_J1_MAX` | J1 Max Endstop Switch | Digital Input (`INPUT_PULLUP`) | Active LOW, 50 ms debounced ISR |
+| **GPIO 7** | `LIMIT_J2_MIN` | J2 Min Endstop Switch | Digital Input (`INPUT_PULLUP`) | Active LOW, 50 ms debounced ISR |
+| **GPIO 10** | `LIMIT_J2_MAX` | J2 Max Endstop Switch | Digital Input (`INPUT_PULLUP`) | Active LOW, 50 ms debounced ISR |
+| **GPIO 11** | `LIMIT_J3_MIN` | J3 Min Endstop Switch | Digital Input (`INPUT_PULLUP`) | Active LOW, 50 ms debounced ISR |
+| **GPIO 12** | `LIMIT_J3_MAX` | J3 Max Endstop Switch | Digital Input (`INPUT_PULLUP`) | Active LOW, 50 ms debounced ISR |
+| **GPIO 19, 20** | `USB_D-`, `USB_D+` | Native USB OTG Port | USB Differential Data | Flashing, debugging & CDC Serial Monitor |
+| **GPIO 13, 14, 17, 18, 48** | `SPARE_GPIO` | Unused / Expansion Header | Tri-state / Floating | Reserved for future accessories (e.g. Gripper, Laser) |
+
+---
+
+### 2. Stepper Motors, Drivers & Actuator Specifications
+
+| Joint Axis | Kinematic Role | Motor Frame | Driver IC | Drive Mode | Hardware Address / Pins | Gear Ratio | Steps / Degree |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **J1** | Base Yaw | NEMA 17 | TMC2209 | UART1 + StealthChop / SpreadCycle | Addr `0b00` (MS1=GND, MS2=GND) | **6:1** | 53.33 |
+| **J2** | Shoulder Pitch | NEMA 17 | TMC2209 | UART1 + StealthChop / SpreadCycle | Addr `0b01` (MS1=VIO, MS2=GND) | **20:1** | 177.78 |
+| **J3** | Elbow Pitch | NEMA 17 | TMC2209 | UART1 + StealthChop / SpreadCycle | Addr `0b10` (MS1=GND, MS2=VIO) | **20:1** | 177.78 |
+| **J4** | Wrist Pan | NEMA 17 | TMC2209 | UART1 + StealthChop / SpreadCycle | Addr `0b11` (MS1=VIO, MS2=VIO) | **4:1** | 35.56 |
+| **J5** | Wrist Tilt (Carrier) | NEMA 14 | A4988 | STEP + DIR (1/16 Microstepping) | STEP: GPIO 38, DIR: GPIO 39 | **3:1** | 26.67 |
+| **J6** | Tool Roll (Spider) | NEMA 14 | A4988 | STEP + DIR (1/16 Microstepping) | STEP: GPIO 40, DIR: GPIO 47 | **3:1** | 26.67 |
 
 > [!NOTE]
-> J1–J4 share a single half-duplex UART bus on GPIO 15 (RX) and GPIO 16 (TX). Direction reversal is handled directly via TMC2209 `shaft()` register over UART without dedicated physical DIR pins.
+> - **TMC2209 Single-Wire UART**: Drivers J1–J4 share a single UART bus on `GPIO 15` (RX) and `GPIO 16` (TX). Direction reversal is managed over UART via the internal `shaft()` register — eliminating 4 physical DIR wires.
+> - **Driver Enable Line**: All driver `EN` pins are tied directly to GND (always active). Firmware never floats motor coils during runtime to prevent gravitational back-driving.
 
-### Sensors & Peripherals
+---
 
-| Component | Function | Interface | Pins / Addresses |
-| :--- | :--- | :--- | :--- |
-| **PCA9548A** | 8-Channel I2C Multiplexer | I2C (800 kHz Fast-Mode+) | SDA: GPIO 8, SCL: GPIO 9 (Addr `0x70`) |
-| **AS5600 ×6** | 12-bit Absolute Magnetic Encoders | I2C via PCA9548A | Sub-buses: Ch 0–2 (J1–J3), Ch 3–5 (J4–J6) |
-| **Endstops** | Microswitches (Active LOW) | Internal Pullup + ISR | J1: 5/6, J2: 7/10, J3: 11/12 |
+### 3. I2C Magnetic Encoder Bus & Multiplexer Topology
 
-> [!WARNING]
-> **Prohibited Pins on ESP32-S3**: Do not reassign strapping pins (GPIO 0, 3, 45, 46), Octal SPI Flash/PSRAM lines (GPIO 26–32), or USB OTG pins (GPIO 19, 20).
+```
+                  ┌────────────────────────────────────────────────────────┐
+                  │                 ESP32-S3 (I2C Master)                  │
+                  │         GPIO 8 (SDA) ────┬──── GPIO 9 (SCL)            │
+                  └──────────────────────────┼─────────────────────────────┘
+                                             │ 800 kHz Fast-Mode+ (2.2k Pullups)
+                                             ▼
+                  ┌────────────────────────────────────────────────────────┐
+                  │          PCA9548A 8-Channel I2C Multiplexer            │
+                  │                 (I2C Address: 0x70)                    │
+                  ├────────┬────────┬────────┬────────┬────────┬───────────┤
+                  │  Ch 0  │  Ch 1  │  Ch 2  │  Ch 3  │  Ch 4  │   Ch 5    │
+                  └───┬────┴───┬────┴───┬────┴───┬────┴───┬────┴─────┬─────┘
+                      │        │        │        │        │          │
+                      ▼        ▼        ▼        ▼        ▼          ▼
+                    AS5600   AS5600   AS5600   AS5600   AS5600     AS5600
+                    (0x36)   (0x36)   (0x36)   (0x36)   (0x36)     (0x36)
+                    Joint 1  Joint 2  Joint 3  Joint 4  Joint 5    Joint 6
+                   (Base Yaw)(Shoulder)(Elbow) (Wrist) (Tilt/Left)(Roll/Right)
+```
+
+| Mux Sub-Bus | Target Sensor | Monitored Joint Axis | Magnet Airgap | Sensor Task Rate |
+| :---: | :--- | :--- | :--- | :--- |
+| **Channel 0** | AS5600 12-bit (`0x36`) | Joint 1 (Base Yaw) | $1.0\text{ mm} - 2.0\text{ mm}$ diametric | 200 Hz (Core 0) |
+| **Channel 1** | AS5600 12-bit (`0x36`) | Joint 2 (Shoulder Pitch) | $1.0\text{ mm} - 2.0\text{ mm}$ diametric | 200 Hz (Core 0) |
+| **Channel 2** | AS5600 12-bit (`0x36`) | Joint 3 (Elbow Pitch) | $1.0\text{ mm} - 2.0\text{ mm}$ diametric | 200 Hz (Core 0) |
+| **Channel 3** | AS5600 12-bit (`0x36`) | Joint 4 (Wrist Pan) | $1.0\text{ mm} - 2.0\text{ mm}$ diametric | 200 Hz (Core 0) |
+| **Channel 4** | AS5600 12-bit (`0x36`) | Joint 5 (Wrist Tilt / Left Side Gear) | $1.0\text{ mm} - 2.0\text{ mm}$ diametric | 200 Hz (Core 0) |
+| **Channel 5** | AS5600 12-bit (`0x36`) | Joint 6 (Tool Roll / Right Side Gear) | $1.0\text{ mm} - 2.0\text{ mm}$ diametric | 200 Hz (Core 0) |
+
+---
+
+### 4. Endstop Switches & Homing Architecture
+
+| Joint Axis | Endstop Designation | GPIO Pin | Microswitch Type | Connection / Electrical Interface |
+| :---: | :--- | :---: | :--- | :--- |
+| **J1** | `J1_MIN` | **GPIO 5** | Roller Lever Microswitch | Normally Open (NO) to GND, Internal Pull-Up, Active LOW |
+| **J1** | `J1_MAX` | **GPIO 6** | Roller Lever Microswitch | Normally Open (NO) to GND, Internal Pull-Up, Active LOW |
+| **J2** | `J2_MIN` | **GPIO 7** | Roller Lever Microswitch | Normally Open (NO) to GND, Internal Pull-Up, Active LOW |
+| **J2** | `J2_MAX` | **GPIO 10** | Roller Lever Microswitch | Normally Open (NO) to GND, Internal Pull-Up, Active LOW |
+| **J3** | `J3_MIN` | **GPIO 11** | Roller Lever Microswitch | Normally Open (NO) to GND, Internal Pull-Up, Active LOW |
+| **J3** | `J3_MAX` | **GPIO 12** | Roller Lever Microswitch | Normally Open (NO) to GND, Internal Pull-Up, Active LOW |
+| **J4** | Sensorless StallGuard | — | Integrated in TMC2209 | SG_RESULT current load monitoring over UART (`STALL_SG_LEVEL = 100`) |
+| **J5 / J6** | Coupled Differential Zero | — | Coaxial AS5600 Magnetic | 2-DOF differential angle decoupling from $E_L$ and $E_R$ encoders |
+
+---
+
+### 5. Safety Invariants & ESP32-S3 Reserved Pin Reference
+
+> [!CAUTION]
+> **ESP32-S3 Forbidden / Reserved Pin Invariants**:
+> - **Strapping Pins (DO NOT CONNECT TO PERIPHERALS)**: `GPIO 0` (Boot mode), `GPIO 3` (JTAG source), `GPIO 45` (VDD_SPI voltage level), `GPIO 46` (ROM log suppression).
+> - **Internal Octal SPI Flash & PSRAM**: `GPIO 26` through `GPIO 37` are bonded directly to the internal 8MB QD Flash memory. Connecting external signals to these lines will cause instant silicon bus lockup.
+> - **Bootloader Conflict**: `GPIO 4` is known to cause bootloop issues on ESP32-S3 and is strictly excluded.
+> - **Native USB OTG**: `GPIO 19` (D-) and `GPIO 20` (D+) are reserved for hardware debugging, flashing, and serial telemetry.
 
 ---
 

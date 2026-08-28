@@ -1020,6 +1020,21 @@ hiện tại trừ khi thí nghiệm trên buộc phải đổi mô hình.
 - `py -3 digital_clone.py --test` $\to$ **ALL PASSED** (Pure Tilt, Pure Roll, Differential Sweep, WorkPlane Star/Line).
 - `pio run` $\to$ **SUCCESS** (RAM: 17.8% 58,356 B, Flash: 26.7% 893,069 B, 0 errors, 0 warnings).
 
+---
+
+## 2026-08-28 — Bổ sung Bảng Sơ đồ Chân Pinout Toàn diện cho Từng Linh kiện vào README.md
+
+### Việc đã làm
+- What: Mở rộng mục "Hardware Specifications" trong [`README.md`](file:///E:/00.Project/04.robot-arm/robotic_arm/README.md) thành "Hardware Specifications & Complete Pinout" với 5 bảng và sơ đồ chi tiết:
+  1. **Bảng Master Pinout ESP32-S3**: Liệt kê từng chân GPIO (1..48), tên net/hàm, linh kiện kết nối, mức logic điện áp, và ghi chú kỹ thuật.
+  2. **Bảng Động cơ & Driver (J1..J6)**: Chi tiết cấu hình địa chỉ UART TMC2209 (`0b00`..`0b11`), chân STEP/DIR cho A4988, tỉ số truyền, và bước/độ.
+  3. **Sơ đồ Bus Cảm biến I2C & PCA9548A**: Mô hình topo cây I2C từ ESP32-S3 qua PCA9548A (`0x70`) đến 6 kênh AS5600 (`0x36`).
+  4. **Bảng Công tắc Hành trình Endstops**: Định nghĩa chân GPIO, kiểu switch (NO/NC), chế độ ngắt pull-up active LOW cho J1..J3 và phương thức homing cho J4 (StallGuard), J5-J6 (vi sai).
+  5. **Bảng Cấm / Chân Strapping & Flash**: Cảnh báo rõ ràng các chân cấm đụng (GPIO 0, 3, 4, 19, 20, 26–37, 45, 46).
+- Why: Yêu cầu của người dùng nhằm tài liệu hóa đầy đủ và chính xác 100% sơ đồ đấu nối phần cứng cho mọi người đọc và chế tạo robot.
+- How: Đồng bộ trực tiếp từ các định nghĩa phần cứng trong [`src/config.h`](file:///E:/00.Project/04.robot-arm/robotic_arm/src/config.h).
+
+
 
 
 
