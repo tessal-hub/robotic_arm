@@ -1044,3 +1044,20 @@ hiện tại trừ khi thí nghiệm trên buộc phải đổi mô hình.
 
 
 
+
+---
+
+## 2026-08-28 — Việt hóa toàn bộ README
+
+### Việc đã làm
+- What: dịch toàn bộ nội dung `/home/runner/work/robotic_arm/robotic_arm/README.md` sang tiếng Việt, giữ nguyên cấu trúc kỹ thuật (kiến trúc, pinout, kinematics, quick start, simulator, REST API, commissioning, tài liệu tham chiếu).
+- What: cập nhật footer ngày Generated trong `/home/runner/work/robotic_arm/robotic_arm/docs/SYSTEM_OVERVIEW.html` để phản ánh thay đổi tài liệu sống.
+- Why: yêu cầu từ owner: "đổi readme thành tiếng việt".
+- How: chỉ chỉnh sửa tài liệu, không thay đổi firmware logic hay API.
+
+### Build gate
+- `pio run` → **FAIL** trong môi trường sandbox vì không tải được platform `espressif32` (`HTTPClientError` khi Platform Manager install).
+- `tools/run_kin_tests.sh` → không chạy (không đụng `kinematics.*`).
+
+### Việc còn lại (nếu có)
+- Chạy lại `pio run` ở môi trường có mạng truy cập được registry PlatformIO để xác nhận build gate xanh.
