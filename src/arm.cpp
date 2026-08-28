@@ -95,6 +95,7 @@ void ArmController::taskLoop() {
         // 2) Endstop bảo vệ: chỉ khi motor đang chạy VÀ endstop vật lý thực sự nhấn
         //    Homing tự xử lý endstop riêng — arm không can thiệp trong quá trình homing.
         //    Endstop pressed at boot = OK (resting against switch), không fault.
+        //    Nếu motor đang chạy lùi xa khỏi endstop (jog away) -> cho phép di chuyển.
         if (es != nullptr && hc != nullptr && !hc->isActive()) {
             bool anyMotorRunning = false;
             for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
@@ -106,20 +107,28 @@ void ArmController::taskLoop() {
             if (anyMotorRunning) {
                 for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
                     if (es->hasPin(i, EndstopWhich::MIN) && es->isPressed(i, EndstopWhich::MIN)) {
-                        for (uint8_t j = 0; j < NUM_MOTORS; ++j)
-                            if (motors[j] != nullptr) motors[j]->stop();
-                        es->clearAllLatches();
-                        mode_ = ArmMode::FAULT;
-                        Serial.printf("[ARM] FAULT: endstop J%u MIN pressed during motion\n", i + 1);
-                        break;
+                        const bool movingAway = (motors[i] != nullptr && motors[i]->isRunning() &&
+                                                 motors[i]->getDirCW() == JointModel::cwForDelta(i, +1.0f));
+                        if (!movingAway) {
+                            for (uint8_t j = 0; j < NUM_MOTORS; ++j)
+                                if (motors[j] != nullptr) motors[j]->stop();
+                            es->clearAllLatches();
+                            mode_ = ArmMode::FAULT;
+                            Serial.printf("[ARM] FAULT: endstop J%u MIN pressed during motion\n", i + 1);
+                            break;
+                        }
                     }
                     if (es->hasPin(i, EndstopWhich::MAX) && es->isPressed(i, EndstopWhich::MAX)) {
-                        for (uint8_t j = 0; j < NUM_MOTORS; ++j)
-                            if (motors[j] != nullptr) motors[j]->stop();
-                        es->clearAllLatches();
-                        mode_ = ArmMode::FAULT;
-                        Serial.printf("[ARM] FAULT: endstop J%u MAX pressed during motion\n", i + 1);
-                        break;
+                        const bool movingAway = (motors[i] != nullptr && motors[i]->isRunning() &&
+                                                 motors[i]->getDirCW() == JointModel::cwForDelta(i, -1.0f));
+                        if (!movingAway) {
+                            for (uint8_t j = 0; j < NUM_MOTORS; ++j)
+                                if (motors[j] != nullptr) motors[j]->stop();
+                            es->clearAllLatches();
+                            mode_ = ArmMode::FAULT;
+                            Serial.printf("[ARM] FAULT: endstop J%u MAX pressed during motion\n", i + 1);
+                            break;
+                        }
                     }
                 }
             }
@@ -138,10 +147,7 @@ void ArmController::taskLoop() {
             if (hc != nullptr && hc->isActive()) {
                 mode_ = ArmMode::HOMING;
             } else if (pl != nullptr && pl->isActive()) {
-                mode_ = ArmMode::CART;
-            } else if (mode_ == ArmMode::HOMING || mode_ == ArmMode::CART ||
-                       mode_ == ArmMode::DRAW) {
-                mode_ = ArmMode::IDLE;
+                mode_ = pl->isDrawing() ? ArmMode::DRAW : ArmMode::CART;
             } else if (busy()) {
                 mode_ = ArmMode::JOG;
             } else {
@@ -234,7 +240,7 @@ void ArmController::execute(const ArmCommand& cmd) {
                 job.r = cmd.p[3];
             }
             if (cmd.p[5] > 1.0f && cmd.p[5] < 200.0f) job.feedMmS = cmd.p[5];
-            mode_ = ArmMode::CART;
+            mode_ = (cmd.type == ArmCommand::MOVE_CART) ? ArmMode::CART : ArmMode::DRAW;
             if (!pl->submit(job)) mode_ = ArmMode::IDLE;
             break;
         }

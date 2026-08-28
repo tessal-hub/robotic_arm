@@ -256,10 +256,10 @@ void Motor::begin(uint16_t initialCurrentMa, uint16_t initialMicrosteps,
 }
 
 void Motor::setDirection(bool cw) {
-    dirCW.store(cw, std::memory_order_relaxed);
-
     if (dirPin != 255) { // A4988 hoặc TMC có chân DIR vật lý
+        dirCW.store(cw, std::memory_order_relaxed);
         gpio_set_level(static_cast<gpio_num_t>(dirPin), cw ? 1 : 0);
+        return;
     } 
     
     if (isTMC && dirPin == 255) { // TMC dùng UART đảo chiều
@@ -269,8 +269,13 @@ void Motor::setDirection(bool cw) {
                 flushUartRx();
                 driver->shaft(cw);
                 lastShaftDir = requestedDir;
+                dirCW.store(cw, std::memory_order_relaxed);
                 giveUart();
+            } else {
+                Serial.printf("[MOTOR] Canh bao: %s take UART timeout, khong doi duoc chieu!\n", label);
             }
+        } else {
+            dirCW.store(cw, std::memory_order_relaxed);
         }
     }
 }

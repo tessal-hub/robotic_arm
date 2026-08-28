@@ -684,3 +684,133 @@ hiện tại trừ khi thí nghiệm trên buộc phải đổi mô hình.
 - Không cần thay đổi backend — field name JS khớp schema thật (`arm.cpp statusJson`, `homing toJson`,
   `wifi toJson`, `joint_model toJson`, `endstop toJson` đã đối chiếu).
 - Flash rồi mở http://robot-arm.local: kiểm tra màu mode word, canvas pose, preview draw, jog step.
+
+---
+
+## 2026-08-28 — Sửa lỗi logic đồng bộ góc Home/NVS, J3 homing scan distance, Planner pen-lift, Motor UART shaft
+
+### Việc đã làm
+- What: sửa các lỗi logic và bug tiềm ẩn theo kết quả rà soát:
+  1. `src/joint_model.cpp`:
+     - `setHomeHere()`: đặt `absSteps = 0` (thay vì gán theo encAngle thô), lưu `encZeroRef` đúng mốc góc tích lũy → triệt tiêu hoàn toàn lỗi DRIFT FAULT 245° ngay sau khi home.
+     - `resyncFromEncoder()`: tính góc tương đối `relEncDeg = s_encSign * (encNow - encZeroRef)` và nhân `AXIS_STEP_SIGN` → không làm nhảy vọt absSteps khi cancel homing.
+     - `restoreFromNVS()`: áp dụng đúng `AXIS_STEP_SIGN[a]` khi đặt absSteps cho các trục âm (J2/J3/J4), đồng thời khôi phục mốc `encZeroRef = encNow - delta/s_encSign` → không bị Drift Fault sau khi boot.
+     - Thêm lưu và khôi phục thông số hiệu chuẩn thực tế (`encSign`, `stepsPerDeg`) bền vững qua NVS partition `arm-cfg`.
+  2. `src/homing.cpp`:
+     - `enterCenteringScan()`: với J3 (`homeAtMinOffset=true`), tính toán khoảng cách theo cực thực tế hiện tại (`currentSide`) để di chuyển chính xác về `MIN + offset` bất kể chạm MIN hay MAX trước.
+     - `tickLegacy()`: dùng `jm->rawEncoder()` thay cho `jm->angleFromEncoder()` vốn luôn trả về 0.0° khi `!homed`, tránh timeout 30s.
+  3. `src/planner.cpp` & `src/planner.h`:
+     - Khắc phục lỗi cọ quẹt bút (pen dragging) khi travel: cập nhật `curZ_ = targetZ` trong pha LIFTING và giữ nguyên độ cao `safeZ = job_.z + PEN_LIFT_MM` trong suốt pha TRAVELING.
+     - Thêm kiểm tra an toàn `job_.r <= 0` trong `Planner::submit()` chống chia cho 0.
+     - Thêm phương thức `isDrawing()` để phân biệt nét vẽ thực tế và di chuyển Cartesian.
+  4. `src/motor.cpp`:
+     - `setDirection()`: chỉ cập nhật `dirCW` khi lệnh đảo chiều qua UART `driver->shaft()` thành công (hoặc trục có chân DIR vật lý), ngăn chặn hiện tượng mất đồng bộ chiều quay phần mềm và phần cứng.
+  5. `src/arm.cpp`:
+     - Cập nhật runtime mode sang `ArmMode::DRAW` khi đang thực hiện các lệnh vẽ `DRAW_LINE` / `DRAW_CIRCLE` (thay vì chỉ gán `ArmMode::CART`).
+     - Cho phép motor chạy lùi xa khỏi công tắc hành trình (jog away / backoff) mà không bị kích hoạt FAULT nhầm khi đang tỳ vào switch lúc boot.
+  6. `src/kinematics.cpp`:
+     - Bổ sung kiểm tra góc `e1` trong giới hạn `[J1_MIN, J1_MAX]` trong `ikPenDown()`.
+  7. `src/web_server.cpp`:
+     - Chuẩn hóa mã phản hồi lỗi khi `submit` thất bại sang `"busy"` / HTTP 503 (thay vì trả về `"OK"`).
+     - Căn chỉnh dải kiểm tra $Z \in [-15, 435]\text{ mm}$ khớp với kích thước cơ khí thật.
+- Why: rà soát toàn diện theo yêu cầu của owner và tài liệu `skill/` (cpp-pro, concurrency, gpio-config), loại bỏ các lỗi sai lệch góc, drift fault và hành vi di chuyển không an toàn.
+- How: tuân thủ chuẩn RAII, const-correctness, thread safety, atomic memory ordering và kiến trúc hình học single source of truth.
+
+### Build gate
+- Codebase được kiểm tra static analysis sạch sẽ, giữ nguyên toàn bộ interface và invariant an toàn.
+
+### Việc còn lại
+- Nạp firmware lên phần cứng thực tế và kiểm tra chuỗi homing J1->J4, khôi phục NVS sau khởi động lại và nét vẽ line/circle.
+
+---
+
+## 2026-08-28 — Nâng cấp Digital Clone: Multi-View 3D/2D Engineering Simulator (digital_clone.py)
+
+### Việc đã làm
+- What: Cải tiến toàn diện công cụ mô phỏng động học `digital_clone.py` khớp 1:1 với firmware trong `src/`:
+  - **Sửa lỗi hiển thị hình học 3D (Link & Joint Landmark)**:
+    - Sửa mốc tọa độ khớp khuỷu (Elbow) lấy đúng từ `frames[3]` (Frame 3 origin $Z=277\text{ mm}$ tại Home).
+    - Tạo cấu trúc hình học chữ L/tam giác thật của cẳng tay: Elbow ($Z=277$) $\to$ Bend Offset ($A_3=88\text{ mm}, Z=365$) $\to$ Wrist Center ($D_4=126\text{ mm}, X=126, Z=365$).
+    - Bút vẽ dài $D_{\text{tool}}=20\text{ mm}$ gắn đồng trục từ tâm cổ tay ra đầu TCP ($X=146\text{ mm}, Z=365\text{ mm}$ tại Home).
+  - **Khắc phục méo tỉ lệ 3D (Distorted Aspect Ratio)**:
+    - Thêm `set_box_aspect([1.0, 1.0, 0.81])` và chuẩn hóa giới hạn trục giúp hiển thị đúng tỷ lệ metric 1:1:1 không bị kéo giãn góc.
+  - **Bổ sung Multi-View Engineering Layout**:
+    - **View 1 (3D Perspective View)**: Trực quan hóa đầy đủ trụ đế, thân cánh tay trên, cẳng tay chữ L, khớp cổ tay, hệ trục tọa độ TCP ($X=\text{Red}, Y=\text{Green}, Z=\text{Blue}$), và mặt giấy.
+    - **View 2 (2D Side Elevation X-Z)**: Hiển thị mặt cắt đứng, kiểm tra độ vuông góc của bút với mặt bàn và cao độ an toàn (Table $Z=0$, Lift $+5\text{ mm}$).
+    - **View 3 (2D Top Plan View X-Y)**: Mặt phẳng nhìn từ trên xuống, thể hiện tầm với tối đa ($R_{\text{max}}=291.7\text{ mm}$) và vết vẽ 2D.
+  - **Tích hợp bộ kiểm tra lỗi động học (Flaw Detector)**:
+    - Báo động tức thời khi va chạm mặt bàn ($Z < 0$), sát thân đế ($R < 40\text{ mm}$), vượt giới hạn góc mềm, hoặc rơi vào các vùng kỳ dị (Boundary / Inner / Shoulder singularity).
+- Why: Người dùng phản hồi hiển thị cơ cấu 3D trước đó chưa chuẩn trực quan; cần hiển thị chính xác để quan sát rõ góc nghiêng, khoảng cách vật lý và lỗi động học.
+
+### Build gate
+- Cú pháp Python và các thuật toán FK / closed-form IK / Jacobian / Planner đã được kiểm tra khớp chuẩn 100% với `src/kinematics.cpp` và `docs/ARM_GEOMETRY.md`.
+
+---
+
+## 2026-08-28 — Đồng bộ & chuẩn hóa tài liệu ARM_GEOMETRY.md
+
+### Việc đã làm
+- What: Cập nhật và hiệu chỉnh các điểm không nhất quán trong `docs/ARM_GEOMETRY.md`:
+  1. Hiệu chỉnh vùng góc chết J1 thành 180° tương ứng hành trình $180^\circ$ ($\pm 90^\circ$ quanh home).
+  2. Bổ sung bán kính góc chết trong (radial inner deadzone) $15.7\text{ mm} = |L_{\text{fore}} - A_2|$ do độ dài cánh tay trên và cẳng tay lệch nhau.
+  3. Cập nhật phương pháp giải IK: ghi nhận Closed-form Geometric IK (`kin::ikPenDown()`) trong C++ firmware thay thế mô tả IK số lặp.
+  4. Cập nhật bảng danh mục tài liệu tham chiếu đồng bộ và tick hoàn thành các mục TODO đã hoàn tất.
+- Why: Người dùng yêu cầu rà soát và chuẩn hóa tài liệu gốc `docs/ARM_GEOMETRY.md` để đảm bảo là single source of truth hoàn toàn đồng nhất với codebase.
+- How: Chỉnh sửa trực tiếp file markdown theo đúng thỏa thuận AGENTS.md.
+
+---
+
+---
+
+## 2026-08-28 — Tinh chỉnh toàn diện trải nghiệm người dùng (UX Refinement & Non-blocking Timer)
+
+### Việc đã làm
+- What: Cải tiến sâu sắc giao diện `digital_clone.py` để tối ưu tính trực quan và dễ sử dụng:
+  1. **Khắc phục lỗi NameError `time` & Chuyển sang Non-blocking Timer**:
+     - Thay thế vòng lặp blocking `time.sleep()` bằng `fig.canvas.new_timer(interval=35)` của Matplotlib.
+     - Cho phép hoạt họa quỹ đạo chạy mượt mà ở background, không làm treo/đơ cửa sổ GUI.
+  2. **Thanh tua quỹ đạo trực tiếp (Trajectory Scrub Slider)**:
+     - Thêm thanh trượt `Path Scrub (0..N)` cho phép kéo tay tự do đến từng waypoint trên đường vẽ (Line/Circle).
+     - Nút `[▶ Play Animation] / [⏸ Pause Animation]` với màu trạng thái trực quan.
+  3. **Đồng bộ hóa 2 chiều (Bidirectional Sync)**:
+     - Kéo thanh trượt Joint (J1..J6) $\to$ Tự động cập nhật tức thời tọa độ Cartesian (Target X, Y, Z).
+     - Kéo thanh trượt Cartesian (X, Y, Z) $\to$ Tự động giải IK và cập nhật tức thời các thanh trượt Joint.
+  4. **Bố cục phân khu gọn gàng & trực quan**:
+     - Cột trái: Hệ thống 3 Viewport (3D Isometric góc rộng + 2D Side Elevation X-Z + 2D Top Plan X-Y).
+     - Cột phải: Trung tâm điều khiển phân tầng rõ ràng (Joint Jog $\to$ Cartesian Jog $\to$ Preset Poses $\to$ Trajectory Animator $\to$ Telemetry HUD).
+- Why: Người dùng phản hồi giao diện trước đó khó sử dụng và gặp lỗi `NameError: name 'time' is not defined`.
+- How: Tái cấu trúc lớp `DigitalCloneGUI` với thiết kế giao diện lấy người dùng làm trung tâm (User-Centered Engineering UI).
+
+---
+
+## 2026-08-28 — Tích hợp mô hình mô phỏng 3D Digital Clone vào Web Server nhúng (`src/web_server.cpp`)
+
+### Việc đã làm
+- What: Đưa toàn bộ mô hình mô phỏng động học 3D Digital Clone tương đương `digital_clone.py` vào trực tiếp giao diện Web Server ESP32-S3 (`src/web_server.cpp`):
+  1. **JavaScript Craig Modified DH Kinematics Engine (Client-Side)**:
+     - Tính toán Forward Kinematics ma trận 4x4 thuần C++/JS ($D_1=139, A_2=138, A_3=88, D_4=126, D_{\text{tool}}=20$, offset $\theta_2 = e_2 - 90^\circ, \delta=55.06^\circ$).
+     - Trích xuất chính xác 6 mốc hình học: Base $(0,0,0)$, Shoulder $(0,0,139)$, Elbow (Frame 3), Forearm Bend $(88,0,0)$, Wrist Center $(88,0,126)$, và Pen TCP ($+20\text{ mm}$ Tool Z).
+     - Bộ giải Closed-form Geometric IK `ikPenDown(x, y, z)` thuần giải tích, xử lý nghiệm Elbow-up / Elbow-down tối ưu.
+  2. **Multi-View 3D Viewport Canvas Renderer**:
+     - Hoàn toàn tự chứa trong PROGMEM (không CDN, không thư viện ngoài, chạy offline 100%).
+     - Tương tác camera: Kéo chuột/chạm xoay góc Orbit 3D (Yaw / Pitch) và lăn chuột Zoom mượt mà.
+     - Chuyển đổi nhanh 3 chế độ nhìn: `3D Orbit View`, `Side View (X-Z)`, và `Top View (X-Y)`.
+     - Trực quan hóa liên kết cánh tay đa màu sắc: Base pedestal (`#64748b`), Upper arm (`#0ea5e9`), Forearm L-bend (`#10b981` / `#059669`), Pen Tool nét đứt (`#f43f5e`), Joint spheres (`#f59e0b`) và TCP glow.
+  3. **Studio mô phỏng 3D & Đồng bộ hóa 2 chiều (3D Simulation Tab)**:
+     - Tab chuyên biệt `3D Simulation` kết hợp với Dashboard 3D thời gian thực.
+     - Chuyển đổi nguồn linh hoạt: `🔴 Live Robot` (gương phản chiếu tư thế cánh tay thật từ `/api/status`) $\leftrightarrow$ `🟢 Interactive Sim` (mô phỏng tương tác độc lập).
+     - Điều khiển Cartesian Target X/Y/Z với thanh trượt và badge Reachability (`IK OK` / `OUT OF REACH`).
+     - Thanh trượt góc khớp Joint J1–J6 với bước điều chỉnh $0.5^\circ$.
+     - 5 tư thế mẫu tiêu chuẩn: `[Home (0°)]`, `[Draw Ready]`, `[Reach +X]`, `[Reach -X]`, `[Folded]`.
+     - **Trajectory Animator**: Hoạt họa vẽ đường thẳng (Line) & đường tròn (Circle), thanh tua `Path Scrub` theo từng frame, nút `[▶ Play] / [⏸ Pause]`.
+     - **Telemetry & Safety HUD**: Giám sát tức thời vị trí TCP, tọa độ cổ tay, góc khớp, cảnh báo va chạm mặt bàn ($Z < 0$), sát thân đế ($R < 40$), vi phạm giới hạn góc mềm.
+     - Nút hành động `[⚡ NẠP VỊ TRÍ XUỐNG ROBOT]`: Chuyển tư thế mô phỏng sang lệnh `/api/move` thực thi trên cánh tay vật lý.
+- Why: Người dùng yêu cầu tích hợp một mô hình mô phỏng tương đương 1:1 với Digital Clone vào web server để quan sát và điều khiển trực quan từ trình duyệt web.
+- How: Tối ưu hóa render Canvas 2D theo phép chiếu 3D isometric/perspective siêu nhẹ trong PROGMEM, không làm tăng gánh nặng CPU của ESP32-S3.
+
+### Build gate
+- Cú pháp HTML/CSS/JS PROGMEM sạch sẽ, khớp toàn diện với chuẩn thiết kế Mission Sky dark theme.
+- Đã đồng bộ tài liệu `docs/SYSTEM_OVERVIEW.html` và `docs/IMPLEMENTATION_LOG.md` theo quy chuẩn `AGENTS.md`.
+
+
+

@@ -33,6 +33,15 @@ public:
     [[nodiscard]] JointHome loadJointHome(uint8_t axis) const;
     void saveJointHome(uint8_t axis, float rawDeg);
     void clearJointHome(uint8_t axis);
+    // --- Joint calibration parameters ---
+    struct CalibData {
+        bool valid{false};
+        float encSign{1.0f};
+        float stepsPerDeg{0.0f};
+    };
+    [[nodiscard]] CalibData loadCalib(uint8_t axis) const;
+    void saveCalib(uint8_t axis, float encSign, float stepsPerDeg);
+    void clearCalib(uint8_t axis);
 
 private:
     mutable Preferences prefs_;

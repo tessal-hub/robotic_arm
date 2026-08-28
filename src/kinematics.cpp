@@ -128,6 +128,7 @@ bool ikPenDown(const Pose& target, float outEnc[6]) {
         const float e3 = t3 * 57.29577951308232f;
         const float e5 = -q23 * 57.29577951308232f;       // t5_DH = -q23
 
+        if (!(e1 >= J1_MIN && e1 <= J1_MAX)) continue;
         if (!(e2 >= J2_MIN && e2 <= J2_MAX)) continue;
         if (!(e3 >= J3_MIN && e3 <= J3_MAX)) continue;
         if (!(e5 >= J5_MIN && e5 <= J5_MAX)) continue;

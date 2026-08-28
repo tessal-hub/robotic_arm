@@ -74,16 +74,14 @@ void JointModel::setHomeHere(uint8_t axis) {
     if (axis >= NUM_MOTORS) return;
     if (motors[axis] == nullptr) return;
 
+    motors[axis]->setAbsoluteSteps(0);
     if (sensor != nullptr && sensor->isSensorOK(axis)) {
         const float encAngle = sensor->getAccumulatedAngle(axis);
         encZeroRef[axis] = encAngle;
-        const float angleDeg = s_encSign[axis] * encAngle;
-        motors[axis]->setAbsoluteSteps(degreesToSteps(axis, angleDeg));
         if (nvs != nullptr) nvs->saveJointHome(axis, sensor->getAngle(axis));
-        Serial.printf("[JM] SetHome J%u (enc=ok, steps set to %.1f deg)\n",
-                      axis + 1, angleDeg);
+        Serial.printf("[JM] SetHome J%u (enc=ok, zeroRef=%.1f deg)\n",
+                      axis + 1, encAngle);
     } else {
-        motors[axis]->setAbsoluteSteps(0);
         Serial.printf("[JM] SetHome J%u (enc=DEAD, step-only)\n", axis + 1);
     }
     driftFault[axis] = false;
@@ -100,14 +98,21 @@ void JointModel::clearHome(uint8_t axis) {
 
 void JointModel::resyncFromEncoder(uint8_t axis) {
     if (axis >= NUM_MOTORS) return;
-    if (motors[axis] == nullptr || sensor == nullptr || !sensor->isSensorOK(axis)) return;
-    const float encAngle = s_encSign[axis] * sensor->getAccumulatedAngle(axis);
-    motors[axis]->setAbsoluteSteps(degreesToSteps(axis, encAngle));
+    if (motors[axis] == nullptr || sensor == nullptr || !sensor->isSensorOK(axis) || !homed[axis]) return;
+    const float relEncDeg = s_encSign[axis] * (sensor->getAccumulatedAngle(axis) - encZeroRef[axis]);
+    motors[axis]->setAbsoluteSteps(AXIS_STEP_SIGN[axis] * degreesToSteps(axis, relEncDeg));
 }
 
 void JointModel::forgetHome(uint8_t axis) {
     clearHome(axis);
-    if (nvs != nullptr) nvs->clearJointHome(axis);
+    if (axis < NUM_MOTORS) {
+        s_hasMeasured[axis] = false;
+        s_encSign[axis] = AXIS_ENC_SIGN[axis];
+    }
+    if (nvs != nullptr) {
+        nvs->clearJointHome(axis);
+        nvs->clearCalib(axis);
+    }
 }
 
 void JointModel::applyHomingCalibration(uint8_t axis, float encSign, float stepsPerDeg) {
@@ -115,6 +120,7 @@ void JointModel::applyHomingCalibration(uint8_t axis, float encSign, float steps
     s_encSign[axis] = (encSign >= 0.0f) ? 1.0f : -1.0f;
     s_measuredSpd[axis] = stepsPerDeg;
     s_hasMeasured[axis] = true;
+    if (nvs != nullptr) nvs->saveCalib(axis, s_encSign[axis], s_measuredSpd[axis]);
     Serial.printf("[JM] Calib J%u: encSign=%+.0f, steps/deg=%.2f (measured)\n",
                   axis + 1, s_encSign[axis], s_measuredSpd[axis]);
 }
@@ -123,6 +129,13 @@ uint8_t JointModel::restoreFromNVS() {
     if (nvs == nullptr || sensor == nullptr) return 0;
     uint8_t okCount = 0;
     for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
+        const NvsStore::CalibData cal = nvs->loadCalib(a);
+        if (cal.valid) {
+            s_encSign[a] = cal.encSign;
+            s_measuredSpd[a] = cal.stepsPerDeg;
+            s_hasMeasured[a] = true;
+        }
+
         if (!sensor->isSensorOK(a) || motors[a] == nullptr) continue;
         const NvsStore::JointHome h = nvs->loadJointHome(a);
         if (!h.valid) continue;
@@ -137,8 +150,8 @@ uint8_t JointModel::restoreFromNVS() {
             continue;
         }
 
-        motors[a]->setAbsoluteSteps(degreesToSteps(a, delta));
-        encZeroRef[a] = sensor->getAccumulatedAngle(a);
+        motors[a]->setAbsoluteSteps(AXIS_STEP_SIGN[a] * degreesToSteps(a, delta));
+        encZeroRef[a] = sensor->getAccumulatedAngle(a) - delta / s_encSign[a];
         driftFault[a] = false;
         restored[a] = true;
         homed[a] = true;

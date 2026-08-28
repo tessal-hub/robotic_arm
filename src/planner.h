@@ -54,6 +54,9 @@ public:
     [[nodiscard]] bool submit(const Job& job);
     void stop();                       // huỷ ngay, dừng motor
     [[nodiscard]] bool isActive() const noexcept { return state_ != State::IDLE; }
+    [[nodiscard]] bool isDrawing() const noexcept {
+        return hasJob_ && (job_.shape == Shape::LINE || job_.shape == Shape::CIRCLE);
+    }
     [[nodiscard]] State state() const noexcept { return state_; }
 
     // Gọi định kỳ từ motion task (10ms). Sinh segment khi các trục đã dừng.

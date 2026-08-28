@@ -135,15 +135,21 @@ void HomingController::enterScanMax() {
 void HomingController::enterCenteringScan() {
     Motor& m = *motors[curAxis_];
     // J1/J2: home = TÂM cơ khí = step_max/2 bước từ cực đầu (đúng bất kể gear ratio).
-    // J3: home = điểm riêng gần MIN = lùi một offset nhỏ khỏi MIN endstop, không phải tâm.
+    // J3: home = điểm riêng gần MIN = lùi một offset nhỏ khỏi MIN endstop.
     int64_t stepCenter;
     if (homeAtMinOffset(curAxis_)) {
-        stepCenter = JointModel::degreesToSteps(curAxis_, HOME_BACKOFF_DEG + 0.5f);
+        const int64_t offsetSteps = JointModel::degreesToSteps(curAxis_, HOME_BACKOFF_DEG + 0.5f);
+        const EndstopWhich currentSide = (minSide_ == EndstopWhich::MIN) ? EndstopWhich::MAX : EndstopWhich::MIN;
+        if (currentSide == EndstopWhich::MAX) {
+            stepCenter = (stepMax_ > offsetSteps) ? (stepMax_ - offsetSteps) : 0;
+        } else {
+            stepCenter = offsetSteps;
+        }
     } else {
         stepCenter = stepMax_ / 2;
     }
     const float centerDeg = JointModel::stepsToDegrees(curAxis_, stepCenter);
-    const bool cwToCenter = JointModel::cwForDelta(curAxis_, -centerDeg); // từ MIN về phía cực đầu
+    const bool cwToCenter = JointModel::cwForDelta(curAxis_, -centerDeg); // từ cực hiện tại về phía cực đầu
     m.setSpeed(DEFAULT_AXIS_HOMING_SPEEDS[curAxis_]);
     m.run(cwToCenter, static_cast<uint32_t>(stepCenter));
     centeringCoarse_ = false;
@@ -328,7 +334,7 @@ void HomingController::contactMade() {
         es->clearLatch(curAxis_, EndstopWhich::MAX);
     }
     if (jm != nullptr && jm->encOK(curAxis_)) {
-        angleEncAtContact_ = jm->angleFromEncoder(curAxis_);
+        angleEncAtContact_ = jm->rawEncoder(curAxis_);
     }
     Serial.printf("[HOME] J%u: CONTACT (steps=%lld, enc=%.1f deg)\n", curAxis_ + 1,
                   static_cast<long long>(m.getAbsoluteSteps()), angleEncAtContact_);
@@ -359,7 +365,7 @@ void HomingController::enterReapproach() {
 bool HomingController::gotoNearHome() {
     if (jm == nullptr || !jm->encOK(curAxis_)) return false;
     Motor& m = *motors[curAxis_];
-    const float encAngle = jm->angleFromEncoder(curAxis_);
+    const float encAngle = jm->rawEncoder(curAxis_);
     const float stroke = DEFAULT_AXIS_CALIB_RANGE[curAxis_];
     const float targetAngle = angleEncAtContact_ + stroke / 2.0f;
     const float err = targetAngle - encAngle;
@@ -432,7 +438,7 @@ void HomingController::tickLegacy(uint32_t now, Motor& m) {
                 m.stop();
                 es->consumeLatch(curAxis_, EndstopWhich::MIN);
                 if (jm != nullptr && jm->encOK(curAxis_)) {
-                    angleEncAtContact_ = jm->angleFromEncoder(curAxis_);
+                    angleEncAtContact_ = jm->rawEncoder(curAxis_);
                 }
                 Serial.printf("[HOME] J%u: REAPPROACH CONTACT (enc=%.1f deg)\n",
                               curAxis_ + 1, angleEncAtContact_);
@@ -447,7 +453,7 @@ void HomingController::tickLegacy(uint32_t now, Motor& m) {
         case HomePhase::CENTERING: {
             if (now - phaseStartMs_ > HOMING_JOINT_TIMEOUT_MS) { finishJoint(false); return; }
             if (jm != nullptr && jm->encOK(curAxis_)) {
-                const float encAngle = jm->angleFromEncoder(curAxis_);
+                const float encAngle = jm->rawEncoder(curAxis_);
                 const float stroke = DEFAULT_AXIS_CALIB_RANGE[curAxis_];
                 const float targetAngle = angleEncAtContact_ + stroke / 2.0f;
                 const float err = targetAngle - encAngle;

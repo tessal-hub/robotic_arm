@@ -109,21 +109,21 @@ Giới hạn khớp đã cung cấp (giả định đối xứng quanh home — 
 
 | Khớp | Tổng hành trình | Giả định range |
 |---|---|---|
-| J1 | 270° | ±135° quanh home |
+| J1 | 180° | ±90° quanh home |
 | J2 | 180° | ±90° quanh home |
-| J3 | 180° | ±90° quanh home |
+| J3 | 90° | +90° từ home |
 
 Kết quả tính được (xem `fk_verify.py` để tái tạo):
 
 | Thông số | Giá trị |
 |---|---|
 | Tầm với xa nhất (radial từ trục J1) | 291.7mm |
-| Tầm với gần nhất | 0mm (wrist có thể chạm trục J1) |
+| Tầm với gần nhất (radial inner deadzone) | 15.7mm (=|153.69 - 138|) |
 | Độ cao tối đa | 430.7mm |
 | Độ cao tối thiểu | -14.7mm (có thể bị đế chặn vật lý) |
 | Đoạn J3→wrist center (cố định, không đổi theo θ3) | 153.69mm (=√(88²+126²)) |
 
-Với J1 chỉ 270° (không phải 360°), có một **góc chết ~90°** phía sau robot không với tới được.
+Với J1 hành trình 180° (±90° quanh home), có một **vùng góc chết 180°** phía sau robot không quay tới được.
 
 ## 7. Kỳ dị động học đã phát hiện (Singularity)
 
@@ -133,25 +133,24 @@ xuống bàn) → trục J1 và J6 gần như trùng phương → **mất 1 bậ
 "wrist singularity" kinh điển (cái sau là trục cổ tay cầu J4/J6 trùng nhau). Trong firmware, đây
 không phải lỗi code — nó là hệ quả tất yếu của cấu trúc 6-DOF đã khóa e4=e6.
 
-**Cách xử lý đã áp dụng:** dùng Levenberg-Marquardt (damped least-squares) thay vì
-Newton-Raphson thuần túy khi giải IK số, tránh nghiệm trôi vô hạn. Xem `ik_line_trajectory.py`.
+**Cách xử lý đã áp dụng:** dùng **Closed-form Analytic IK** (`kin::ikPenDown()` trong `src/kinematics.cpp`)
+giải hình học trực tiếp góc vai-khuỷu (J2-J3) theo định lý cosin, tính góc nghiêng cổ tay J5 = -(t2+t3+δ),
+và cố định J4=0, J6=0 — loại bỏ hoàn toàn hiện tượng trôi nghiệm của IK số lặp.
 
 ## 8. File tham chiếu liên quan trong repo
 
 | File | Vai trò |
 |---|---|
-| `fk_verify.py` | Nguồn chân lý cho FK, bảng DH, offset, D6_TOOL (Python, dùng `numpy`) |
-| `ik_line_trajectory.py` | IK số (Levenberg-Marquardt) + sinh trajectory đường thẳng Cartesian, giữ hướng cố định |
-| `arm_simulator.html` | Giả lập 3D (Three.js) — port JS của FK, phải đồng bộ nếu đổi DH table/offset ở Python |
-| `src/kinematics.h` / `src/kinematics.cpp` | Bản port sang C++/float cho ESP32-S3 firmware — **PHẢI đồng bộ với file này khi cập nhật DH/offset** |
+| `digital_clone.py` | Visualizer 3D/2D đa góc nhìn + kiểm thử động học & bộ sinh quỹ đạo Planner |
+| `src/kinematics.h` / `src/kinematics.cpp` | Bản port C++/float cho ESP32-S3 firmware — **PHẢI đồng bộ với file này khi cập nhật DH/offset** |
+| `test/kinematics/test_kinematics.cpp` | Host test tự động 3280 điểm FK/IK roundtrip |
 
 > ⚠️ Khi thay đổi bất kỳ số liệu nào ở mục 1-4 (đo lại link length, xác nhận offset J4-J6...),
-> **bắt buộc cập nhật đồng thời cả 4 file trên** để tránh lệch pha giữa Python (verify), web
-> simulator, và firmware thật.
+> **bắt buộc cập nhật đồng thời cả 3 file trên** để tránh lệch pha giữa simulator, firmware, và test suite.
 
 ## 9. Việc còn tồn đọng (TODO)
 
 - [ ] Xác nhận offset vật lý θ4, θ5, θ6 (đo giống cách đã làm với θ2)
-- [ ] Xác nhận giới hạn góc J1/J2/J3 có đối xứng quanh home hay lệch tâm
+- [x] Xác nhận giới hạn góc J1/J2/J3 (Đã chốt: J1: ±90°, J2: ±90°, J3: 0..+90°)
 - [ ] Đo D6_TOOL chính xác bằng thước cặp thay vì ước lượng "khoảng 2cm"
-- [ ] Port closed-form IK (geometric + spherical wrist decomposition) sang C++/float cho firmware, thay thế IK số hiện chỉ chạy trên PC
+- [x] Port closed-form IK (geometric + spherical wrist decomposition) sang C++/float cho firmware (`src/kinematics.cpp::ikPenDown`)

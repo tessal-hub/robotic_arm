@@ -52,6 +52,7 @@ bool Planner::submit(const Job& job) {
             break;
         }
         case Shape::CIRCLE: {
+            if (job_.r <= 0.0f) return false;
             const float dxr = curX_ - job_.x1; // x1=cx
             const float dyr = curY_ - job_.y1; // y1=cy
             startAng_ = atan2f(dyr, dxr);
@@ -173,11 +174,15 @@ void Planner::tick() {
     if (!hasJob_) return;
 
     switch (state_) {
-        case State::LIFTING:
+        case State::LIFTING: {
             if (motorsBusy(motors)) return;
-            if (!startMoveTo(curX_, curY_, curZ_ + PEN_LIFT_MM, DRAW_FEED_MM_S)) return;
+            const float safeZ = job_.z + PEN_LIFT_MM;
+            const float targetZ = (curZ_ > safeZ) ? curZ_ : safeZ;
+            curZ_ = targetZ;
+            if (!startMoveTo(curX_, curY_, targetZ, DRAW_FEED_MM_S)) return;
             state_ = State::TRAVELING;
             break;
+        }
 
         case State::TRAVELING:
             if (motorsBusy(motors)) return;
@@ -198,6 +203,7 @@ void Planner::tick() {
 
         case State::DROPPING:
             if (motorsBusy(motors)) return;
+            curZ_ = job_.z;
             if (!startMoveTo(curX_, curY_, job_.z, job_.feedMmS)) return;
             state_ = State::DRAWING;
             break;
@@ -215,11 +221,14 @@ void Planner::tick() {
             }
             break;
 
-        case State::FINISHED_LIFT:
+        case State::FINISHED_LIFT: {
             if (motorsBusy(motors)) return;
-            if (!startMoveTo(curX_, curY_, job_.z + PEN_LIFT_MM, DRAW_FEED_MM_S)) return;
+            const float safeZ = job_.z + PEN_LIFT_MM;
+            curZ_ = safeZ;
+            if (!startMoveTo(curX_, curY_, safeZ, DRAW_FEED_MM_S)) return;
             finishAll();
             break;
+        }
 
         default:
             break;

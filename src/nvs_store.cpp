@@ -59,3 +59,37 @@ void NvsStore::clearJointHome(uint8_t axis) {
     snprintf(key, sizeof(key), "j%u_valid", axis);
     prefs_.putBool(key, false);
 }
+
+NvsStore::CalibData NvsStore::loadCalib(uint8_t axis) const {
+    CalibData c;
+    if (!ok_ || axis >= NUM_MOTORS) return c;
+    char key[14];
+    snprintf(key, sizeof(key), "j%u_cvalid", axis);
+    c.valid = prefs_.getBool(key, false);
+    if (c.valid) {
+        snprintf(key, sizeof(key), "j%u_esign", axis);
+        c.encSign = prefs_.getFloat(key, 1.0f);
+        snprintf(key, sizeof(key), "j%u_mspd", axis);
+        c.stepsPerDeg = prefs_.getFloat(key, 0.0f);
+        if (c.stepsPerDeg <= 0.0f) c.valid = false;
+    }
+    return c;
+}
+
+void NvsStore::saveCalib(uint8_t axis, float encSign, float stepsPerDeg) {
+    if (!ok_ || axis >= NUM_MOTORS) return;
+    char key[14];
+    snprintf(key, sizeof(key), "j%u_cvalid", axis);
+    prefs_.putBool(key, true);
+    snprintf(key, sizeof(key), "j%u_esign", axis);
+    prefs_.putFloat(key, encSign);
+    snprintf(key, sizeof(key), "j%u_mspd", axis);
+    prefs_.putFloat(key, stepsPerDeg);
+}
+
+void NvsStore::clearCalib(uint8_t axis) {
+    if (!ok_ || axis >= NUM_MOTORS) return;
+    char key[14];
+    snprintf(key, sizeof(key), "j%u_cvalid", axis);
+    prefs_.putBool(key, false);
+}

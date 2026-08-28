@@ -327,8 +327,9 @@ tr:hover td{background:#243247}
       <div class="body">
         Quy đổi: <code>stepsPerDegree = 200 × microstep × gear / 360</code>. Góc khớp =
         <code>AXIS_STEP_SIGN × absSteps / stepsPerDegree</code> (gốc tại home đã calib).<br>
-        <span class="tag">setHomeHere</span> Encoder-aware: encoder khoẻ → dùng làm ground truth, set absSteps = degreesToSteps(encAngle) để step/encoder luôn đồng bộ (motor stall trong CENTERING không gây drift). Encoder chết → absSteps=0 (step-only). Lưu raw single-turn vào NVS, xoá drift fault.<br>
-        <span class="tag">restoreFromNVS</span> lúc boot: delta = ENC_SIGN × wrap180(raw_now − raw_saved); từ chối nếu |delta| &gt; hành trình lý thuyết + 15° (nam châm trôi); set absSteps theo delta, đánh dấu <code>restored</code>. Giới hạn đúng ±180° của encoder (J6 chỉ mod 360 — vô hại vì roll).<br>
+        <span class="tag">setHomeHere</span> Chuẩn hóa 0°: đặt <code>absSteps = 0</code>, ghi nhận mốc <code>encZeroRef</code> bằng góc tích lũy hiện tại (đảm bảo angleFromSteps và angleFromEncoder đồng bộ 0° tại Home, không phát sinh drift fault). Lưu raw single-turn vào NVS, xoá drift fault.<br>
+        <span class="tag">resyncFromEncoder</span> Đồng bộ bước theo góc encoder tương đối: <code>absSteps = AXIS_STEP_SIGN × degreesToSteps(relEncDeg)</code>.<br>
+        <span class="tag">restoreFromNVS</span> lúc boot: delta = ENC_SIGN × wrap180(raw_now − raw_saved); từ chối nếu |delta| &gt; hành trình lý thuyết + 15° (nam châm trôi); set <code>absSteps = AXIS_STEP_SIGN × degreesToSteps(delta)</code> và khôi phục mốc <code>encZeroRef</code>, đánh dấu <code>restored</code>. Giới hạn đúng ±180° của encoder (J6 chỉ mod 360 — vô hại vì roll).<br>
         <span class="tag">drift watchdog</span> khi idle: |angleFromSteps − angleFromEncoder| &gt; 5° → latch <code>driftFault</code>.
       </div>
     </details>
@@ -344,12 +345,12 @@ tr:hover td{background:#243247}
         <code>enc_center=(enc_min+enc_max)/2</code>, đo <code>real_step_to_enc</code> + áp dụng vào điều khiển;
         <b>inline tức thời, 1 tick — không phải state chờ</b>, nên không xuất hiện trong enum phase JSON)
         → CENTERING (căn theo BƯỚC: J1/J2 về TÂM cơ khí = <code>step_max/2</code> từ cực đầu; J3 về điểm riêng
-        gần MIN = <code>Min + offset</code> ~2.5° — không chạy vòng encoder tinh vì AS5600 accumulated
+        gần MIN = <code>step_max − offset</code> (~2.5° khỏi MIN endstop) — không chạy vòng encoder tinh vì AS5600 accumulated
         không ổn định làm phản hồi ngược hướng) → SETREF.
         Home: J1/J2 = TÂM cơ khí (giữa 2 endstop); J3 = điểm riêng (Min + offset).<br>
-        <b>J3:</b> cũng quét 2 endstop (7 giai đoạn) nhưng <b>home tại điểm riêng gần MIN</b>, không phải tâm.
-        <b>J4:</b> legacy stallguard bump (không endstop). Endstop vật lý là NGUỒN SỰ THẬT DUY NHẤT — <b>không dùng StallGuard</b>.
-        Dòng homing: J1=800/J2=500/J3=450/J4=300 mA (J1 đủ torque để quét full range vì homing giờ chỉ dùng endstop, không StallGuard; ISR bảo vệ chạm), khôi phục 800 mA khi xong.
+        <b>J3:</b> quét 2 endstop (7 giai đoạn), CENTERING di chuyển <code>step_max − offset</code> để <b>home tại điểm riêng gần MIN</b> (~2.5° khỏi MIN).
+        <b>J4:</b> legacy bump / approach (dùng <code>rawEncoder</code> đọc trực tiếp góc thô không phụ thuộc homed flag).
+        Dòng homing: J1=800/J2=1000/J3=1000/J4=300 mA (J1 đủ torque để quét full range vì homing giờ chỉ dùng endstop, không StallGuard; ISR bảo vệ chạm), khôi phục 800 mA khi xong.
         Timeout: scan phases 60 s; các phase khác 30 s. J5/J6 bỏ qua — Set-Home thủ công.
       </div>
     </details>
@@ -358,11 +359,11 @@ tr:hover td{background:#243247}
       <summary>planner.* — thực thi chuyển động Cartesian <span class="file">src/planner.h/.cpp</span></summary>
       <div class="body">
         Job: POINT (tới điểm, travel-only) / LINE (x1,y1 → x2,y2) / CIRCLE (tâm, r, quét CCW đủ vòng từ góc hiện tại).
-        Sinh waypoint on-the-fly ~1 mm — không buffer lớn.<br>
+        Sinh waypoint on-the-fly ~1 mm — không buffer lớn. Kiểm tra r &gt; 0 chống chia 0.<br>
         <span class="tag">segment sync</span> IK pen-down → delta 6 trục; trục nhiều bước nhất (dominant) đặt
         <code>interval = 1e6·segLen/(feed·steps_max)</code>; trục khác scale nghịch đảo để cùng kết thúc đúng lúc.<br>
-        Chuỗi nét vẽ: LIFTING(+5mm Z) → TRAVELING(ngang) → DROPPING(z giấy) → DRAWING(segments) → FINISHED_LIFT.
-        POINT kết thúc tại đích không lift lại.<br>
+        Chuỗi nét vẽ an toàn: LIFTING(nhấc lên <code>z + PEN_LIFT_MM</code>) → TRAVELING(giữ nguyên độ cao nhấc trên không) → DROPPING(hạ z giấy) → DRAWING(segments) → FINISHED_LIFT.
+        Tránh hoàn toàn lỗi cọ quẹt bút trên mặt giấy khi travel.<br>
         Gate bắt buộc: <code>allPositioningHomed()</code> (J1–J4 đã home); điểm ngoài vùng với → huỷ job + log.
       </div>
     </details>
@@ -397,12 +398,16 @@ tr:hover td{background:#243247}
     <details class="mod">
       <summary>web_server.* — web app + REST API <span class="file">src/web_server.h/.cpp</span></summary>
       <div class="body">
-        Trang single-page nhúng PROGMEM (dark Mission Sky: nền <code>#0f172a</code>, accent <code>#38bdf8</code>),
-        tabs: Dashboard | Joints | Homing | WiFi | Cartesian | Draw + nút E-STOP nổi.
+        Trang single-page nhúng PROGMEM (dark Mission Sky: nền <code>#0b0f19</code>, surface <code>#111827</code>, accent <code>#38bdf8</code>),
+        tabs: Dashboard | 3D Simulation | Joints | Homing | Cartesian | Draw | WiFi + nút E-STOP nổi.
         Polling <code>/api/status</code> mỗi 300 ms.<br>
-        <b>Dashboard</b> (Operate): canvas 2D pose nhìn từ trên (TCP + home trên graticule 50 mm) + cột
+        <b>Dashboard</b> (Operate): canvas 3D pose thời gian thực (orbit/side/top viewports, link robot đa màu, TCP tip rose glow) + cột
         trạng thái glanceable — chế độ hoạt động (mode word + badge màu theo trạng thái), WiFi, số khớp đã
-        home, trạng thái endstop (J#MIN/MAX đang nhấn), phase homing, và tiến độ J1→J4 theo chip hightlight.<br>
+        home, trạng thái endstop (J#MIN/MAX đang nhấn), phase homing, và tiến độ J1→J4 theo chip highlight.<br>
+        <b>3D Simulation Studio</b>: Digital Clone tích hợp client-side JavaScript Craig MDH kinematics & closed-form IK pen-down.
+        Hỗ trợ điều khiển Cartesian target X/Y/Z, thanh trượt góc khớp J1–J6 hai chiều, 5 tư thế mẫu (Home 0°, Draw Ready, Reach ±X, Folded),
+        Trajectory Animator (vẽ đường thẳng/tròn, thanh scrub quỹ đạo theo frame, nút play/pause), Telemetry HUD kiểm tra an toàn va chạm bàn/thân đế/kỳ dị,
+        và nút nạp tư thế mô phỏng trực tiếp xuống robot thật qua <code>/api/move</code>.<br>
         <b>Joints</b>: panel jog 6 khớp (readout độ lớn, encoder/flag trạng thái, jog ± theo bước 0.5/1/5/15°).
         <b>Homing</b>: home all/đơn lẻ + Set-Home / Clear-Calib cho từng khớp.<br>
         Front-end: nút hành động (home/move/draw/sethome) tự disable khi arm busy hoặc FAULT; toast phản hồi
@@ -740,7 +745,7 @@ tr:hover td{background:#243247}
 </div>
 
 <div class="footer">
-   Generated 2026-08-27 (update: UI web redesign — Dashboard pose-canvas + status column, mode word, chips homing, panel jog/sethome nhất quán; plus: chuẩn hóa gear dương + direction vào AXIS_STEP_SIGN; J3 home=Min+offset; J1/J2 step-center; J1 homing 800mA; FSM CROSSCHECK; gimbal-lock) · File này là <b>bản đồ hệ thống sống</b> — AI agent PHẢI cập nhật nó cùng
+   Generated 2026-08-28 (tích hợp 3D Digital Clone Simulation studio vào web server: Craig MDH FK/IK client-side, 3D orbit/side/top viewports, trajectory animator & live robot mirror) · File này là <b>bản đồ hệ thống sống</b> — AI agent PHẢI cập nhật nó cùng
   docs/IMPLEMENTATION_LOG.md sau mỗi thay đổi (quy tắc trong AGENTS.md)
 </div>
 
