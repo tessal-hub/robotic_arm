@@ -1,0 +1,143 @@
+#include "safety_manager.h"
+
+#ifdef ARDUINO
+#include "endstop.h"
+#include "joint_model.h"
+#include <esp_timer.h>
+#include <Arduino.h>
+
+// Firmware explicit constructor
+SafetyManager::SafetyManager(Endstops* es, JointModel* jm) {
+  isPressed_ = [es](uint8_t axis, EndstopWhich w) -> bool {
+    return es->isPressed(axis, w);
+  };
+  anyPressed_ = [this]() -> bool {
+    for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
+      for (auto w : {EndstopWhich::MIN, EndstopWhich::MAX}) {
+        if (isPressed_(a, w)) return true;
+      }
+    }
+    return false;
+  };
+  clearLatches_ = [es]() { es->clearAllLatches(); };
+  hasDrift_ = [jm]() -> bool {
+    if (!jm) return false;
+    return jm->hasAnyDriftFault();
+  };
+  clearDrift_ = [jm]() {
+    if (jm) jm->clearAllDriftFaults();
+  };
+  state_.store(SafetyState::NORMAL, std::memory_order_release);
+  homingActive_ = false;
+  for (auto &row : pending_) row.fill(false);
+  for (auto &row : pendingTime_) row.fill(0);
+  for (auto &row : latched_) row.fill(false);
+}
+
+void SafetyManager::pollEndstops() {
+  pollEndstops(static_cast<uint64_t>(esp_timer_get_time()));
+}
+
+#else
+// Host build: no esp_timer, provide dummy no-arg poll
+void SafetyManager::pollEndstops() {
+  pollEndstops(0);
+}
+#endif
+
+void SafetyManager::isrNotify(uint8_t axis, EndstopWhich which, int64_t isrTimeUs) {
+  if (axis >= NUM_MOTORS) return;
+  uint8_t idx = (which == EndstopWhich::MIN) ? 0 : 1;
+  pending_[axis][idx] = true;
+  pendingTime_[axis][idx] = isrTimeUs;
+}
+
+void SafetyManager::pollEndstops(uint64_t nowUs) {
+  for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
+    for (uint8_t wi = 0; wi < 2; ++wi) {
+      if (!pending_[a][wi]) continue;
+      int64_t delta = static_cast<int64_t>(nowUs) - pendingTime_[a][wi];
+      if (delta < DEBOUNCE_US) continue; // not yet debounced, keep pending
+      EndstopWhich w = (wi == 0) ? EndstopWhich::MIN : EndstopWhich::MAX;
+      bool pressed = false;
+      if (isPressed_) pressed = isPressed_(a, w);
+      if (pressed) {
+        latched_[a][wi] = true;
+        if (!homingActive_) {
+          SafetyState cur = state_.load(std::memory_order_acquire);
+          if (cur != SafetyState::E_STOP) {
+            state_.store(SafetyState::E_STOP, std::memory_order_release);
+          }
+        } else {
+          // homing active: keep HOMING state (ensure it is HOMING if was NORMAL)
+          SafetyState cur = state_.load(std::memory_order_acquire);
+          if (cur == SafetyState::NORMAL) {
+            state_.store(SafetyState::HOMING, std::memory_order_release);
+          }
+        }
+      } else {
+        // GPIO HIGH at poll time -> glitch, no latch
+      }
+      pending_[a][wi] = false;
+    }
+  }
+}
+
+void SafetyManager::assertHoming(bool active) {
+  homingActive_ = active;
+  if (active) {
+    SafetyState cur = state_.load(std::memory_order_acquire);
+    if (cur == SafetyState::NORMAL) {
+      state_.store(SafetyState::HOMING, std::memory_order_release);
+    }
+  } else {
+    SafetyState cur = state_.load(std::memory_order_acquire);
+    if (cur == SafetyState::HOMING) {
+      state_.store(SafetyState::NORMAL, std::memory_order_release);
+    }
+  }
+}
+
+void SafetyManager::assertEStop(const char* reason) {
+  (void)reason;
+  state_.store(SafetyState::E_STOP, std::memory_order_release);
+}
+
+bool SafetyManager::tryClearFault() {
+  bool pressed = false;
+  if (anyPressed_) pressed = anyPressed_();
+  bool drift = false;
+  if (hasDrift_) drift = hasDrift_();
+  if (pressed || drift) return false;
+  for (auto &row : latched_) row.fill(false);
+  for (auto &row : pending_) row.fill(false);
+  // pendingTime not needed clear but for completeness
+  for (auto &row : pendingTime_) row.fill(0);
+  if (clearLatches_) clearLatches_();
+  if (clearDrift_) clearDrift_();
+  state_.store(SafetyState::NORMAL, std::memory_order_release);
+  homingActive_ = false;
+  return true;
+}
+
+bool SafetyManager::isMotionAllowed() const {
+  SafetyState s = state_.load(std::memory_order_acquire);
+  return s == SafetyState::NORMAL || s == SafetyState::HOMING;
+}
+
+bool SafetyManager::isEStop() const {
+  return state_.load(std::memory_order_acquire) == SafetyState::E_STOP;
+}
+
+SafetyState SafetyManager::state() const {
+  return state_.load(std::memory_order_acquire);
+}
+
+bool SafetyManager::anyLatched() const {
+  for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
+    for (uint8_t wi = 0; wi < 2; ++wi) {
+      if (latched_[a][wi]) return true;
+    }
+  }
+  return false;
+}
