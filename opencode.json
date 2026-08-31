@@ -1,0 +1,28 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    "AGENTS.md",
+    "docs/SYSTEM_OVERVIEW.html",
+    "docs/ARM_GEOMETRY.md",
+    "docs/IMPLEMENTATION_LOG.md"
+  ],
+  "permission": {
+    "edit": "allow",
+    "bash": {
+      "pio *": "allow",
+      "g++ *": "allow",
+      "gcc *": "allow",
+      "tools/run_kin_tests.sh*": "allow",
+      "git status": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "*": "ask"
+    },
+    "external_directory": "allow"
+  },
+  "formatter": false,
+  "lsp": false,
+  "share": "manual",
+  "autoupdate": false,
+  "plugin": ["superpowers@git+https://github.com/obra/superpowers.git"]
+}
