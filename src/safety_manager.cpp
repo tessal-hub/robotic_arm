@@ -142,3 +142,31 @@ bool SafetyManager::anyLatched() const {
   }
   return false;
 }
+
+bool SafetyManager::isLatched(uint8_t axis, EndstopWhich which) const {
+  if (axis >= NUM_MOTORS) return false;
+  uint8_t idx = (which == EndstopWhich::MIN) ? 0 : 1;
+  return latched_[axis][idx].load(std::memory_order_relaxed);
+}
+
+void SafetyManager::clearLatched(uint8_t axis, EndstopWhich which) noexcept {
+  if (axis >= NUM_MOTORS) return;
+  uint8_t idx = (which == EndstopWhich::MIN) ? 0 : 1;
+  latched_[axis][idx].store(false, std::memory_order_relaxed);
+}
+
+bool SafetyManager::consumeLatched(uint8_t axis, EndstopWhich which) noexcept {
+  if (axis >= NUM_MOTORS) return false;
+  uint8_t idx = (which == EndstopWhich::MIN) ? 0 : 1;
+  return latched_[axis][idx].exchange(false, std::memory_order_acq_rel);
+}
+
+void SafetyManager::forceClear() noexcept {
+  for (auto &row : pending_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
+  for (auto &row : pendingTime_) for (auto &v : row) v.store(0, std::memory_order_relaxed);
+  for (auto &row : latched_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
+  if (clearLatches_) clearLatches_();
+  if (clearDrift_) clearDrift_();
+  state_.store(SafetyState::NORMAL, std::memory_order_release);
+  homingActive_ = false;
+}

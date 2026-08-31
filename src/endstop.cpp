@@ -1,20 +1,26 @@
 #include "endstop.h"
-#include "motor.h"
-#include "driver/gpio.h"
-#include "esp_rom_sys.h"
-
-namespace {
-constexpr int64_t ENDSTOP_DEBOUNCE_US = 50000; // 50 ms
-constexpr uint32_t GLITCH_FILTER_DELAY_US = 25; // 25 us verify delay for EMI noise rejection
-}
+class Motor;
+#ifdef ARDUINO
+#include "safety_manager.h"
+#include <esp_timer.h>
+#else
+class SafetyManager;
+#endif
 
 Endstops::Endstops() {
     for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
         minCh[a].pin = AXIS_MIN_PINS[a];
         maxCh[a].pin = AXIS_MAX_PINS[a];
+        minCh[a].latched.store(false, std::memory_order_relaxed);
+        maxCh[a].latched.store(false, std::memory_order_relaxed);
         owner[a] = nullptr;
         for (uint8_t w = 0; w < 2; ++w) {
-            ctx[a][w] = IsrCtx{this, a, static_cast<EndstopWhich>(w)};
+            ctx[a][w].axis = a;
+            ctx[a][w].which = static_cast<EndstopWhich>(w);
+            ctx[a][w].self = this;
+            ctx[a][w].safety = nullptr;
+            ctx[a][w].pending.store(false, std::memory_order_relaxed);
+            ctx[a][w].isrTime.store(0, std::memory_order_relaxed);
         }
     }
 }
@@ -24,10 +30,22 @@ void Endstops::begin(Motor** motors) {
         owner[a] = (motors != nullptr) ? motors[a] : nullptr;
         for (const auto w : {EndstopWhich::MIN, EndstopWhich::MAX}) {
             Channel& c = ch(a, w);
-            __atomic_store_n(&c.latched, false, __ATOMIC_RELEASE);
-            c.lastEdgeUs = 0;
+            c.latched.store(false, std::memory_order_release);
+            IsrCtx& ic = ctx[a][static_cast<uint8_t>(w)];
+            ic.pending.store(false, std::memory_order_relaxed);
+            ic.isrTime.store(0, std::memory_order_relaxed);
             if (!hasPin(a, w)) continue;
+#ifdef ARDUINO
             pinMode(c.pin, INPUT_PULLUP);
+#endif
+        }
+    }
+    // Propagate safety_ to ctx if already injected before begin
+    if (safety_ != nullptr) {
+        for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
+            for (uint8_t w = 0; w < 2; ++w) {
+                ctx[a][w].safety = safety_;
+            }
         }
     }
     // Attach sau khi mọi pinMode đã xong để tránh ISR bắn trong lúc setup.
@@ -40,48 +58,43 @@ void Endstops::begin(Motor** motors) {
     initialized.store(true, std::memory_order_release);
 }
 
+void Endstops::setSafetyManager(SafetyManager* sm) noexcept {
+    safety_ = sm;
+    for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
+        for (uint8_t w = 0; w < 2; ++w) {
+            ctx[a][w].safety = sm;
+        }
+    }
+}
+
 void Endstops::installPin(uint8_t axis, EndstopWhich w) {
+#ifdef ARDUINO
     const Channel& c = ch(axis, w);
     attachInterruptArg(digitalPinToInterrupt(c.pin), &Endstops::isrHandler,
                        &ctx[axis][static_cast<uint8_t>(w)], FALLING);
+#else
+    (void)axis; (void)w;
+#endif
 }
 
 void IRAM_ATTR Endstops::isrHandler(void* arg) {
     auto* c = static_cast<IsrCtx*>(arg);
-    if (c == nullptr || c->self == nullptr) return;
-
-    Channel& chan = c->self->ch(c->axis, c->which);
-
-    // 1. Kiểm tra nhanh: nếu chân đã về HIGH (3.3V) -> xung nhiễu sub-microsecond, bỏ qua
-    if (gpio_get_level(static_cast<gpio_num_t>(chan.pin)) != ENDSTOP_ACTIVE_STATE) {
-        return;
+    if (c == nullptr) return;
+    // Minimal ISR: only pending + timestamp (<3µs). No delay, no gpio_get_level, no debounce.
+    c->pending.store(true, std::memory_order_relaxed);
+#ifdef ARDUINO
+    int64_t now = esp_timer_get_time();
+#else
+    int64_t now = 0;
+#endif
+    c->isrTime.store(now, std::memory_order_relaxed);
+#ifdef ARDUINO
+    SafetyManager* sm = c->safety;
+    if (sm == nullptr && c->self != nullptr) sm = c->self->safety_;
+    if (sm != nullptr) {
+        sm->isrNotify(c->axis, c->which, now);
     }
-
-    // 2. Debounce window
-    const int64_t now = esp_timer_get_time();
-    if (now - chan.lastEdgeUs < ENDSTOP_DEBOUNCE_US) return;
-
-    // 3. Glitch filter: chờ 25us và kiểm tra lại mức logic để lọc sạch nhiễu cảm ứng từ dây stepper
-    esp_rom_delay_us(GLITCH_FILTER_DELAY_US);
-    if (gpio_get_level(static_cast<gpio_num_t>(chan.pin)) != ENDSTOP_ACTIVE_STATE) {
-        return; // Nhiễu gai ngắn (< 25us), không phải tiếp xúc cơ học thật
-    }
-
-    chan.lastEdgeUs = now;
-    __atomic_store_n(&chan.latched, true, __ATOMIC_RELEASE);
-
-    // AN TOÀN TUYỆT ĐỐI: BẤT KỲ KHI NÀO ENDSTOP BỊ NHẤN (FALLING EDGE) -> DỪNG MOTOR NGAY TRONG ISR
-    if (g_homingActive.load(std::memory_order_acquire)) {
-        Motor* m = c->self->owner[c->axis];
-        if (m != nullptr) m->stopFromISR();
-    } else {
-        // Ngoài homing: dừng mọi trục + fail-fast E-stop cho step timer
-        g_emergencyStop.store(true, std::memory_order_release);
-        for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
-            Motor* mot = c->self->owner[i];
-            if (mot != nullptr) mot->stopFromISR();
-        }
-    }
+#endif
 }
 
 bool Endstops::hasPin(uint8_t axis, EndstopWhich w) const noexcept {
@@ -91,41 +104,86 @@ bool Endstops::hasPin(uint8_t axis, EndstopWhich w) const noexcept {
 
 bool Endstops::isPressed(uint8_t axis, EndstopWhich w) const noexcept {
     if (!hasPin(axis, w)) return false;
+#ifdef ARDUINO
     return digitalRead(ch(axis, w).pin) == ENDSTOP_ACTIVE_STATE;
+#else
+    return false;
+#endif
 }
 
 bool Endstops::isLatched(uint8_t axis, EndstopWhich w) const noexcept {
     if (!hasPin(axis, w)) return false;
-    return __atomic_load_n(&ch(axis, w).latched, __ATOMIC_ACQUIRE);
+#ifdef ARDUINO
+    if (safety_ != nullptr) {
+        return safety_->isLatched(axis, w);
+    }
+#endif
+    return ch(axis, w).latched.load(std::memory_order_acquire);
 }
 
 bool Endstops::consumeLatch(uint8_t axis, EndstopWhich w) noexcept {
     if (!hasPin(axis, w)) return false;
+#ifdef ARDUINO
+    if (safety_ != nullptr) {
+        return safety_->consumeLatched(axis, w);
+    }
+#endif
     Channel& c = ch(axis, w);
-    return __atomic_exchange_n(&c.latched, false, __ATOMIC_ACQ_REL);
+    return c.latched.exchange(false, std::memory_order_acq_rel);
 }
 
 void Endstops::clearLatch(uint8_t axis, EndstopWhich w) noexcept {
     if (!hasPin(axis, w)) return;
-    __atomic_store_n(&ch(axis, w).latched, false, __ATOMIC_RELEASE);
+#ifdef ARDUINO
+    if (safety_ != nullptr) {
+        safety_->clearLatched(axis, w);
+    }
+#endif
+    ch(axis, w).latched.store(false, std::memory_order_release);
+    // also clear pending for this channel
+    ctx[axis][static_cast<uint8_t>(w)].pending.store(false, std::memory_order_relaxed);
 }
 
 void Endstops::clearAllLatches() noexcept {
     for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
-        if (minCh[a].pin >= 0) __atomic_store_n(&minCh[a].latched, false, __ATOMIC_RELEASE);
-        if (maxCh[a].pin >= 0) __atomic_store_n(&maxCh[a].latched, false, __ATOMIC_RELEASE);
+        if (minCh[a].pin >= 0) minCh[a].latched.store(false, std::memory_order_release);
+        if (maxCh[a].pin >= 0) maxCh[a].latched.store(false, std::memory_order_release);
+        for (uint8_t w = 0; w < 2; ++w) {
+            ctx[a][w].pending.store(false, std::memory_order_relaxed);
+            ctx[a][w].isrTime.store(0, std::memory_order_relaxed);
+        }
     }
+#ifdef ARDUINO
+    if (safety_ != nullptr) {
+        // Force clear SafetyManager latched/pending without pressed/drift check (boot sync)
+        safety_->forceClear();
+    }
+#endif
 }
 
 bool Endstops::anyLatched() const noexcept {
+#ifdef ARDUINO
+    if (safety_ != nullptr) return safety_->anyLatched();
+#endif
     for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
-        if (minCh[a].pin >= 0 && __atomic_load_n(&minCh[a].latched, __ATOMIC_ACQUIRE)) return true;
-        if (maxCh[a].pin >= 0 && __atomic_load_n(&maxCh[a].latched, __ATOMIC_ACQUIRE)) return true;
+        if (minCh[a].pin >= 0 && minCh[a].latched.load(std::memory_order_acquire)) return true;
+        if (maxCh[a].pin >= 0 && maxCh[a].latched.load(std::memory_order_acquire)) return true;
     }
     return false;
 }
 
+bool Endstops::isrPending(uint8_t axis, EndstopWhich w) const noexcept {
+    if (axis >= NUM_MOTORS) return false;
+    return ctx[axis][static_cast<uint8_t>(w)].pending.load(std::memory_order_relaxed);
+}
+
+int64_t Endstops::isrTimeUs(uint8_t axis, EndstopWhich w) const noexcept {
+    if (axis >= NUM_MOTORS) return 0;
+    return ctx[axis][static_cast<uint8_t>(w)].isrTime.load(std::memory_order_relaxed);
+}
+
 String Endstops::toJson() const {
+#ifdef ARDUINO
     String j = "[";
     for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
         if (a > 0) j += ",";
@@ -136,7 +194,7 @@ String Endstops::toJson() const {
             j += "{\"pressed\":";
             j += isPressed(a, EndstopWhich::MIN) ? "true" : "false";
             j += ",\"latched\":";
-            j += __atomic_load_n(&minCh[a].latched, __ATOMIC_ACQUIRE) ? "true" : "false";
+            j += isLatched(a, EndstopWhich::MIN) ? "true" : "false";
             j += "}";
         }
         j += ",\"max\":";
@@ -146,11 +204,14 @@ String Endstops::toJson() const {
             j += "{\"pressed\":";
             j += isPressed(a, EndstopWhich::MAX) ? "true" : "false";
             j += ",\"latched\":";
-            j += __atomic_load_n(&maxCh[a].latched, __ATOMIC_ACQUIRE) ? "true" : "false";
+            j += isLatched(a, EndstopWhich::MAX) ? "true" : "false";
             j += "}";
         }
         j += "}";
     }
     j += "]";
     return j;
+#else
+    return String("[]");
+#endif
 }

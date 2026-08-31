@@ -65,6 +65,10 @@ public:
   bool isEStop() const;
   SafetyState state() const;
   bool anyLatched() const;
+  bool isLatched(uint8_t axis, EndstopWhich which) const;
+  void clearLatched(uint8_t axis, EndstopWhich which) noexcept;
+  bool consumeLatched(uint8_t axis, EndstopWhich which) noexcept;
+  void forceClear() noexcept;
 
 private:
   std::function<bool(uint8_t, EndstopWhich)> isPressed_;
