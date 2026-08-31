@@ -1,9 +1,9 @@
 #include "motor.h"
 #include "driver/gpio.h"
 #include "rtos_guard.h"
-
-std::atomic<bool> g_emergencyStop{false};
-std::atomic<bool> g_homingActive{false};
+#ifdef ARDUINO
+#include "safety_manager.h"
+#endif
 
 Motor::Motor(HardwareSerial* serial, float rSense, uint8_t uartAddress,
              uint8_t stepPinNum, uint8_t dirPinNum, const char* motorLabel)
@@ -77,13 +77,15 @@ void IRAM_ATTR Motor::onStepTimer(void* arg) {
     Motor* self = static_cast<Motor*>(arg);
     if (!self->running.load(std::memory_order_acquire)) return;
 
-    // Fail-fast emergency stop check (Instantaneous abort <= 20us)
-    if (g_emergencyStop.load(std::memory_order_acquire)) {
+    // Fail-fast emergency stop check (Instantaneous abort <= 20us) — SafetyManager single owner
+#ifdef ARDUINO
+    if (self->safety_ && self->safety_->isEStop()) {
         if (self->isHighPin) GPIO.out1_w1tc.val = self->stepPinMaskHigh;
         else GPIO.out_w1tc = self->stepPinMaskLow;
         self->running.store(false, std::memory_order_release);
         return;
     }
+#endif
 
     gpio_set_level(static_cast<gpio_num_t>(self->stepPin), 1);
     esp_rom_delay_us(4); // 4us clean pulse width cho A4988 và TMC
@@ -124,7 +126,11 @@ void IRAM_ATTR Motor::onStepTimer(void* arg) {
     if (nextInterval < MIN_STEP_INTERVAL_US) nextInterval = MIN_STEP_INTERVAL_US;
     if (nextInterval > MAX_STEP_INTERVAL_US) nextInterval = MAX_STEP_INTERVAL_US;
 
-    if (!self->running.load(std::memory_order_acquire) || g_emergencyStop.load(std::memory_order_acquire)) {
+    bool estop = false;
+#ifdef ARDUINO
+    estop = (self->safety_ && self->safety_->isEStop());
+#endif
+    if (!self->running.load(std::memory_order_acquire) || estop) {
         self->running.store(false, std::memory_order_release);
         return;
     }

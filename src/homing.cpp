@@ -2,6 +2,7 @@
 #include "endstop.h"
 #include "joint_model.h"
 #include "motor.h"
+#include "safety_manager.h"
 
 #include <algorithm>
 
@@ -35,9 +36,6 @@ constexpr uint32_t PROGRESS_LOG_MS = 2000;
 // Thời gian settle sau khi motor dừng trong WARMUP trước khi đọc encoder
 constexpr uint32_t WARMUP_ENC_SETTLE_MS = 200;
 
-void setHomingActive(bool on) {
-    g_homingActive.store(on, std::memory_order_release);
-}
 } // namespace
 
 HomingController::HomingController() {
@@ -58,7 +56,7 @@ bool HomingController::startAll() {
     attempt_ = 0;
     active_ = true;
     lastOk_ = true;
-    setHomingActive(true);
+    if (safety_) safety_->assertHoming(true);
     beginScan();
     return true;
 }
@@ -72,7 +70,7 @@ bool HomingController::startAxis(uint8_t axis) {
     attempt_ = 0;
     active_ = true;
     lastOk_ = true;
-    setHomingActive(true);
+    if (safety_) safety_->assertHoming(true);
     beginScan();
     return true;
 }
@@ -776,7 +774,7 @@ void HomingController::finishJoint(bool ok) {
         beginScan();
     } else {
         active_ = false;
-        setHomingActive(false);
+        if (safety_) safety_->assertHoming(false);
         lastOk_ = true;
         phase_ = HomePhase::IDLE;
         Serial.println("[HOME] Toan bo hoan tat");
@@ -792,7 +790,7 @@ void HomingController::retryOrFail() {
         return;
     }
     active_ = false;
-    setHomingActive(false);
+    if (safety_) safety_->assertHoming(false);
     lastOk_ = false;
     phase_ = HomePhase::IDLE;
     Serial.printf("[HOME] J%u: FAILED sau %u lan thu — huy chuoi homing\n",
@@ -818,7 +816,7 @@ void HomingController::cancel() {
         es->clearLatch(curAxis_, EndstopWhich::MAX);
     }
     active_ = false;
-    setHomingActive(false);
+    if (safety_) safety_->assertHoming(false);
     lastOk_ = false;
     phase_ = HomePhase::IDLE;
     Serial.println("[HOME] Huy boi nguoi dung");

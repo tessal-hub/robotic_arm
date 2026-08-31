@@ -6,6 +6,7 @@
 #include "kinematics.h"
 #include "motor.h"
 #include "planner.h"
+#include "safety_manager.h"
 #include "sensor.h"
 #include "wifi_manager.h"
 
@@ -22,6 +23,8 @@ ArmController::ArmController() {
     mode_ = ArmMode::IDLE;
 }
 
+ArmController::~ArmController() = default;
+
 void ArmController::begin(Motor** motors_, Sensor* sensor_, Endstops* endstops_,
                           JointModel* joints_, HomingController* homing_,
                           Planner* planner_) {
@@ -31,6 +34,16 @@ void ArmController::begin(Motor** motors_, Sensor* sensor_, Endstops* endstops_,
     jm = joints_;
     hc = homing_;
     pl = planner_;
+
+    // Create single owner SafetyManager and inject into all safety-dependent modules
+    if (es != nullptr && jm != nullptr) {
+        safety_ = std::make_unique<SafetyManager>(es, jm);
+        es->setSafetyManager(safety_.get());
+        for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+            if (motors[i] != nullptr) motors[i]->setSafetyManager(safety_.get());
+        }
+        if (hc != nullptr) hc->setSafetyManager(safety_.get());
+    }
 
     queue = xQueueCreate(PLANNER_QUEUE_DEPTH, sizeof(ArmCommand));
     if (queue == nullptr) {
@@ -84,6 +97,9 @@ void ArmController::taskLoop() {
         vTaskDelayUntil(&lastWake, period);
         esp_task_wdt_reset();
 
+        // Safety poll: debounce ISR pending → latch/E_STOP (50ms)
+        if (safety_ != nullptr) safety_->pollEndstops();
+
         // 1) Homing FSM trước (ưu tiên an toàn), rồi planner
         if (hc != nullptr) hc->tick();
         if (pl != nullptr) pl->tick();
@@ -96,8 +112,8 @@ void ArmController::taskLoop() {
 
         // 2) Endstop bảo vệ + E-stop (homing tự xử lý endstop riêng)
         if (es != nullptr && hc != nullptr && !hc->isActive() && mode_ != ArmMode::FAULT) {
-            const bool estopPending = g_emergencyStop.load(std::memory_order_acquire);
-            const bool latchPending = es->anyLatched();
+            const bool estopPending = safety_ ? safety_->isEStop() : false;
+            const bool latchPending = safety_ ? safety_->anyLatched() : es->anyLatched();
 
             if (estopPending || latchPending) {
                 if (pl != nullptr) pl->stop();
@@ -125,7 +141,7 @@ void ArmController::taskLoop() {
                                 for (uint8_t j = 0; j < NUM_MOTORS; ++j) {
                                     if (motors[j] != nullptr) motors[j]->stop();
                                 }
-                                g_emergencyStop.store(true, std::memory_order_release);
+                                if (safety_) safety_->assertEStop("endstop MIN");
                                 mode_ = ArmMode::FAULT;
                                 Serial.printf("[ARM] FAULT: endstop J%u MIN pressed during motion\n", i + 1);
                                 break;
@@ -139,7 +155,7 @@ void ArmController::taskLoop() {
                                 for (uint8_t j = 0; j < NUM_MOTORS; ++j) {
                                     if (motors[j] != nullptr) motors[j]->stop();
                                 }
-                                g_emergencyStop.store(true, std::memory_order_release);
+                                if (safety_) safety_->assertEStop("endstop MAX");
                                 mode_ = ArmMode::FAULT;
                                 Serial.printf("[ARM] FAULT: endstop J%u MAX pressed during motion\n", i + 1);
                                 break;
@@ -188,7 +204,10 @@ void ArmController::taskLoop() {
     esp_task_wdt_delete(nullptr);
 }
 
-bool ArmController::motionAllowed() const { return mode_ != ArmMode::FAULT; }
+bool ArmController::motionAllowed() const {
+    if (safety_ && !safety_->isMotionAllowed()) return false;
+    return mode_ != ArmMode::FAULT;
+}
 
 void ArmController::execute(const ArmCommand& cmd) {
     switch (cmd.type) {
@@ -202,15 +221,22 @@ void ArmController::execute(const ArmCommand& cmd) {
             Serial.println("[ARM] STOP ALL");
             break;
 
-        case ArmCommand::CLEAR_FAULT:
-            if (es != nullptr) {
-                es->clearAllLatches();
+        case ArmCommand::CLEAR_FAULT: {
+            bool ok = true;
+            if (safety_) {
+                ok = safety_->tryClearFault();
+            } else {
+                if (es != nullptr) es->clearAllLatches();
+                if (jm != nullptr) jm->clearAllDriftFaults();
             }
-            g_emergencyStop.store(false, std::memory_order_release);
-            if (jm != nullptr) jm->clearAllDriftFaults();
-            mode_ = ArmMode::IDLE;
-            Serial.println("[ARM] FAULT cleared -> IDLE");
+            if (ok) {
+                mode_ = ArmMode::IDLE;
+                Serial.println("[ARM] FAULT cleared -> IDLE");
+            } else {
+                Serial.println("[ARM] CLEAR_FAULT rejected: endstop still pressed or drift active");
+            }
             break;
+        }
 
         case ArmCommand::HOME_ALL:
             if (!motionAllowed()) break;

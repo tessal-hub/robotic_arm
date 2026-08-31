@@ -8,6 +8,7 @@
 class Motor;
 class Endstops;
 class JointModel;
+class SafetyManager;
 
 enum class HomePhase : uint8_t {
     IDLE = 0,
@@ -44,6 +45,7 @@ public:
     HomingController& operator=(const HomingController&) = delete;
 
     void begin(Motor** motors, Endstops* endstops, JointModel* joints);
+    void setSafetyManager(SafetyManager* s) noexcept { safety_ = s; }
 
     [[nodiscard]] bool startAll();               // chuỗi J1..J4
     [[nodiscard]] bool startAxis(uint8_t axis);  // một khớp (chỉ 0..3)
@@ -87,6 +89,7 @@ private:
     Motor* motors[NUM_MOTORS]{};
     Endstops* es{nullptr};
     JointModel* jm{nullptr};
+    SafetyManager* safety_{nullptr};
 
     bool active_{false};
     bool lastOk_{true};

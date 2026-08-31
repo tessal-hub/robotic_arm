@@ -8,10 +8,7 @@
 #include <memory>
 #include "config.h"
 
-// Global fail-fast E-stop (step timer + endstop ISR set; CLEAR_FAULT clears).
-extern std::atomic<bool> g_emergencyStop;
-// Homing active — endstop ISR chỉ dừng trục chạm; ngoài homing dừng mọi trục + E-stop.
-extern std::atomic<bool> g_homingActive;
+class SafetyManager;
 
 struct TMC2209Diag {
     bool uartOk{false};
@@ -31,6 +28,7 @@ class Motor {
 private:
     HardwareSerial* serialPort;
     SemaphoreHandle_t* uartMutex;
+    SafetyManager* safety_{nullptr};
     std::unique_ptr<TMC2209Stepper> driver;
     bool isTMC; // Phân biệt TMC2209 và A4988
 
@@ -85,6 +83,7 @@ public:
     Motor& operator=(const Motor&) = delete;
 
     void setUartMutex(SemaphoreHandle_t* mutex) noexcept { uartMutex = mutex; }
+    void setSafetyManager(SafetyManager* s) noexcept { safety_ = s; }
 
     void begin(uint16_t initialCurrentMa = DEFAULT_NORMAL_CURRENT,
                uint16_t initialMicrosteps = DEFAULT_MICROSTEPS,

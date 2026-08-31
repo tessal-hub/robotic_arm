@@ -3,10 +3,12 @@
 
 #include <Arduino.h>
 #include <atomic>
+#include <memory>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
 #include "config.h"
+#include "safety_manager.h"
 
 class Motor;
 class Sensor;
@@ -46,7 +48,7 @@ struct ArmCommand {
 class ArmController {
 public:
     ArmController();
-    ~ArmController() = default;
+    ~ArmController();
 
     ArmController(const ArmController&) = delete;
     ArmController& operator=(const ArmController&) = delete;
@@ -59,6 +61,7 @@ public:
     [[nodiscard]] bool busy() const;
 
     [[nodiscard]] ArmMode mode() const;
+    [[nodiscard]] SafetyManager* safety() noexcept { return safety_.get(); }
     String statusJson();
 
 private:
@@ -77,6 +80,7 @@ private:
 
     QueueHandle_t queue{nullptr};
     TaskHandle_t task{nullptr};
+    std::unique_ptr<SafetyManager> safety_{nullptr};
     std::atomic<ArmMode> mode_{ArmMode::IDLE};
     uint32_t driftTickCounter{0};
 };
