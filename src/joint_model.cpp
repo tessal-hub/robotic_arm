@@ -14,6 +14,8 @@ JointModel::JointModel() {
         homed[i] = false;
         restored[i] = false;
         driftFault[i] = false;
+        lastRunningMs[i] = 0;
+        driftFailCount[i] = 0;
         s_encSign[i] = AXIS_ENC_SIGN[i];
         s_measuredSpd[i] = stepsPerDegree(i);
         s_hasMeasured[i] = false;
@@ -29,7 +31,6 @@ void JointModel::attachNvs(NvsStore* nvs_) { nvs = nvs_; }
 
 float JointModel::stepsPerDegree(uint8_t axis) {
     if (axis >= NUM_MOTORS) return 1.0f;
-    if (s_hasMeasured[axis]) return s_measuredSpd[axis];
     const float stepsPerRev =
         static_cast<float>(DEFAULT_FULL_STEPS) * static_cast<float>(DEFAULT_MICROSTEPS) *
         DEFAULT_AXIS_GEAR_RATIOS[axis];
@@ -63,7 +64,8 @@ float JointModel::actuatorAngleFromSteps(uint8_t axis) const {
 
 float JointModel::actuatorAngleFromEncoder(uint8_t axis) {
     if (axis >= NUM_MOTORS || sensor == nullptr || !homed[axis]) return 0.0f;
-    return s_encSign[axis] * (sensor->getAccumulatedAngle(axis) - encZeroRef[axis]);
+    const float rawDiff = sensor->getAccumulatedAngle(axis) - encZeroRef[axis];
+    return s_encSign[axis] * rawDiff;
 }
 
 float JointModel::angleFromSteps(uint8_t axis) const {
@@ -108,6 +110,8 @@ void JointModel::setHomeHere(uint8_t axis) {
         Serial.printf("[JM] SetHome J%u (enc=DEAD, step-only)\n", axis + 1);
     }
     driftFault[axis] = false;
+    driftFailCount[axis] = 0;
+    lastRunningMs[axis] = millis();
     restored[axis] = false;
     homed[axis] = true;
 }
@@ -117,12 +121,14 @@ void JointModel::clearHome(uint8_t axis) {
     homed[axis] = false;
     restored[axis] = false;
     driftFault[axis] = false;
+    driftFailCount[axis] = 0;
+    lastRunningMs[axis] = millis();
 }
 
 void JointModel::resyncFromEncoder(uint8_t axis) {
     if (axis >= NUM_MOTORS) return;
     if (motors[axis] == nullptr || sensor == nullptr || !sensor->isSensorOK(axis) || !homed[axis]) return;
-    const float relEncDeg = s_encSign[axis] * (sensor->getAccumulatedAngle(axis) - encZeroRef[axis]);
+    const float relEncDeg = (sensor->getAccumulatedAngle(axis) - encZeroRef[axis]) * s_encSign[axis];
     motors[axis]->setAbsoluteSteps(AXIS_STEP_SIGN[axis] * degreesToSteps(axis, relEncDeg));
 }
 
@@ -140,24 +146,28 @@ void JointModel::forgetHome(uint8_t axis) {
 
 void JointModel::applyHomingCalibration(uint8_t axis, float encSign, float stepsPerDeg) {
     if (axis >= NUM_MOTORS) return;
-    s_encSign[axis] = (encSign >= 0.0f) ? 1.0f : -1.0f;
-    s_measuredSpd[axis] = stepsPerDeg;
+    s_encSign[axis] = AXIS_ENC_SIGN[axis];
+    s_measuredSpd[axis] = stepsPerDegree(axis);
     s_hasMeasured[axis] = true;
     if (nvs != nullptr) nvs->saveCalib(axis, s_encSign[axis], s_measuredSpd[axis]);
-    Serial.printf("[JM] Calib J%u: encSign=%+.0f, steps/deg=%.2f (measured)\n",
+    Serial.printf("[JM] Calib J%u: encSign=%+.0f, steps/deg=%.2f\n",
                   axis + 1, s_encSign[axis], s_measuredSpd[axis]);
+}
+
+void JointModel::resetHomingCalibration(uint8_t axis) {
+    if (axis >= NUM_MOTORS) return;
+    s_encSign[axis] = AXIS_ENC_SIGN[axis];
+    s_measuredSpd[axis] = stepsPerDegree(axis);
+    s_hasMeasured[axis] = false;
 }
 
 uint8_t JointModel::restoreFromNVS() {
     if (nvs == nullptr || sensor == nullptr) return 0;
     uint8_t okCount = 0;
     for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
-        const NvsStore::CalibData cal = nvs->loadCalib(a);
-        if (cal.valid) {
-            s_encSign[a] = cal.encSign;
-            s_measuredSpd[a] = cal.stepsPerDeg;
-            s_hasMeasured[a] = true;
-        }
+        s_encSign[a] = AXIS_ENC_SIGN[a];
+        s_measuredSpd[a] = stepsPerDegree(a);
+        s_hasMeasured[a] = true;
 
         if (!sensor->isSensorOK(a) || motors[a] == nullptr) continue;
         const NvsStore::JointHome h = nvs->loadJointHome(a);
@@ -166,9 +176,10 @@ uint8_t JointModel::restoreFromNVS() {
         const float now = sensor->getAngle(a);
         const float delta = s_encSign[a] * wrap180(now - h.rawDeg);
 
-        const float maxSpan = DEFAULT_AXIS_CALIB_RANGE[a] + 15.0f;
+        // Giới hạn an toàn: chỉ khôi phục khi độ lệch <= 30 độ quanh mốc home đã lưu
+        const float maxSpan = 30.0f;
         if (fabsf(delta) > maxSpan) {
-            Serial.printf("[JM] J%u: restore BACON lech %.1f deg > span %.1f => bo qua\n",
+            Serial.printf("[JM] J%u: restore lech %.1f deg > span %.1f => bo qua (can home lai)\n",
                           a + 1, delta, maxSpan);
             continue;
         }
@@ -176,10 +187,12 @@ uint8_t JointModel::restoreFromNVS() {
         motors[a]->setAbsoluteSteps(AXIS_STEP_SIGN[a] * degreesToSteps(a, delta));
         encZeroRef[a] = sensor->getAccumulatedAngle(a) - delta / s_encSign[a];
         driftFault[a] = false;
+        driftFailCount[a] = 0;
+        lastRunningMs[a] = millis();
         restored[a] = true;
         homed[a] = true;
         ++okCount;
-        Serial.printf("[JM] J%u: restore tu NVS %+.2f deg\n", a + 1, delta);
+        Serial.printf("[JM] J%u: restore tu NVS %+.2f deg (encZeroRef=%.1f)\n", a + 1, delta, encZeroRef[a]);
     }
     Serial.printf("[JM] Restore xong: %u/%u khop\n", okCount, NUM_MOTORS);
     return okCount;
@@ -199,34 +212,79 @@ bool JointModel::allPositioningHomed() const noexcept {
 }
 
 bool JointModel::updateDriftCheck(uint8_t axis) {
-    if (axis >= NUM_MOTORS || !homed[axis] || sensor == nullptr ||
+    if (axis >= NUM_MOTORS) return false;
+    if (!homed[axis] || sensor == nullptr ||
         motors[axis] == nullptr || !sensor->isSensorOK(axis)) {
+        driftFailCount[axis] = 0;
         return false;
     }
-    if (motors[axis]->isRunning()) return false; // đang di chuyển: bỏ qua lần poll này
+    const uint32_t now = millis();
+    if (motors[axis]->isRunning()) {
+        lastRunningMs[axis] = now;
+        driftFailCount[axis] = 0;
+        return false;
+    }
+    // Cho phép thời gian trễ 300ms sau khi motor dừng để cảm biến & bộ lọc EMA ổn định hoàn toàn
+    if (now - lastRunningMs[axis] < 300) {
+        return false;
+    }
 
     const float diff = angleFromSteps(axis) - angleFromEncoder(axis);
     if (fabsf(diff) > RUNAWAY_ERROR_THRESHOLD) {
-        driftFault[axis] = true;
-        Serial.printf("[DRIFT] J%u lech %.2f deg (step=%.2f enc=%.2f)\n",
-                      axis + 1, diff, angleFromSteps(axis), angleFromEncoder(axis));
+        driftFailCount[axis]++;
+        if (driftFailCount[axis] >= 3) {
+            driftFault[axis] = true;
+            Serial.printf("[DRIFT] J%u lech %.2f deg (step=%.2f enc=%.2f) -> FAULT\n",
+                          axis + 1, diff, angleFromSteps(axis), angleFromEncoder(axis));
+        } else {
+            Serial.printf("[DRIFT] J%u nghi lech %.2f deg (step=%.2f enc=%.2f) [%u/3]\n",
+                          axis + 1, diff, angleFromSteps(axis), angleFromEncoder(axis),
+                          driftFailCount[axis]);
+        }
+    } else {
+        driftFailCount[axis] = 0;
+        // Tự động đồng bộ vị trí bước theo encoder sau khi dừng chuyển động
+        resyncFromEncoder(axis);
     }
     return driftFault[axis];
+}
+
+bool JointModel::hasAnyDriftFault() const noexcept {
+    for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+        if (driftFault[i]) return true;
+    }
+    return false;
+}
+
+void JointModel::clearAllDriftFaults() noexcept {
+    for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+        driftFault[i] = false;
+        driftFailCount[i] = 0;
+        lastRunningMs[i] = millis();
+        if (homed[i] && encOK(i)) {
+            resyncFromEncoder(i);
+        }
+    }
 }
 
 bool JointModel::encOK(uint8_t axis) const {
     return (sensor != nullptr) && sensor->isSensorOK(axis);
 }
 
+float JointModel::encSignOf(uint8_t axis) const {
+    return (axis < NUM_MOTORS) ? s_encSign[axis] : 1.0f;
+}
+
 String JointModel::toJson() {
     String j = "[";
     for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
         if (a > 0) j += ",";
+        const float actDeg = (homed[a] && encOK(a)) ? angleFromEncoder(a) : angleFromSteps(a);
         char buf[224];
         snprintf(buf, sizeof(buf),
                  "{\"deg\":%.2f,\"encDeg\":%.2f,\"homed\":%s,\"restored\":%s,"
                  "\"encOK\":%s,\"drift\":%s,\"limitMin\":%.1f,\"limitMax\":%.1f}",
-                 angleFromSteps(a), angleFromEncoder(a),
+                 actDeg, angleFromEncoder(a),
                  homed[a] ? "true" : "false",
                  restored[a] ? "true" : "false",
                  encOK(a) ? "true" : "false",

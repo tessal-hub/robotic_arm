@@ -121,7 +121,9 @@ bool ikPenDown(const Pose& target, float outEnc[6]) {
 
         // q23 = t2_DH + t3_DH ; quan hệ: hướng fore-arm = -(q23 + DELTA)
         const float q23 = -phiPsi - deltaRad;
-        const float t3 = q23 - t2;
+        float t3 = q23 - t2;
+        while (t3 > 3.141592653589793f) t3 -= 6.283185307179586f;
+        while (t3 < -3.141592653589793f) t3 += 6.283185307179586f;
 
         const float e1 = t1 * 57.29577951308232f;
         const float e2 = t2 * 57.29577951308232f + 90.0f; // trừ offset -90

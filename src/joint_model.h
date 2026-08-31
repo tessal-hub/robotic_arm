@@ -66,13 +66,21 @@ public:
     // So sánh step-count vs encoder. Trả về true NẾU phát hiện lệch quá ngưỡng (latch fault).
     bool updateDriftCheck(uint8_t axis);
     [[nodiscard]] bool hasDriftFault(uint8_t axis) const noexcept { return axis < NUM_MOTORS && driftFault[axis]; }
+    [[nodiscard]] bool hasAnyDriftFault() const noexcept;
     void clearDriftFault(uint8_t axis) { if (axis < NUM_MOTORS) driftFault[axis] = false; }
+    void clearAllDriftFaults() noexcept;
 
     [[nodiscard]] bool encOK(uint8_t axis) const;
+
+    // Dấu encoder đo được (±1) đã áp dụng (homing dùng quy đổi raw encoder <-> góc khớp).
+    [[nodiscard]] float encSignOf(uint8_t axis) const;
 
     // Đo và áp dụng hiệu chuẩn động (gọi từ homing sau cross-check):
     // encSign = dấu encoder (±1) thay AXIS_ENC_SIGN, stepsPerDeg = bước/độ đo được.
     void applyHomingCalibration(uint8_t axis, float encSign, float stepsPerDeg);
+    // Xoá hiệu chuẩn đo được của 1 trục, trả về hằng số config — gọi khi BẮT ĐẦU mỗi
+    // lần thử homing để lần thử tự đo lại từ đầu (hiệu chuẩn cũ có thể từ encoder đã lỗi).
+    void resetHomingCalibration(uint8_t axis);
 
     String toJson();
 
@@ -84,6 +92,8 @@ private:
     bool homed[NUM_MOTORS]{};
     bool restored[NUM_MOTORS]{};
     bool driftFault[NUM_MOTORS]{};
+    uint32_t lastRunningMs[NUM_MOTORS]{};
+    uint8_t driftFailCount[NUM_MOTORS]{};
 
     // Hiệu chuẩn đo được (thay hằng số cố định khi đã home). Static: 1 instance duy nhất.
     static float s_encSign[NUM_MOTORS];      // dấu encoder (±1)

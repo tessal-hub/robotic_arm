@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <array>
+#include <atomic>
 #include "config.h"
 
 // AS5600 Register Map
@@ -52,13 +53,14 @@ private:
     std::array<float, NUM_SENSORS> accumulated_angles{};
     std::array<int32_t, NUM_SENSORS> turn_counts{};
     std::array<bool, NUM_SENSORS> initialized{};
-    std::array<bool, NUM_SENSORS> sensor_error{};
+    std::array<std::atomic<bool>, NUM_SENSORS> sensor_error{};
     std::array<uint32_t, NUM_SENSORS> read_fail_counts{};
 
     SemaphoreHandle_t dataMutex{nullptr};        // Bảo vệ mảng góc khi task ghi / main đọc
     SemaphoreHandle_t i2cMutex{nullptr};         // Bảo vệ I2C bus khi đọc chẩn đoán từ task khác
     TaskHandle_t taskHandle{nullptr};
     volatile bool taskRunning{false};
+    bool wdtRegistered_{false};                  // Task WDT đã đăng ký thành công trong taskLoop
 
     bool setPCAChannel(uint8_t channel);
     void disableAllPCAChannels();

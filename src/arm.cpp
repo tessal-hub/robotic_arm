@@ -13,7 +13,7 @@
 
 namespace {
 WifiManager* g_wifi = nullptr; // inject để statusJson đọc wifi (tránh include vòng)
-}
+} // namespace
 
 void armSetWifiProvider(WifiManager* w) { g_wifi = w; }
 
@@ -59,11 +59,6 @@ bool ArmController::busy() const {
     return false;
 }
 
-void ArmController::estopFromISR() {
-    // ISR endstop ngoài ngữ cảnh homing => dừng tất cả + FAULT
-    mode_ = ArmMode::FAULT;
-}
-
 ArmMode ArmController::mode() const { return mode_; }
 
 void ArmController::taskEntry(void* param) {
@@ -79,8 +74,14 @@ void ArmController::taskLoop() {
     // Đăng ký Task WDT — task homing/planner/FAULT là an toàn nhất, phải có watchdog riêng
     esp_task_wdt_add(nullptr);
 
+    const TickType_t period = pdMS_TO_TICKS(MOTION_TASK_PERIOD_MS);
+
     for (;;) {
-        vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(MOTION_TASK_PERIOD_MS));
+        const TickType_t now = xTaskGetTickCount();
+        if ((now - lastWake) > period * 2) {
+            lastWake = now;
+        }
+        vTaskDelayUntil(&lastWake, period);
         esp_task_wdt_reset();
 
         // 1) Homing FSM trước (ưu tiên an toàn), rồi planner
@@ -93,53 +94,75 @@ void ArmController::taskLoop() {
         }
         wasHoming = (hc != nullptr && hc->isActive());
 
-        // 2) Endstop bảo vệ: chỉ khi motor đang chạy VÀ endstop vật lý thực sự nhấn
-        //    Homing tự xử lý endstop riêng — arm không can thiệp trong quá trình homing.
-        //    Endstop pressed at boot = OK (resting against switch), không fault.
-        //    Nếu motor đang chạy lùi xa khỏi endstop (jog away) -> cho phép di chuyển.
-        if (es != nullptr && hc != nullptr && !hc->isActive()) {
-            bool anyMotorRunning = false;
-            for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
-                if (motors[i] != nullptr && motors[i]->isRunning()) {
-                    anyMotorRunning = true;
-                    break;
+        // 2) Endstop bảo vệ + E-stop (homing tự xử lý endstop riêng)
+        if (es != nullptr && hc != nullptr && !hc->isActive() && mode_ != ArmMode::FAULT) {
+            const bool estopPending = g_emergencyStop.load(std::memory_order_acquire);
+            const bool latchPending = es->anyLatched();
+
+            if (estopPending || latchPending) {
+                if (pl != nullptr) pl->stop();
+                for (uint8_t j = 0; j < NUM_MOTORS; ++j) {
+                    if (motors[j] != nullptr) motors[j]->stop();
                 }
-            }
-            if (anyMotorRunning) {
+                mode_ = ArmMode::FAULT;
+                Serial.println("[ARM] FAULT: endstop hit during motion (ISR/E-stop)");
+            } else {
+                // Backup: phát hiện endstop khi motor đang chạy (jog away khỏi công tắc)
+                bool anyMotorRunning = false;
                 for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
-                    if (es->hasPin(i, EndstopWhich::MIN) && es->isPressed(i, EndstopWhich::MIN)) {
-                        const bool movingAway = (motors[i] != nullptr && motors[i]->isRunning() &&
-                                                 motors[i]->getDirCW() == JointModel::cwForDelta(i, +1.0f));
-                        if (!movingAway) {
-                            for (uint8_t j = 0; j < NUM_MOTORS; ++j)
-                                if (motors[j] != nullptr) motors[j]->stop();
-                            es->clearAllLatches();
-                            mode_ = ArmMode::FAULT;
-                            Serial.printf("[ARM] FAULT: endstop J%u MIN pressed during motion\n", i + 1);
-                            break;
-                        }
+                    if (motors[i] != nullptr && motors[i]->isRunning()) {
+                        anyMotorRunning = true;
+                        break;
                     }
-                    if (es->hasPin(i, EndstopWhich::MAX) && es->isPressed(i, EndstopWhich::MAX)) {
-                        const bool movingAway = (motors[i] != nullptr && motors[i]->isRunning() &&
-                                                 motors[i]->getDirCW() == JointModel::cwForDelta(i, -1.0f));
-                        if (!movingAway) {
-                            for (uint8_t j = 0; j < NUM_MOTORS; ++j)
-                                if (motors[j] != nullptr) motors[j]->stop();
-                            es->clearAllLatches();
-                            mode_ = ArmMode::FAULT;
-                            Serial.printf("[ARM] FAULT: endstop J%u MAX pressed during motion\n", i + 1);
-                            break;
+                }
+                if (anyMotorRunning) {
+                    for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+                        if (es->hasPin(i, EndstopWhich::MIN) && es->isPressed(i, EndstopWhich::MIN)) {
+                            const bool movingAway = (motors[i] != nullptr && motors[i]->isRunning() &&
+                                                     motors[i]->getDirCW() == JointModel::cwForDelta(i, +1.0f));
+                            if (!movingAway) {
+                                if (pl != nullptr) pl->stop();
+                                for (uint8_t j = 0; j < NUM_MOTORS; ++j) {
+                                    if (motors[j] != nullptr) motors[j]->stop();
+                                }
+                                g_emergencyStop.store(true, std::memory_order_release);
+                                mode_ = ArmMode::FAULT;
+                                Serial.printf("[ARM] FAULT: endstop J%u MIN pressed during motion\n", i + 1);
+                                break;
+                            }
+                        }
+                        if (es->hasPin(i, EndstopWhich::MAX) && es->isPressed(i, EndstopWhich::MAX)) {
+                            const bool movingAway = (motors[i] != nullptr && motors[i]->isRunning() &&
+                                                     motors[i]->getDirCW() == JointModel::cwForDelta(i, -1.0f));
+                            if (!movingAway) {
+                                if (pl != nullptr) pl->stop();
+                                for (uint8_t j = 0; j < NUM_MOTORS; ++j) {
+                                    if (motors[j] != nullptr) motors[j]->stop();
+                                }
+                                g_emergencyStop.store(true, std::memory_order_release);
+                                mode_ = ArmMode::FAULT;
+                                Serial.printf("[ARM] FAULT: endstop J%u MAX pressed during motion\n", i + 1);
+                                break;
+                            }
                         }
                     }
                 }
             }
         }
 
-        // 3) Drift watchdog ~ mỗi 500ms
+        // 3) Drift watchdog ~ mỗi 500ms (chỉ chạy khi KHÔNG homing)
         if (++driftTickCounter >= (500 / MOTION_TASK_PERIOD_MS)) {
             driftTickCounter = 0;
-            if (jm != nullptr) {
+            if (jm != nullptr && (hc == nullptr || !hc->isActive()) && mode_ != ArmMode::FAULT) {
                 for (uint8_t i = 0; i < NUM_MOTORS; ++i) jm->updateDriftCheck(i);
+                if (jm->hasAnyDriftFault()) {
+                    if (pl != nullptr) pl->stop();
+                    for (uint8_t j = 0; j < NUM_MOTORS; ++j) {
+                        if (motors[j] != nullptr) motors[j]->stop();
+                    }
+                    mode_ = ArmMode::FAULT;
+                    Serial.println("[ARM] FAULT: step/encoder drift exceeded threshold");
+                }
             }
         }
 
@@ -180,7 +203,13 @@ void ArmController::execute(const ArmCommand& cmd) {
             break;
 
         case ArmCommand::CLEAR_FAULT:
-            if (mode_ == ArmMode::FAULT) mode_ = ArmMode::IDLE;
+            if (es != nullptr) {
+                es->clearAllLatches();
+            }
+            g_emergencyStop.store(false, std::memory_order_release);
+            if (jm != nullptr) jm->clearAllDriftFaults();
+            mode_ = ArmMode::IDLE;
+            Serial.println("[ARM] FAULT cleared -> IDLE");
             break;
 
         case ArmCommand::HOME_ALL:
@@ -199,14 +228,31 @@ void ArmController::execute(const ArmCommand& cmd) {
 
         case ArmCommand::SET_HOME:
             if (busy()) break;
-            if (jm != nullptr) jm->setHomeHere(cmd.axis);
-            Serial.printf("[ARM] Set-Home J%u tai vi tri hien tai\n", cmd.axis + 1);
+            if (jm != nullptr) {
+                if (cmd.axis == 255) {
+                    // Set home toàn bộ cổ tay vi sai (J5 + J6)
+                    jm->setHomeHere(4);
+                    jm->setHomeHere(5);
+                    Serial.println("[ARM] Set-Home Wrist (J5 + J6) tai vi tri hien tai");
+                } else if (cmd.axis < NUM_MOTORS) {
+                    jm->setHomeHere(cmd.axis);
+                    Serial.printf("[ARM] Set-Home J%u tai vi tri hien tai\n", cmd.axis + 1);
+                }
+            }
             break;
 
         case ArmCommand::JOG_REL:
-            if (!motionAllowed()) break;
+            if (!motionAllowed()) {
+                Serial.printf("[ARM] TU CHOI JOG J%u: robot dang o mode=%u / FAULT (Bấm CLEAR FAULT để xóa lỗi)\n",
+                              cmd.axis + 1, static_cast<unsigned>(mode_.load(std::memory_order_relaxed)));
+                break;
+            }
             if (cmd.axis >= NUM_MOTORS || hc == nullptr || jm == nullptr) break;
-            if (motors[cmd.axis]->isRunning()) break; // bỏ qua nếu trục đang chạy
+            if (motors[cmd.axis]->isRunning()) {
+                Serial.printf("[ARM] JOG J%u bo qua: motor dang chay\n", cmd.axis + 1);
+                break;
+            }
+            Serial.printf("[ARM] JOG J%u %+.2f deg\n", cmd.axis + 1, cmd.value);
             applyJog(cmd.axis, cmd.value);
             break;
 
@@ -256,50 +302,75 @@ void ArmController::applyJog(uint8_t axis, float deltaDeg) {
         // Khớp 1..4 dẫn động trực tiếp
         float delta = deltaDeg;
         if (jm->isHomed(axis)) {
-            const float cur = jm->angleFromSteps(axis);
+            const float cur = (jm->encOK(axis)) ? jm->angleFromEncoder(axis) : jm->angleFromSteps(axis);
             float target = cur + delta;
             if (target > DEFAULT_AXIS_LIMIT_MAX[axis]) target = DEFAULT_AXIS_LIMIT_MAX[axis];
             if (target < DEFAULT_AXIS_LIMIT_MIN[axis]) target = DEFAULT_AXIS_LIMIT_MIN[axis];
-            delta = target - cur; // clamp theo soft limit
+            delta = target - cur; // clamp theo soft limit từ vị trí encoder thực tế
         }
         const int64_t steps = JointModel::degreesToSteps(axis, fabsf(delta));
+        Serial.printf("[JOG] J%u: delta=%.2f steps=%lld cw=%d (encOK=%d homed=%d)\n",
+                      axis+1, delta, steps, (int)JointModel::cwForDelta(axis, delta),
+                      (int)jm->encOK(axis), (int)jm->isHomed(axis));
         if (steps <= 0) return;
         const bool cw = JointModel::cwForDelta(axis, delta);
+        motors[axis]->setSpeed(DEFAULT_AXIS_JOG_SPEEDS[axis]);
         motors[axis]->run(cw, static_cast<uint32_t>(steps));
     } else if (axis == 4) {
-        // Jog J5 (Tilt): Chuyển động thuần Tilt => Cả 2 động cơ M5 và M6 quay cùng chiều, cùng góc
+        // Jog J5 (Tilt): Chuyển động thuần Tilt qua Differential Wrist
         float delta = deltaDeg;
         if (jm->isHomed(4)) {
-            const float cur = jm->angleFromSteps(4);
+            const float cur = (jm->encOK(4) && jm->encOK(5)) ? jm->angleFromEncoder(4) : jm->angleFromSteps(4);
             float target = cur + delta;
             if (target > DEFAULT_AXIS_LIMIT_MAX[4]) target = DEFAULT_AXIS_LIMIT_MAX[4];
             if (target < DEFAULT_AXIS_LIMIT_MIN[4]) target = DEFAULT_AXIS_LIMIT_MIN[4];
             delta = target - cur;
         }
-        const int64_t s5 = JointModel::degreesToSteps(4, fabsf(delta));
-        const int64_t s6 = JointModel::degreesToSteps(5, fabsf(delta));
-        if (s5 > 0 && motors[4] != nullptr) motors[4]->run(JointModel::cwForDelta(4, delta), static_cast<uint32_t>(s5));
-        if (s6 > 0 && motors[5] != nullptr) motors[5]->run(JointModel::cwForDelta(5, delta), static_cast<uint32_t>(s6));
+        const DifferentialWrist::ActuatorSteps steps = g_diffWrist.computeIncrementalSteps(
+            delta, 0.0f, JointModel::stepsPerDegree(4), JointModel::stepsPerDegree(5));
+        Serial.printf("[JOG] J5 (Tilt): delta=%.2f leftSteps=%lld rightSteps=%lld\n",
+                      delta, static_cast<long long>(steps.leftSteps), static_cast<long long>(steps.rightSteps));
+        if (steps.leftSteps != 0 && motors[4] != nullptr) {
+            motors[4]->setSpeed(DEFAULT_AXIS_JOG_SPEEDS[4]);
+            motors[4]->run(JointModel::cwForDelta(4, static_cast<float>(steps.leftSteps)),
+                           static_cast<uint32_t>(llabs(steps.leftSteps)));
+        }
+        if (steps.rightSteps != 0 && motors[5] != nullptr) {
+            motors[5]->setSpeed(DEFAULT_AXIS_JOG_SPEEDS[5]);
+            motors[5]->run(JointModel::cwForDelta(5, static_cast<float>(steps.rightSteps)),
+                           static_cast<uint32_t>(llabs(steps.rightSteps)));
+        }
     } else if (axis == 5) {
-        // Jog J6 (Roll): Chuyển động thuần Roll => Động cơ M5 quay +delta, M6 quay -delta (ngược chiều)
+        // Jog J6 (Roll): Chuyển động thuần Roll qua Differential Wrist
         float delta = deltaDeg;
         if (jm->isHomed(5)) {
-            const float cur = jm->angleFromSteps(5);
+            const float cur = (jm->encOK(4) && jm->encOK(5)) ? jm->angleFromEncoder(5) : jm->angleFromSteps(5);
             float target = cur + delta;
             if (target > DEFAULT_AXIS_LIMIT_MAX[5]) target = DEFAULT_AXIS_LIMIT_MAX[5];
             if (target < DEFAULT_AXIS_LIMIT_MIN[5]) target = DEFAULT_AXIS_LIMIT_MIN[5];
             delta = target - cur;
         }
-        const float effDelta = fabsf(delta) * g_diffWrist.getBevelRatio();
-        const int64_t s5 = JointModel::degreesToSteps(4, effDelta);
-        const int64_t s6 = JointModel::degreesToSteps(5, effDelta);
-        if (s5 > 0 && motors[4] != nullptr) motors[4]->run(JointModel::cwForDelta(4, +delta), static_cast<uint32_t>(s5));
-        if (s6 > 0 && motors[5] != nullptr) motors[5]->run(JointModel::cwForDelta(5, -delta), static_cast<uint32_t>(s6));
+        const DifferentialWrist::ActuatorSteps steps = g_diffWrist.computeIncrementalSteps(
+            0.0f, delta, JointModel::stepsPerDegree(4), JointModel::stepsPerDegree(5));
+        Serial.printf("[JOG] J6 (Roll): delta=%.2f leftSteps=%lld rightSteps=%lld\n",
+                      delta, static_cast<long long>(steps.leftSteps), static_cast<long long>(steps.rightSteps));
+        if (steps.leftSteps != 0 && motors[4] != nullptr) {
+            motors[4]->setSpeed(DEFAULT_AXIS_JOG_SPEEDS[4]);
+            motors[4]->run(JointModel::cwForDelta(4, static_cast<float>(steps.leftSteps)),
+                           static_cast<uint32_t>(llabs(steps.leftSteps)));
+        }
+        if (steps.rightSteps != 0 && motors[5] != nullptr) {
+            motors[5]->setSpeed(DEFAULT_AXIS_JOG_SPEEDS[5]);
+            motors[5]->run(JointModel::cwForDelta(5, static_cast<float>(steps.rightSteps)),
+                           static_cast<uint32_t>(llabs(steps.rightSteps)));
+        }
     }
 }
 
 String ArmController::statusJson() {
-    String j = "{";
+    String j;
+    j.reserve(3500);
+    j = "{";
     j += "\"fw\":\"" FW_VERSION "\",";
     switch (mode_) {
         case ArmMode::IDLE:   j += "\"mode\":\"idle\",";   break;
@@ -316,11 +387,11 @@ String ArmController::statusJson() {
     if (jm != nullptr) j += "\"joints\":" + jm->toJson() + ",";
     if (es != nullptr) j += "\"endstops\":" + es->toJson() + ",";
 
-    // TCP pose hiện tại theo FK từ góc khớp (step count)
+    // TCP pose hiện tại theo FK từ góc khớp thực tế (encoder)
     {
         float enc[6];
         for (uint8_t i = 0; i < NUM_MOTORS; ++i)
-            enc[i] = jm ? jm->angleFromSteps(i) : 0.0f;
+            enc[i] = (jm && jm->isHomed(i) && jm->encOK(i)) ? jm->angleFromEncoder(i) : (jm ? jm->angleFromSteps(i) : 0.0f);
         const kin::FkResult fk = kin::forward(enc);
         char buf[80];
         snprintf(buf, sizeof(buf), "\"pose\":{\"x\":%.1f,\"y\":%.1f,\"z\":%.1f},",

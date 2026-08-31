@@ -67,7 +67,9 @@ public:
  * @brief Convenience helper for taking mutex with milliseconds timeout.
  */
 inline RtosLockGuard makeTimedLock(SemaphoreHandle_t mutex, uint32_t timeoutMs) {
-    return RtosLockGuard(mutex, pdMS_TO_TICKS(timeoutMs));
+    TickType_t ticks = pdMS_TO_TICKS(timeoutMs);
+    if (timeoutMs > 0 && ticks == 0) ticks = 1;
+    return RtosLockGuard(mutex, ticks);
 }
 
 #endif // RTOS_GUARD_H

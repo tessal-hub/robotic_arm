@@ -2,11 +2,8 @@
 #include "driver/gpio.h"
 #include "rtos_guard.h"
 
-// Global direct fail-fast emergency stop flag (Checked in Step ISR every 20us)
 std::atomic<bool> g_emergencyStop{false};
-
-// 6-Axis Synchronized Lock-Free SPSC Motion Queue (Capacity 64 blocks)
-SPSCQueue<MotionBlock, 64> g_motionQueue;
+std::atomic<bool> g_homingActive{false};
 
 Motor::Motor(HardwareSerial* serial, float rSense, uint8_t uartAddress,
              uint8_t stepPinNum, uint8_t dirPinNum, const char* motorLabel)
@@ -78,18 +75,19 @@ inline uint32_t Motor::calculateSCurveInterval(uint32_t currentStep, uint32_t to
 
 void IRAM_ATTR Motor::onStepTimer(void* arg) {
     Motor* self = static_cast<Motor*>(arg);
-    if (!self->running.load(std::memory_order_relaxed)) return;
+    if (!self->running.load(std::memory_order_acquire)) return;
 
     // Fail-fast emergency stop check (Instantaneous abort <= 20us)
-    if (g_emergencyStop.load(std::memory_order_relaxed)) {
+    if (g_emergencyStop.load(std::memory_order_acquire)) {
         if (self->isHighPin) GPIO.out1_w1tc.val = self->stepPinMaskHigh;
         else GPIO.out_w1tc = self->stepPinMaskLow;
         self->running.store(false, std::memory_order_release);
         return;
     }
 
-    if (self->isHighPin) GPIO.out1_w1ts.val = self->stepPinMaskHigh;
-    else GPIO.out_w1ts = self->stepPinMaskLow;
+    gpio_set_level(static_cast<gpio_num_t>(self->stepPin), 1);
+    esp_rom_delay_us(4); // 4us clean pulse width cho A4988 và TMC
+    gpio_set_level(static_cast<gpio_num_t>(self->stepPin), 0);
 
     uint32_t nextInterval = self->targetSpeedUs.load(std::memory_order_relaxed);
     const bool isCont = self->continuousMode.load(std::memory_order_relaxed);
@@ -110,8 +108,6 @@ void IRAM_ATTR Motor::onStepTimer(void* arg) {
         self->currentSpeedUs.store(nextInterval, std::memory_order_relaxed);
 
         if (remaining == 0) {
-            if (self->isHighPin) GPIO.out1_w1tc.val = self->stepPinMaskHigh;
-            else GPIO.out_w1tc = self->stepPinMaskLow;
             self->running.store(false, std::memory_order_release);
             return;
         }
@@ -128,10 +124,12 @@ void IRAM_ATTR Motor::onStepTimer(void* arg) {
     if (nextInterval < MIN_STEP_INTERVAL_US) nextInterval = MIN_STEP_INTERVAL_US;
     if (nextInterval > MAX_STEP_INTERVAL_US) nextInterval = MAX_STEP_INTERVAL_US;
 
-    esp_timer_start_once(self->stepTimer, nextInterval);
+    if (!self->running.load(std::memory_order_acquire) || g_emergencyStop.load(std::memory_order_acquire)) {
+        self->running.store(false, std::memory_order_release);
+        return;
+    }
 
-    if (self->isHighPin) GPIO.out1_w1tc.val = self->stepPinMaskHigh;
-    else GPIO.out_w1tc = self->stepPinMaskLow;
+    esp_timer_start_once(self->stepTimer, nextInterval);
 }
 
 bool Motor::takeUart(uint32_t timeoutMs) {
@@ -178,12 +176,15 @@ TMC2209Diag Motor::getDriverStatus() {
     if (uartOk) {
         flushUartRx();
         const uint32_t drvStatus = driver->DRV_STATUS();
+        // Bit layout DRV_STATUS (TMC2209 datasheet / TMCStepper TMC2208_bitfields.h):
+        // otpw=0, ot=1, s2ga=2, s2gb=3, s2vsa=4, s2vsb=5, ola=6, olb=7, t120..t157=8..11,
+        // cs_actual=16..20, stealth=30, stst=31.
         diag.overTemp        = (drvStatus & (1UL << 1)) != 0;
         diag.overTempWarning = (drvStatus & (1UL << 0)) != 0;
         diag.shortToGndA     = (drvStatus & (1UL << 2)) != 0;
         diag.shortToGndB     = (drvStatus & (1UL << 3)) != 0;
-        diag.openLoadA       = (drvStatus & (1UL << 4)) != 0;
-        diag.openLoadB       = (drvStatus & (1UL << 5)) != 0;
+        diag.openLoadA       = (drvStatus & (1UL << 6)) != 0;
+        diag.openLoadB       = (drvStatus & (1UL << 7)) != 0;
         diag.standStill      = (drvStatus & (1UL << 31)) != 0;
         diag.csActual        = static_cast<uint8_t>((drvStatus >> 16) & 0x1F);
 
@@ -197,12 +198,26 @@ TMC2209Diag Motor::getDriverStatus() {
 
 void Motor::begin(uint16_t initialCurrentMa, uint16_t initialMicrosteps,
                    bool initialSpreadCycle, uint8_t initialHoldScale, uint8_t iholddelay) {
-    pinMode(stepPin, OUTPUT);
-    digitalWrite(stepPin, LOW);
+    gpio_config_t cfg = {};
+    cfg.pin_bit_mask = (1ULL << stepPin);
+    cfg.mode = GPIO_MODE_OUTPUT;
+    cfg.pull_up_en = GPIO_PULLUP_DISABLE;
+    cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    cfg.intr_type = GPIO_INTR_DISABLE;
+    gpio_config(&cfg);
+    gpio_set_level(static_cast<gpio_num_t>(stepPin), 0);
+    gpio_set_drive_capability(static_cast<gpio_num_t>(stepPin), GPIO_DRIVE_CAP_3);
 
     if (dirPin != 255) {
-        pinMode(dirPin, OUTPUT);
-        digitalWrite(dirPin, LOW);
+        gpio_config_t dirCfg = {};
+        dirCfg.pin_bit_mask = (1ULL << dirPin);
+        dirCfg.mode = GPIO_MODE_OUTPUT;
+        dirCfg.pull_up_en = GPIO_PULLUP_DISABLE;
+        dirCfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        dirCfg.intr_type = GPIO_INTR_DISABLE;
+        gpio_config(&dirCfg);
+        gpio_set_level(static_cast<gpio_num_t>(dirPin), 0);
+        gpio_set_drive_capability(static_cast<gpio_num_t>(dirPin), GPIO_DRIVE_CAP_3);
     }
 
     if (stepTimer != nullptr) {
@@ -256,6 +271,9 @@ void Motor::begin(uint16_t initialCurrentMa, uint16_t initialMicrosteps,
     driver->ihold(holdScale);
     driver->iholddelay(iholddelay);
 
+    driver->TCOOLTHRS(0xFFFFF); // Kích hoạt StallGuard4 ở mọi vận tốc
+    driver->SGTHRS(DEFAULT_STALL_THRESHOLD);
+
     driver->shaft(false);
     lastShaftDir = -1;
 
@@ -269,29 +287,30 @@ void Motor::begin(uint16_t initialCurrentMa, uint16_t initialMicrosteps,
     }
 }
 
-void Motor::setDirection(bool cw) {
+bool Motor::setDirection(bool cw) {
     if (dirPin != 255) { // A4988 hoặc TMC có chân DIR vật lý
         dirCW.store(cw, std::memory_order_relaxed);
         gpio_set_level(static_cast<gpio_num_t>(dirPin), cw ? 1 : 0);
-        return;
-    } 
-    
+        return true;
+    }
+
     if (isTMC && dirPin == 255) { // TMC dùng UART đảo chiều
         const int8_t requestedDir = cw ? 1 : 0;
         if (lastShaftDir != requestedDir) {
-            if (takeUart(100)) {
-                flushUartRx();
-                driver->shaft(cw);
-                lastShaftDir = requestedDir;
-                dirCW.store(cw, std::memory_order_relaxed);
-                giveUart();
-            } else {
+            if (!takeUart(100)) {
                 Serial.printf("[MOTOR] Canh bao: %s take UART timeout, khong doi duoc chieu!\n", label);
+                return false;
             }
+            flushUartRx();
+            driver->shaft(cw);
+            lastShaftDir = requestedDir;
+            dirCW.store(cw, std::memory_order_relaxed);
+            giveUart();
         } else {
             dirCW.store(cw, std::memory_order_relaxed);
         }
     }
+    return true;
 }
 
 void Motor::run(bool cw, uint32_t steps) {
@@ -303,25 +322,31 @@ void Motor::run(bool cw, uint32_t steps) {
     running.store(false, std::memory_order_relaxed);
 
     if (!enabled.load(std::memory_order_relaxed)) enable(true);
-    setDirection(cw);
+    if (!setDirection(cw)) {
+        Serial.printf("[MOTOR] %s bo qua run: khong doi duoc chieu UART\n", label);
+        return;
+    }
 
     continuousMode.store(false, std::memory_order_relaxed);
     targetSteps = steps;
     stepsRemaining.store(steps, std::memory_order_relaxed);
     stepCounter.store(0, std::memory_order_relaxed);
 
-    if (steps > 150) {
-        accelSteps = steps / 4;
-        if (accelSteps > 100) accelSteps = 100;
-        decelSteps = accelSteps;
+    const uint32_t targetInterval = targetSpeedUs.load(std::memory_order_relaxed);
+    if (steps < 80) {
+        // Chuyển động ngắn (1-2 độ): chạy thẳng tốc độ mục tiêu không cần tăng giảm tốc, phản hồi tức thì
+        accelSteps = 0;
+        decelSteps = 0;
+        startSpeedUs = targetInterval;
+        currentSpeedUs.store(targetInterval, std::memory_order_relaxed);
     } else {
-        accelSteps = steps / 2;
-        decelSteps = steps - accelSteps;
+        accelSteps = steps / 4;
+        if (accelSteps > 150) accelSteps = 150;
+        decelSteps = accelSteps;
+        // Bắt đầu từ 1000us (~1000 steps/sec) tạo mô-men khởi động tức thì, không bị bò rùa 2500us
+        startSpeedUs = (targetInterval > 1000U) ? targetInterval : 1000U;
+        currentSpeedUs.store(startSpeedUs, std::memory_order_relaxed);
     }
-
-    startSpeedUs = targetSpeedUs.load(std::memory_order_relaxed) + 600;
-    if (startSpeedUs > MAX_STEP_INTERVAL_US) startSpeedUs = MAX_STEP_INTERVAL_US;
-    currentSpeedUs.store(startSpeedUs, std::memory_order_relaxed);
 
     running.store(true, std::memory_order_release);
     if (stepTimer != nullptr) esp_timer_start_once(stepTimer, currentSpeedUs.load(std::memory_order_relaxed));
@@ -332,7 +357,10 @@ void Motor::runContinuous(bool cw) {
     running.store(false, std::memory_order_relaxed);
 
     if (!enabled.load(std::memory_order_relaxed)) enable(true);
-    setDirection(cw);
+    if (!setDirection(cw)) {
+        Serial.printf("[MOTOR] %s bo qua runContinuous: khong doi duoc chieu UART\n", label);
+        return;
+    }
 
     continuousMode.store(true, std::memory_order_relaxed);
     targetSteps = 0xFFFFFFFF;
@@ -341,8 +369,7 @@ void Motor::runContinuous(bool cw) {
     accelSteps = 120;
     decelSteps = 0;
 
-    startSpeedUs = targetSpeedUs.load(std::memory_order_relaxed) + 600;
-    if (startSpeedUs > MAX_STEP_INTERVAL_US) startSpeedUs = MAX_STEP_INTERVAL_US;
+    startSpeedUs = MAX_STEP_INTERVAL_US; // Bắt đầu từ 400 steps/sec
     currentSpeedUs.store(startSpeedUs, std::memory_order_relaxed);
 
     running.store(true, std::memory_order_release);
@@ -449,7 +476,7 @@ String Motor::toJson() const {
              running.load(std::memory_order_relaxed) ? "true" : "false",
              dirCW.load(std::memory_order_relaxed) ? "cw" : "ccw",
              stepsRemaining.load(std::memory_order_relaxed),
-             targetSteps,
+             targetSteps.load(std::memory_order_relaxed),
              targetSpeedUs.load(std::memory_order_relaxed),
              currentSpeedUs.load(std::memory_order_relaxed),
              currentMa,

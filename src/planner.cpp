@@ -29,13 +29,20 @@ bool Planner::submit(const Job& job) {
     if (isActive()) return false;
     if (job.shape == Shape::NONE) return false;
 
-    // Vị trí Cartesian xuất phát = TCP hiện tại theo FK
+    // Vị trí Cartesian xuất phát = TCP hiện tại theo FK (hoặc UCS nếu WorkPlane bật)
     float enc[6];
     for (uint8_t i = 0; i < NUM_MOTORS; ++i) enc[i] = jm->angleFromSteps(i);
     const kin::FkResult fkNow = kin::forward(enc);
-    curX_ = fkNow.tcp.x;
-    curY_ = fkNow.tcp.y;
-    curZ_ = fkNow.tcp.z;
+    if (workPlane != nullptr && workPlane->isEnabled()) {
+        const Point3D ucsNow = workPlane->fromRobotXYZ({fkNow.tcp.x, fkNow.tcp.y, fkNow.tcp.z});
+        curX_ = ucsNow.x;
+        curY_ = ucsNow.y;
+        curZ_ = ucsNow.z;
+    } else {
+        curX_ = fkNow.tcp.x;
+        curY_ = fkNow.tcp.y;
+        curZ_ = fkNow.tcp.z;
+    }
 
     job_ = job;
 
@@ -229,7 +236,7 @@ void Planner::tick() {
             }
             if (!startMoveTo(curX_, curY_, curZ_, job_.feedMmS)) return;
             {
-                const bool needDrop = job_.drawNow || job_.shape == Shape::POINT;
+                const bool needDrop = job_.drawNow || (job_.shape == Shape::POINT);
                 state_ = needDrop ? State::DROPPING : State::FINISHED_LIFT;
             }
             break;
@@ -259,9 +266,14 @@ void Planner::tick() {
             const float safeZ = job_.z + PEN_LIFT_MM;
             curZ_ = safeZ;
             if (!startMoveTo(curX_, curY_, safeZ, DRAW_FEED_MM_S)) return;
-            finishAll();
+            state_ = State::WAIT_FINAL_LIFT;
             break;
         }
+
+        case State::WAIT_FINAL_LIFT:
+            if (motorsBusy(motors)) return;
+            finishAll();
+            break;
 
         default:
             break;

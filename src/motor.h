@@ -7,14 +7,11 @@
 #include <atomic>
 #include <memory>
 #include "config.h"
-#include "spsc_queue.h"
-#include "motion_block.h"
 
-// Global direct fail-fast emergency stop flag (Checked in Step ISR every 20us)
+// Global fail-fast E-stop (step timer + endstop ISR set; CLEAR_FAULT clears).
 extern std::atomic<bool> g_emergencyStop;
-
-// 6-Axis Synchronized Lock-Free SPSC Motion Queue (Capacity 64 blocks)
-extern SPSCQueue<MotionBlock, 64> g_motionQueue;
+// Homing active — endstop ISR chỉ dừng trục chạm; ngoài homing dừng mọi trục + E-stop.
+extern std::atomic<bool> g_homingActive;
 
 struct TMC2209Diag {
     bool uartOk{false};
@@ -48,7 +45,7 @@ private:
     std::atomic<uint32_t> targetSpeedUs{DEFAULT_STEP_INTERVAL_US};
     std::atomic<uint32_t> currentSpeedUs{MAX_STEP_INTERVAL_US};
     uint32_t startSpeedUs{MAX_STEP_INTERVAL_US};
-    uint32_t targetSteps{0};
+    std::atomic<uint32_t> targetSteps{0};
     std::atomic<uint32_t> stepsRemaining{0};
     std::atomic<uint32_t> stepCounter{0};
     std::atomic<int64_t> absSteps{0};   // Vị trí tuyệt đối (dấu theo dirCW), cập nhật trong step timer
@@ -95,7 +92,8 @@ public:
                uint8_t initialHoldScale = DEFAULT_HOLD_SCALE,
                uint8_t iholddelay = 10);
 
-    void setDirection(bool cw);
+    // false nếu TMC UART không đổi được chiều (caller phải bỏ lệnh chạy).
+    [[nodiscard]] bool setDirection(bool cw);
     void run(bool cw, uint32_t steps);
     void runContinuous(bool cw);
     void stop();
@@ -122,7 +120,7 @@ public:
     [[nodiscard]] bool isEnabled() const noexcept { return enabled.load(std::memory_order_relaxed); }
     [[nodiscard]] bool getDirCW() const noexcept { return dirCW.load(std::memory_order_relaxed); }
     [[nodiscard]] uint32_t getStepsRemaining() const noexcept { return stepsRemaining.load(std::memory_order_relaxed); }
-    [[nodiscard]] uint32_t getTargetSteps() const noexcept { return targetSteps; }
+    [[nodiscard]] uint32_t getTargetSteps() const noexcept { return targetSteps.load(std::memory_order_relaxed); }
     [[nodiscard]] uint32_t getStepCounter() const noexcept { return stepCounter.load(std::memory_order_relaxed); }
     void resetStepCounter() noexcept { stepCounter.store(0, std::memory_order_relaxed); }
     // Vị trí tuyệt đối tính bằng microstep. Chỉ set khi motor KHÔNG chạy (homing/calib).

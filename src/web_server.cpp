@@ -13,618 +13,600 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>6-Axis Robotic Arm Controller &amp; 3D Digital Clone</title>
+<title>6-Axis Robot Arm Controller &amp; Digital Twin</title>
 <style>
-:root{
-  --color-primary: #38bdf8;
-  --color-primary-deep: #0ea5e9;
-  --color-primary-muted: #7dd3fc;
-  --color-success: #059669;
-  --color-success-bg: #0c1a17;
-  --color-success-text: #6ee7b7;
-  --color-warning: #d97706;
-  --color-warning-bg: #1c1917;
-  --color-warning-text: #fcd34d;
-  --color-danger: #dc2626;
-  --color-danger-bg: #7f1d1d;
-  --color-danger-text: #fca5a5;
-  --color-info: #2563eb;
-  --color-info-bg: #1e3a8a;
-  --color-info-text: #93c5fd;
-  --color-bg: #0b0f19;
-  --color-surface: #111827;
-  --color-surface-elevated: #1e293b;
-  --color-border: #1f2937;
-  --color-border-strong: #334155;
-  --color-text-primary: #f8fafc;
-  --color-text-secondary: #cbd5e1;
-  --color-text-muted: #94a3b8;
-  --color-text-dim: #94a3b8;
-  --color-focus-ring: #38bdf8;
-  --color-estop-glow: rgba(220,38,38,0.5);
-  --color-estop-glow-strong: rgba(220,38,38,0.9);
-  --color-shadow-card: rgba(0,0,0,0.45);
-  --color-shadow-toast: rgba(0,0,0,0.5);
-  --space-xs: 4px;
-  --space-sm: 6px;
-  --space-md: 8px;
-  --space-lg: 10px;
-  --space-xl: 12px;
-  --space-2xl: 14px;
-  --space-card-padding: 16px;
-  --space-card-gap: 14px;
-  --space-tab-gap: 6px;
-  --space-page-padding: 14px;
-  --space-max-width: 1200px;
+:root {
+  --bg: #090d16;
+  --surface: #111827;
+  --surface-sub: #162032;
+  --surface-elevated: #1f293d;
+  --border: #1f2a3d;
+  --border-strong: #334155;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
+  --primary: #38bdf8;
+  --primary-hover: #0ea5e9;
+  --success: #10b981;
+  --success-bg: rgba(16,185,129,0.12);
+  --success-text: #6ee7b7;
+  --danger: #ef4444;
+  --danger-bg: rgba(239,68,68,0.14);
+  --danger-text: #fca5a5;
+  --warning: #f59e0b;
+  --warning-bg: rgba(245,158,11,0.14);
+  --warning-text: #fcd34d;
   --radius-xs: 4px;
-  --radius-sm: 8px;
+  --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
   --radius-pill: 9999px;
-  --radius-badge: 12px;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --fs-display: clamp(1.2rem, 3.5vw, 1.5rem);
-  --fs-headline: 1.0rem;
-  --fs-body: 0.85rem;
-  --fs-label: 0.76rem;
-  --fs-tabular: 1.4rem;
-  --fw-regular: 400;
-  --fw-medium: 500;
-  --fw-semibold: 600;
-  --fw-bold: 700;
-  --transition-fast: 80ms;
-  --transition-normal: 150ms;
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-spring: cubic-bezier(0.23, 1, 0.32, 1);
-  --shadow-card: 0 8px 24px var(--color-shadow-card);
-  --shadow-toast: 0 6px 20px var(--color-shadow-toast);
-  --shadow-estop: 0 6px 24px var(--color-estop-glow);
-  --shadow-estop-strong: 0 6px 36px var(--color-estop-glow-strong);
-  --z-toast: 98;
-  --z-estop: 99;
 }
-
-*{box-sizing:border-box;margin:0;padding:0}
-::selection{background:var(--color-primary);color:var(--color-bg)}
-html{color-scheme:dark}
-body{
-  font-family:var(--font-sans);
-  background:var(--color-bg);
-  color:var(--color-text-primary);
-  min-height:100vh;
-  padding:var(--space-page-padding);
-  padding-top:max(var(--space-page-padding), env(safe-area-inset-top));
-  padding-bottom:max(72px, env(safe-area-inset-bottom));
-  padding-left:max(var(--space-page-padding), env(safe-area-inset-left));
-  padding-right:max(var(--space-page-padding), env(safe-area-inset-right));
-  display:flex;
-  flex-direction:column;
-  align-items:center;
+* { box-sizing: border-box; margin: 0; padding: 0; }
+::selection { background: var(--primary); color: var(--bg); }
+html { color-scheme: dark; }
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text-main);
+  min-height: 100vh;
+  padding: 14px;
+  padding-bottom: 84px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
-:focus-visible{outline:2px solid var(--color-focus-ring);outline-offset:2px}
-.app{width:100%;max-width:var(--space-max-width)}
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.app { width: 100%; max-width: 1200px; }
 
 /* ---- Header ---- */
-.header{
-  display:flex;align-items:center;justify-content:space-between;gap:var(--space-xl);
-  padding:var(--space-md) 0 var(--space-xl);
-  flex-wrap:wrap;
+.header {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 6px 0 16px; flex-wrap: wrap; border-bottom: 1px solid var(--border);
+  margin-bottom: 14px;
 }
-.brand{display:flex;align-items:baseline;gap:var(--space-xl);flex-wrap:wrap}
-.brand h1{font-size:var(--fs-display);font-weight:var(--fw-bold);color:var(--color-text-primary)}
-.brand h1 b{color:var(--color-primary);font-weight:var(--fw-bold)}
-.brand .ver{font-size:var(--fs-label);color:var(--color-text-muted);font-family:var(--font-mono);background:var(--color-surface-elevated);padding:2px 8px;border-radius:4px;border:1px solid var(--color-border)}
-.connline{display:flex;align-items:center;gap:var(--space-md);color:var(--color-text-muted);font-size:var(--fs-body);flex-wrap:wrap}
-.connline .dot{width:8px;height:8px;border-radius:50%;background:var(--color-success);display:inline-block}
-.connline.offline .dot{background:var(--color-danger)}
-.connline.offline{color:var(--color-danger-text)}
+.brand { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.brand h1 { font-size: 1.25rem; font-weight: 700; color: var(--text-main); letter-spacing: -0.02em; }
+.brand h1 b { color: var(--primary); }
+.brand .ver { font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono); background: var(--surface-elevated); padding: 3px 8px; border-radius: var(--radius-xs); border: 1px solid var(--border); }
+.conn-pill {
+  display: flex; align-items: center; gap: 8px; font-size: 0.82rem; font-family: var(--font-mono);
+  background: var(--surface); padding: 5px 12px; border-radius: var(--radius-pill); border: 1px solid var(--border);
+}
+.conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+.conn-pill.offline .conn-dot { background: var(--danger); }
+.conn-pill.offline { color: var(--danger-text); border-color: var(--danger); }
 
-/* ---- Tabs ---- */
-.tabs{
-  display:flex;gap:var(--space-tab-gap);
-  background:var(--color-surface);
-  padding:var(--space-sm);
-  border-radius:var(--radius-md);
-  margin-bottom:14px;
-  flex-wrap:wrap;
-  justify-content:center;
-  width:100%;
-  border:1px solid var(--color-border);
+/* ---- Main Navigation Tabs ---- */
+.nav-tabs {
+  display: flex; gap: 6px; background: var(--surface);
+  padding: 5px; border-radius: var(--radius-md); margin-bottom: 16px;
+  border: 1px solid var(--border); flex-wrap: wrap; justify-content: center;
 }
-.tab-btn{
-  background:transparent;
-  border:none;
-  color:var(--color-text-muted);
-  padding:var(--space-md) var(--space-lg);
-  border-radius:var(--radius-sm);
-  font-size:0.84rem;
-  font-weight:var(--fw-semibold);
-  cursor:pointer;
-  min-height:38px;
-  display:inline-flex;align-items:center;justify-content:center;
-  transition:background var(--transition-normal) var(--ease-out),color var(--transition-normal) var(--ease-out);
+.nav-tab {
+  background: transparent; border: none; color: var(--text-muted);
+  padding: 8px 16px; border-radius: var(--radius-sm); font-size: 0.86rem;
+  font-weight: 600; cursor: pointer; min-height: 38px;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: background 150ms ease, color 150ms ease;
 }
-.tab-btn:hover{background:var(--color-surface-elevated);color:var(--color-text-secondary)}
-.tab-btn.active{background:var(--color-primary);color:var(--color-bg);font-weight:var(--fw-bold)}
-.tab-btn.disabled{opacity:.35;cursor:not-allowed}
-.tab-pane{display:none}
-.tab-pane.active{display:block}
+.nav-tab:hover { background: var(--surface-elevated); color: var(--text-main); }
+.nav-tab.active { background: var(--primary); color: var(--bg); font-weight: 700; }
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
 
-/* ---- Dashboard grid ---- */
-.dash-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:var(--space-card-gap)}
-@media(max-width:880px){.dash-grid{grid-template-columns:1fr}}
+/* ---- Layout Grids ---- */
+.grid-2col { display: grid; grid-template-columns: 1.25fr 0.75fr; gap: 14px; }
+@media (max-width: 900px) { .grid-2col { grid-template-columns: 1fr; } }
+.grid-cards-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
 
 /* ---- Cards ---- */
-.card{
-  background:var(--color-surface);
-  border-radius:var(--radius-lg);
-  padding:var(--space-card-padding);
-  box-shadow:var(--shadow-card);
-  margin-bottom:var(--space-card-gap);
-  border:1px solid var(--color-border);
+.card {
+  background: var(--surface); border-radius: var(--radius-lg);
+  padding: 16px; border: 1px solid var(--border); margin-bottom: 14px;
 }
-.card-head{
-  display:flex;align-items:center;justify-content:space-between;gap:var(--space-md);
-  margin-bottom:var(--space-xl);
-  padding-bottom:var(--space-md);
-  border-bottom:1px solid var(--color-border);
+.card-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
 }
-.card-head h2{font-size:var(--fs-headline);font-weight:var(--fw-semibold);color:var(--color-primary)}
-.card-head .meta{font-size:var(--fs-label);color:var(--color-text-muted)}
+.card-head h2 { font-size: 0.95rem; font-weight: 600; color: var(--primary); display: flex; align-items: center; gap: 6px; }
+.card-head .meta { font-size: 0.76rem; color: var(--text-muted); font-family: var(--font-mono); }
 
-/* ---- 3D Viewport & Simulation Box ---- */
-.sim-viewport-box{
-  position:relative;
-  background:#090d16;
-  border:1px solid var(--color-border);
-  border-radius:var(--radius-sm);
-  overflow:hidden;
+/* ---- 3D Viewport Box ---- */
+.viewport-box {
+  position: relative; background: #070a10; border: 1px solid var(--border);
+  border-radius: var(--radius-md); overflow: hidden; margin-bottom: 10px;
 }
-.sim-canvas{
-  display:block;width:100%;height:380px;
-  background:#090d16;cursor:grab;
+.viewport-canvas { display: block; width: 100%; height: 380px; cursor: grab; }
+.viewport-canvas:active { cursor: grabbing; }
+.viewport-toolbar {
+  position: absolute; top: 8px; left: 8px; right: 8px;
+  display: flex; justify-content: space-between; align-items: center;
+  pointer-events: none; gap: 6px; flex-wrap: wrap; z-index: 2;
 }
-.sim-canvas:active{cursor:grabbing}
-.sim-overlay-bar{
-  position:absolute;top:8px;left:8px;right:8px;
-  display:flex;justify-content:space-between;align-items:center;
-  pointer-events:none;flex-wrap:wrap;gap:6px;z-index:2;
+.toolbar-group {
+  display: flex; gap: 4px; background: rgba(17,24,39,0.88); backdrop-filter: blur(8px);
+  padding: 3px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
+  pointer-events: auto;
 }
-.sim-pill-group{
-  display:flex;gap:4px;
-  background:rgba(17,24,39,0.85);backdrop-filter:blur(6px);
-  padding:3px;border-radius:var(--radius-sm);
-  border:1px solid var(--color-border-strong);
-  pointer-events:auto;
+.tool-btn {
+  background: transparent; border: none; color: var(--text-muted);
+  padding: 4px 10px; border-radius: var(--radius-xs); font-size: 0.74rem;
+  font-weight: 600; cursor: pointer; min-height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: all 120ms ease;
 }
-.sim-pill-btn{
-  background:transparent;border:none;color:var(--color-text-muted);
-  padding:5px 10px;border-radius:var(--radius-xs);
-  font-size:0.75rem;font-weight:var(--fw-semibold);cursor:pointer;min-height:30px;
-  display:inline-flex;align-items:center;justify-content:center;
-  transition:all var(--transition-fast);
-}
-.sim-pill-btn:hover{background:var(--color-surface-elevated);color:var(--color-text-primary)}
-.sim-pill-btn.active{background:var(--color-primary);color:var(--color-bg);font-weight:var(--fw-bold)}
-.sim-pill-btn.src-live.active{background:#10b981;color:#0b0f19}
-.sim-pill-btn.src-sim.active{background:#f59e0b;color:#0b0f19}
+.tool-btn:hover { background: var(--surface-elevated); color: var(--text-main); }
+.tool-btn.active { background: var(--primary); color: var(--bg); font-weight: 700; }
+.tool-btn.live-badge.active { background: var(--success); color: var(--bg); }
+.tool-btn.sim-badge.active { background: var(--warning); color: var(--bg); }
 
-.sim-hud-box{
-  background:#090d16;border:1px solid var(--color-border);border-radius:var(--radius-sm);
-  padding:8px 12px;font-family:var(--font-mono);font-size:0.74rem;color:#f8fafc;
-  line-height:1.45;white-space:pre-wrap;margin-top:8px;
+.hud-pill-bar {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px;
+  background: var(--surface-sub); padding: 10px 12px; border-radius: var(--radius-md);
+  border: 1px solid var(--border); font-family: var(--font-mono); font-size: 0.78rem;
 }
+.hud-item { display: flex; flex-direction: column; gap: 2px; }
+.hud-item .lbl { color: var(--text-dim); font-size: 0.68rem; text-transform: uppercase; font-family: var(--font-sans); }
+.hud-item .val { color: var(--text-main); font-weight: 600; }
+.hud-item .val.accent { color: var(--primary); }
 
-/* ---- Controls Grid ---- */
-.sim-ctrl-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-card-gap)}
-@media(max-width:768px){.sim-ctrl-grid{grid-template-columns:1fr}}
-
-.sim-slider-row{
-  display:grid;grid-template-columns:95px 1fr 55px;align-items:center;gap:8px;
-  margin-bottom:6px;font-size:0.78rem;
+/* ---- Status & Mode ---- */
+.status-hero {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--surface-sub); padding: 14px 16px; border-radius: var(--radius-md);
+  border: 1px solid var(--border); margin-bottom: 12px; flex-wrap: wrap; gap: 10px;
 }
-.sim-slider-row label{color:var(--color-text-secondary);font-weight:var(--fw-medium);margin-bottom:0;text-transform:none;letter-spacing:normal}
-.sim-slider-row input[type="range"]{accent-color:var(--color-primary);width:100%;margin:0;cursor:pointer}
-.sim-slider-row span.val{color:var(--color-primary);font-family:var(--font-mono);font-weight:var(--fw-bold);text-align:right}
-
-.preset-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(95px,1fr));gap:6px;margin-top:8px}
-
-/* ---- Mode readout ---- */
-.mode-block{display:flex;flex-direction:column;gap:var(--space-sm);margin-bottom:var(--space-xl)}
-.mode-label{font-size:var(--fs-label);font-weight:var(--fw-semibold);color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.04em}
-.mode-line{display:flex;align-items:center;gap:var(--space-md);flex-wrap:wrap}
-.mode-word{font-size:2.0rem;font-weight:var(--fw-bold);line-height:1;color:var(--color-text-primary);font-variant-numeric:tabular-nums}
-.badge{
-  padding:3px 10px;border-radius:var(--radius-badge);
-  font-size:var(--fs-label);font-weight:var(--fw-bold);
-  text-transform:uppercase;letter-spacing:0.04em;
-  white-space:nowrap;display:inline-block;
+.mode-title { font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
+.mode-text { font-size: 1.6rem; font-weight: 800; font-family: var(--font-mono); }
+.mode-text.fault { color: var(--danger-text); }
+.mode-text.run { color: var(--success-text); }
+.badge {
+  padding: 4px 10px; border-radius: var(--radius-pill); font-size: 0.72rem;
+  font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
 }
-.b-idle{background:var(--color-info-bg);color:var(--color-info-text)}
-.b-run{background:var(--color-success-bg);color:var(--color-success-text)}
-.b-fault{background:var(--color-danger-bg);color:var(--color-danger-text)}
-.b-warn{background:var(--color-warning-bg);color:var(--color-warning-text)}
-body .mode-word.fault{color:var(--color-danger-text)}
-body .mode-word.run{color:var(--color-success-text)}
+.b-idle { background: rgba(56,189,248,0.14); color: var(--primary); border: 1px solid rgba(56,189,248,0.3); }
+.b-run { background: var(--success-bg); color: var(--success-text); border: 1px solid rgba(16,185,129,0.3); }
+.b-fault { background: var(--danger-bg); color: var(--danger-text); border: 1px solid rgba(239,68,68,0.3); }
+.b-warn { background: var(--warning-bg); color: var(--warning-text); border: 1px solid rgba(245,158,11,0.3); }
 
-/* ---- Stat lines ---- */
-.stat-line{display:flex;justify-content:space-between;font-size:var(--fs-body);color:var(--color-text-muted);margin:4px 0;gap:var(--space-lg)}
-.stat-line .k{color:var(--color-text-muted);font-variant-numeric:tabular-nums}
-.stat-line .v{color:var(--color-text-primary);font-variant-numeric:tabular-nums;font-weight:var(--fw-medium);text-align:right}
-.stat-line .v.muted{color:var(--color-text-muted)}
-.stat-line .v.off{color:var(--color-text-muted)}
-.stat-line.danger .v{color:var(--color-danger-text)}
+/* ---- Stat Rows ---- */
+.stat-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.stat-row:last-child { border-bottom: none; }
+.stat-row .k { color: var(--text-muted); }
+.stat-row .v { color: var(--text-main); font-family: var(--font-mono); font-weight: 600; text-align: right; }
 
-/* ---- Home progress ---- */
-.home-track{display:flex;gap:var(--space-xs);margin-top:var(--space-xl);flex-wrap:wrap}
-.hchip{
-  background:var(--color-border);color:var(--color-text-muted);
-  padding:3px 12px;border-radius:var(--radius-pill);
-  font-size:0.72rem;font-weight:var(--fw-bold);
+/* ---- Homing Chips ---- */
+.home-track { display: flex; gap: 6px; margin: 10px 0 14px; flex-wrap: wrap; }
+.hchip {
+  background: var(--surface-elevated); color: var(--text-dim); padding: 4px 12px;
+  border-radius: var(--radius-pill); font-size: 0.72rem; font-weight: 700; font-family: var(--font-mono);
+  border: 1px solid var(--border);
 }
-.hchip.on{background:var(--color-warning);color:var(--color-text-primary)}
-.hchip.done{background:var(--color-success-bg);color:var(--color-success-text)}
+.hchip.active { background: var(--warning-bg); color: var(--warning-text); border-color: var(--warning); }
+.hchip.done { background: var(--success-bg); color: var(--success-text); border-color: var(--success); }
 
 /* ---- Buttons ---- */
-.btn{
-  border:none;border-radius:var(--radius-sm);
-  padding:var(--space-md) var(--space-lg);
-  font-weight:var(--fw-semibold);font-size:var(--fs-body);
-  cursor:pointer;min-height:38px;
-  display:inline-flex;align-items:center;justify-content:center;gap:6px;
-  transition:transform var(--transition-fast) var(--ease-spring),background var(--transition-normal) var(--ease-out),opacity var(--transition-normal);
+.btn {
+  border: none; border-radius: var(--radius-sm); padding: 9px 16px;
+  font-weight: 600; font-size: 0.84rem; cursor: pointer; min-height: 38px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  transition: background 150ms ease, opacity 150ms ease, transform 80ms ease;
 }
-.btn:hover:not(:disabled){filter:brightness(1.1)}
-.btn:active:not(:disabled){transform:scale(0.97)}
-.btn[disabled],.btn:disabled{opacity:.4;cursor:not-allowed;transform:none;filter:none}
-.primary{background:var(--color-info);color:var(--color-text-primary)}
-.warn{background:var(--color-warning);color:var(--color-text-primary)}
-.danger{background:var(--color-danger);color:var(--color-text-primary)}
-.ghost{background:var(--color-surface-elevated);color:var(--color-text-secondary);border:1px solid var(--color-border)}
-.ok{background:var(--color-success);color:var(--color-text-primary)}
-.row{display:flex;gap:var(--space-md);flex-wrap:wrap;align-items:flex-end}
-.btn-loading{position:relative;color:transparent!important}
-.btn-loading::after{content:"";position:absolute;width:16px;height:16px;top:50%;left:50%;margin:-8px 0 0 -8px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
+.btn:active:not(:disabled) { transform: scale(0.97); }
+.btn:disabled { opacity: 0.38; cursor: not-allowed; }
+.btn-primary { background: var(--primary); color: var(--bg); }
+.btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+.btn-success { background: var(--success); color: #041f18; font-weight: 700; }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-warning { background: var(--warning); color: #261601; font-weight: 700; }
+.btn-ghost { background: var(--surface-elevated); color: var(--text-main); border: 1px solid var(--border-strong); }
+.btn-ghost:hover:not(:disabled) { background: var(--border-strong); }
+.btn-block { width: 100%; }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
 
-/* ---- Joints ---- */
-.grid-joints{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:var(--space-card-gap)}
-.jcard{
-  background:var(--color-surface-elevated);
-  border:1px solid var(--color-border);
-  border-radius:var(--radius-md);
-  padding:12px;
+/* ---- Jog Module Cards ---- */
+.jog-header-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--surface); padding: 10px 14px; border-radius: var(--radius-md);
+  border: 1px solid var(--border); margin-bottom: 12px; flex-wrap: wrap; gap: 10px;
 }
-.jname{font-weight:var(--fw-bold);color:var(--color-text-secondary);display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
-.jdeg{font-size:var(--fs-tabular);color:var(--color-primary);font-variant-numeric:tabular-nums;font-family:var(--font-mono)}
-.jenc{font-size:0.72rem;color:var(--color-text-muted)}
-.jflags{font-size:0.68rem;margin-top:4px;display:flex;gap:var(--space-sm);flex-wrap:wrap}
-.f-h{color:#4ade80}.f-r{color:#93c5fd}.f-d{color:#fca5a5}.f-e{color:#fcd34d}
-.jctrl{margin-top:var(--space-lg)}
-.jbtns{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-xs)}
-.jbtns .btn{padding:9px var(--space-lg);font-size:1.0rem;min-height:42px}
-.stepsel{display:flex;gap:var(--space-xs);width:200px}
-.stepbtn{
-  flex:1;background:var(--color-surface-elevated);color:var(--color-text-secondary);
-  border:1px solid var(--color-border);padding:6px var(--space-xs);border-radius:var(--radius-xs);
-  font-size:0.75rem;font-weight:var(--fw-semibold);cursor:pointer;min-height:32px;
-  display:inline-flex;align-items:center;justify-content:center;
-  transition:background var(--transition-normal) var(--ease-out),color var(--transition-normal) var(--ease-out);
+.step-selector { display: flex; gap: 4px; background: var(--surface-sub); padding: 3px; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+.step-btn {
+  background: transparent; border: none; color: var(--text-muted);
+  padding: 5px 12px; border-radius: var(--radius-xs); font-size: 0.78rem; font-weight: 600; cursor: pointer; min-height: 30px;
 }
-.stepbtn:hover{background:var(--color-border-strong)}
-.stepbtn.active{background:var(--color-primary);color:var(--color-bg);font-weight:var(--fw-bold)}
-.step-label{display:flex;align-items:center;gap:var(--space-md);font-size:0.8rem;color:var(--color-text-muted);margin-bottom:var(--space-lg);flex-wrap:wrap}
-.step-label .lbl{white-space:nowrap}
+.step-btn.active { background: var(--primary); color: var(--bg); font-weight: 700; }
 
-/* ---- Forms ---- */
-label{display:block;font-size:var(--fs-label);font-weight:var(--fw-semibold);color:var(--color-text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.04em}
-.input-group{display:flex;flex-direction:column;gap:2px;flex:1;min-width:80px}
-.input-group label{font-size:0.70rem;color:var(--color-text-muted);margin-bottom:2px}
-input[type=text],input[type=password],input[type=number],select{
-  width:100%;background:var(--color-surface-elevated);border:1px solid var(--color-border);
-  color:var(--color-text-primary);font-size:0.95rem;padding:8px 12px;border-radius:var(--radius-sm);
-  outline:none;margin-bottom:var(--space-md);font-family:var(--font-sans);
-  transition:border-color var(--transition-normal) var(--ease-out);
+.jcard {
+  background: var(--surface-sub); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 12px; display: flex; flex-direction: column; gap: 8px;
 }
-.input-group input{margin-bottom:0}
-input:focus,select:focus{border-color:var(--color-focus-ring)}
-input::placeholder{color:var(--color-text-muted)}
-select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:36px}
+.jcard-top { display: flex; justify-content: space-between; align-items: baseline; }
+.jcard-name { font-weight: 700; font-size: 0.88rem; color: var(--text-main); }
+.jcard-deg { font-size: 1.25rem; font-family: var(--font-mono); font-weight: 700; color: var(--primary); }
+.jcard-enc { font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono); }
+.jcard-flags { display: flex; gap: 6px; font-size: 0.68rem; font-weight: 600; flex-wrap: wrap; }
+.flag-homed { color: var(--success-text); }
+.flag-unhomed { color: var(--text-dim); }
+.flag-drift { color: var(--danger-text); background: var(--danger-bg); padding: 1px 4px; border-radius: 3px; }
+.flag-encerr { color: var(--warning-text); background: var(--warning-bg); padding: 1px 4px; border-radius: 3px; }
 
-/* ---- E-STOP ---- */
-#estop{
-  position:fixed;bottom:16px;right:16px;z-index:var(--z-estop);
-  padding:16px 26px;font-size:1.1rem;font-weight:var(--fw-semibold);
-  box-shadow:var(--shadow-estop);animation:estopPulse 2.2s ease-in-out infinite;
+.jog-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 4px; }
+.jog-btn {
+  min-height: 42px; font-size: 1.1rem; font-weight: 700; border-radius: var(--radius-sm);
+  background: var(--surface-elevated); border: 1px solid var(--border-strong); color: var(--text-main);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all 100ms ease;
 }
-@keyframes estopPulse{0%,100%{box-shadow:var(--shadow-estop)}50%{box-shadow:var(--shadow-estop-strong)}}
+.jog-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.jog-btn:active:not(:disabled) { transform: scale(0.96); }
+.jog-calib-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 2px; }
+.jog-calib-row .btn { min-height: 30px; font-size: 0.72rem; padding: 4px 8px; }
 
-/* ---- Toast Notification (Unified Clean HUD Badge) ---- */
-#toast{
-  position:fixed;bottom:16px;left:16px;z-index:var(--z-toast);
-  background:var(--color-surface-elevated);border:1px solid var(--color-border-strong);
-  border-radius:var(--radius-md);padding:10px 16px;
-  font-size:0.84rem;color:var(--color-text-primary);display:none;max-width:80vw;
-  box-shadow:var(--shadow-toast);animation:toastIn 0.15s var(--ease-out);
+/* ---- Cartesian & Draw Studio ---- */
+.mode-toggle-bar {
+  display: flex; gap: 6px; background: var(--surface-sub);
+  padding: 4px; border-radius: var(--radius-md); border: 1px solid var(--border); margin-bottom: 12px;
 }
-@keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-#toast.t-ok{border-color:var(--color-success);background:#0c1a17;color:var(--color-success-text)}
-#toast.t-warn{border-color:var(--color-warning);background:#1c1917;color:var(--color-warning-text)}
-#toast.t-err{border-color:var(--color-danger);background:#7f1d1d;color:var(--color-danger-text)}
-
-.muted{color:var(--color-text-muted);font-size:var(--fs-label)}
-.off{color:var(--color-text-muted)}
-.mono{font-family:var(--font-mono)}
-.divider{height:1px;background:var(--color-border);margin:var(--space-xl) 0}
-
-@media(pointer:coarse){
-  .tab-btn{padding:10px 14px;min-height:44px}
-  .stepbtn{min-height:42px;padding:8px 4px;font-size:0.82rem}
-  .sim-pill-btn{min-height:38px;padding:7px 12px;font-size:0.78rem}
-  .btn{min-height:44px}
+.mode-toggle-btn {
+  flex: 1; background: transparent; border: none; color: var(--text-muted);
+  padding: 8px 12px; border-radius: var(--radius-sm); font-size: 0.84rem; font-weight: 600;
+  cursor: pointer; text-align: center;
 }
+.mode-toggle-btn.active { background: var(--surface-elevated); color: var(--primary); font-weight: 700; border: 1px solid var(--border-strong); }
 
-@media(prefers-reduced-motion:reduce){
-  #estop{animation:none}
-  *{transition-duration:0.01ms!important;animation-duration:0.01ms!important}
+.slider-row {
+  display: grid; grid-template-columns: 85px 1fr 65px; align-items: center; gap: 8px;
+  margin-bottom: 8px; font-size: 0.8rem;
 }
+.slider-row label { color: var(--text-muted); font-weight: 600; }
+.slider-row input[type="range"] { accent-color: var(--primary); width: 100%; cursor: pointer; }
+.slider-row .val { color: var(--primary); font-family: var(--font-mono); font-weight: 700; text-align: right; }
 
-::-webkit-scrollbar{width:8px;height:8px}
-::-webkit-scrollbar-thumb{background:var(--color-border-strong);border-radius:4px}
-::-webkit-scrollbar-track{background:transparent}
+.input-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.input-field { display: flex; flex-direction: column; gap: 3px; }
+.input-field label { font-size: 0.70rem; color: var(--text-dim); text-transform: uppercase; font-weight: 600; }
+.input-field input, .input-field select {
+  width: 100%; background: var(--surface-elevated); border: 1px solid var(--border-strong);
+  color: var(--text-main); font-size: 0.88rem; padding: 7px 10px; border-radius: var(--radius-sm);
+  outline: none; font-family: var(--font-mono);
+}
+.input-field input:focus, .input-field select:focus { border-color: var(--primary); }
+
+.preset-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.preset-pill {
+  background: var(--surface-elevated); border: 1px solid var(--border); color: var(--text-muted);
+  padding: 5px 10px; border-radius: var(--radius-pill); font-size: 0.74rem; font-weight: 600; cursor: pointer;
+}
+.preset-pill:hover { color: var(--text-main); border-color: var(--border-strong); }
+
+/* ---- Floating E-STOP & Toast ---- */
+#estop {
+  position: fixed; bottom: 18px; right: 18px; z-index: 99;
+  padding: 14px 24px; font-size: 1.05rem; font-weight: 800; border-radius: var(--radius-pill);
+  box-shadow: 0 4px 20px rgba(239,68,68,0.5); letter-spacing: 0.04em;
+}
+#toast {
+  position: fixed; bottom: 18px; left: 18px; z-index: 98;
+  background: var(--surface-elevated); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md); padding: 10px 18px; font-size: 0.84rem;
+  color: var(--text-main); display: none; max-width: 80vw;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+#toast.t-ok { border-color: var(--success); background: #0c1a17; color: var(--success-text); }
+#toast.t-warn { border-color: var(--warning); background: #1c1917; color: var(--warning-text); }
+#toast.t-err { border-color: var(--danger); background: #7f1d1d; color: var(--danger-text); }
+
+@media (pointer: coarse) {
+  .nav-tab { min-height: 44px; padding: 10px 18px; font-size: 0.9rem; }
+  .btn { min-height: 44px; }
+  .jog-btn { min-height: 48px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
 </style>
 </head>
 <body>
 <main class="app" id="main-content">
+  <!-- Header -->
   <header class="header">
-    <div class="brand"><h1>6-Axis <b>Arm</b></h1><span class="ver">NEMA-6AXIS DIGITAL CLONE</span></div>
-    <div class="connline" id="conn"><span class="dot"></span><span id="sub">Đang kết nối...</span></div>
+    <div class="brand">
+      <h1>6-Axis <b>Arm Controller</b></h1>
+      <span class="ver">NEMA-6AXIS DIGITAL TWIN</span>
+    </div>
+    <div class="conn-pill" id="connPill">
+      <span class="conn-dot"></span>
+      <span id="connLabel">Đang kết nối...</span>
+    </div>
   </header>
 
-  <nav class="tabs" role="tablist" aria-label="Các trang điều khiển cánh tay">
-    <button id="tab-dash" class="tab-btn active" data-t="dash" role="tab" aria-selected="true" aria-controls="dash">Dashboard</button>
-    <button id="tab-sim" class="tab-btn" data-t="sim" role="tab" aria-selected="false" aria-controls="sim">3D Simulation</button>
-    <button id="tab-joints" class="tab-btn" data-t="joints" role="tab" aria-selected="false" aria-controls="joints">Joints</button>
-    <button id="tab-home" class="tab-btn" data-t="home" role="tab" aria-selected="false" aria-controls="home">Homing</button>
-    <button id="tab-cart" class="tab-btn" data-t="cart" role="tab" aria-selected="false" aria-controls="cart">Cartesian</button>
-    <button id="tab-draw" class="tab-btn" data-t="draw" role="tab" aria-selected="false" aria-controls="draw">Draw</button>
-    <button id="tab-wifi" class="tab-btn" data-t="wifi" role="tab" aria-selected="false" aria-controls="wifi">WiFi</button>
+  <!-- 4 Core Navigation Tabs -->
+  <nav class="nav-tabs" role="tablist" aria-label="Menu điều khiển cánh tay robot">
+    <button id="tab-dash" class="nav-tab active" data-t="pane-dash" role="tab" aria-selected="true" aria-controls="pane-dash">📊 Dashboard</button>
+    <button id="tab-jog" class="nav-tab" data-t="pane-jog" role="tab" aria-selected="false" aria-controls="pane-jog">🕹️ Jog &amp; Calib</button>
+    <button id="tab-motion" class="nav-tab" data-t="pane-motion" role="tab" aria-selected="false" aria-controls="pane-motion">🎯 Cartesian &amp; Draw Studio</button>
+    <button id="tab-settings" class="nav-tab" data-t="pane-settings" role="tab" aria-selected="false" aria-controls="pane-settings">⚙️ Settings &amp; WiFi</button>
   </nav>
 
-  <!-- ============ DASHBOARD ============ -->
-  <div id="dash" class="tab-pane active" role="tabpanel" aria-labelledby="tab-dash">
-    <div class="dash-grid">
-      <section class="card" aria-labelledby="headingDash3D">
+  <!-- =========================================================================
+       TAB 1: DASHBOARD (Live Twin & System Health)
+  ========================================================================== -->
+  <div id="pane-dash" class="tab-pane active" role="tabpanel" aria-labelledby="tab-dash">
+    <div class="grid-2col">
+      <!-- Left Column: 3D Digital Twin -->
+      <section class="card" aria-labelledby="headDashTwin">
         <div class="card-head">
-          <h2 id="headingDash3D">Mô hình cánh tay 3D (Thời gian thực)</h2>
-          <span class="meta mono" id="poseNow">--</span>
+          <h2 id="headDashTwin">🦾 Mô hình 3D Digital Twin (Thời gian thực)</h2>
+          <span class="meta" id="dashPoseLabel">TCP: (0.0, 0.0, 0.0)</span>
         </div>
-        <div class="sim-viewport-box">
-          <div class="sim-overlay-bar">
-            <div class="sim-pill-group" role="group" aria-label="Góc nhìn 3D Dashboard">
-              <button class="sim-pill-btn active" onclick="setDashView('3d', this)">3D Orbit</button>
-              <button class="sim-pill-btn" onclick="setDashView('side', this)">Side (X-Z)</button>
-              <button class="sim-pill-btn" onclick="setDashView('top', this)">Top (X-Y)</button>
+        <div class="viewport-box">
+          <div class="viewport-toolbar">
+            <div class="toolbar-group">
+              <button class="tool-btn active" onclick="setDashView('3d', this)">3D Orbit</button>
+              <button class="tool-btn" onclick="setDashView('side', this)">Side (X-Z)</button>
+              <button class="tool-btn" onclick="setDashView('top', this)">Top (X-Y)</button>
             </div>
-            <div class="sim-pill-group">
-              <button class="sim-pill-btn" onclick="resetDashCam()" aria-label="Đặt lại góc camera Dashboard">Reset View</button>
+            <div class="toolbar-group">
+              <button class="tool-btn" onclick="resetDashCam()">Reset View</button>
             </div>
           </div>
-          <canvas id="poseCanvas" class="sim-canvas" width="640" height="380" role="img" aria-label="Khung vẽ mô hình 3D cánh tay robot thời gian thực"></canvas>
+          <canvas id="dashCanvas" class="viewport-canvas" width="640" height="380" role="img" aria-label="Mô hình 3D cánh tay robot"></canvas>
         </div>
-        <div class="sim-hud-box" id="dashHud" aria-live="polite">TELEMETRY: Đang tải...</div>
+        <div class="hud-pill-bar">
+          <div class="hud-item"><span class="lbl">TCP Target (X, Y, Z)</span><span class="val accent" id="hudDashTcp">-- mm</span></div>
+          <div class="hud-item"><span class="lbl">Wrist Center</span><span class="val" id="hudDashWrist">-- mm</span></div>
+          <div class="hud-item"><span class="lbl">Trạng thái động học</span><span class="val" id="hudDashStatus">Bình thường</span></div>
+        </div>
       </section>
 
-      <section class="card" aria-labelledby="headingSysState">
-        <div class="card-head"><h2 id="headingSysState">Trạng thái hệ thống</h2><span class="meta">300 ms</span></div>
-        <div class="mode-block">
-          <span class="mode-label">Chế độ hoạt động</span>
-          <div class="mode-line"><span class="mode-word" id="modeWord">--</span><span id="mode" class="badge b-idle">idle</span></div>
-        </div>
-        <div class="stat-line"><span class="k">WiFi</span><span class="v" id="wifiInfo">-</span></div>
-        <div class="stat-line"><span class="k">Khớp đã home</span><span class="v" id="homedN">-/6</span></div>
-        <div class="stat-line" id="esRow"><span class="k">Endstops</span><span class="v" id="esInfo" class="muted">-</span></div>
-        <div class="stat-line"><span class="k">Homing</span><span class="v muted" id="homProg">idle</span></div>
-        <div class="home-track" aria-label="Tiến độ homing"><span class="hchip" id="hc0">J1</span><span class="hchip" id="hc1">J2</span><span class="hchip" id="hc2">J3</span><span class="hchip" id="hc3">J4</span></div>
-        <div class="divider"></div>
-        <div class="row">
-          <button class="btn primary need-idle" onclick="api('/api/home/all')">HOME ALL</button>
-          <button class="btn warn" onclick="api('/api/stop')">STOP ALL</button>
-          <button class="btn ghost" onclick="clearFault()">CLEAR FAULT</button>
-        </div>
-        <p class="muted" style="margin-top:10px">HOME ALL chạy tuần tự J1→J2→J3→J4. J5/J6 dùng Set-Home thủ công ở tab Homing.</p>
-      </section>
+      <!-- Right Column: Status & Quick Actions -->
+      <div>
+        <section class="card" aria-labelledby="headSysState">
+          <div class="card-head">
+            <h2 id="headSysState">⚡ Trạng thái hệ thống</h2>
+            <span class="meta">300 ms poll</span>
+          </div>
+          <div class="status-hero">
+            <div>
+              <div class="mode-title">Chế độ vận hành</div>
+              <div class="mode-text" id="dashModeText">IDLE</div>
+            </div>
+            <span id="dashModeBadge" class="badge b-idle">idle</span>
+          </div>
+
+          <div class="stat-row"><span class="k">Mạng WiFi</span><span class="v" id="dashWifiInfo">-</span></div>
+          <div class="stat-row"><span class="k">Khớp đã Home</span><span class="v" id="dashHomedCount">-/6</span></div>
+          <div class="stat-row"><span class="k">Công tắc Endstop</span><span class="v" id="dashEsInfo">Tất cả mở</span></div>
+          <div class="stat-row"><span class="k">Tiến độ Homing</span><span class="v" id="dashHomingProg">Sẵn sàng</span></div>
+
+          <div class="home-track" aria-label="Trạng thái Homing từng trục">
+            <span class="hchip" id="hc0">J1</span>
+            <span class="hchip" id="hc1">J2</span>
+            <span class="hchip" id="hc2">J3</span>
+            <span class="hchip" id="hc3">J4</span>
+            <span class="hchip" id="hc4">J5 (NVS)</span>
+            <span class="hchip" id="hc5">J6 (NVS)</span>
+          </div>
+
+          <div class="btn-row">
+            <button class="btn btn-primary need-idle" onclick="api('/api/home/all')">🚀 HOME ALL (J1-J4)</button>
+            <button class="btn btn-warning" onclick="api('/api/stop')">⏹ STOP ALL</button>
+            <button class="btn btn-ghost" onclick="clearFault()">CLEAR FAULT</button>
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="headQuickJoints">
+          <div class="card-head">
+            <h2 id="headQuickJoints">📐 Góc khớp tức thời</h2>
+            <span class="meta">Step vs Enc</span>
+          </div>
+          <div id="dashJointRows"></div>
+        </section>
+      </div>
     </div>
   </div>
 
-  <!-- ============ 3D SIMULATION STUDIO ============ -->
-  <div id="sim" class="tab-pane" role="tabpanel" aria-labelledby="tab-sim">
-    <section class="card" aria-labelledby="headingSimStudio">
-      <div class="card-head">
-        <h2 id="headingSimStudio">3D Digital Clone Studio (Exact Craig MDH Kinematics)</h2>
-        <span class="meta" id="simSourceLabel">[CHẾ ĐỘ MÔ PHỎNG]</span>
+  <!-- =========================================================================
+       TAB 2: JOG & CALIBRATION (Unified Joints & Homing)
+  ========================================================================== -->
+  <div id="pane-jog" class="tab-pane" role="tabpanel" aria-labelledby="tab-jog">
+    <div class="jog-header-bar">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:0.82rem;font-weight:600;color:var(--text-muted)">Bước Jog:</span>
+        <div class="step-selector" id="stepSelector"></div>
       </div>
-
-      <div class="sim-viewport-box">
-        <div class="sim-overlay-bar">
-          <div class="sim-pill-group" role="group" aria-label="Góc nhìn mô phỏng">
-            <button class="sim-pill-btn active" onclick="setSimView('3d', this)">3D Orbit</button>
-            <button class="sim-pill-btn" onclick="setSimView('side', this)">Side (X-Z)</button>
-            <button class="sim-pill-btn" onclick="setSimView('top', this)">Top (X-Y)</button>
-          </div>
-          <div class="sim-pill-group" role="group" aria-label="Nguồn dữ liệu mô phỏng">
-            <button class="sim-pill-btn src-live" id="btnSrcLive" onclick="setSimSource('live')">🔴 Live Robot</button>
-            <button class="sim-pill-btn src-sim active" id="btnSrcSim" onclick="setSimSource('sim')">🟢 Interactive Sim</button>
-            <button class="sim-pill-btn" onclick="resetSimCam()" aria-label="Đặt lại camera mô phỏng">Reset Cam</button>
-          </div>
-        </div>
-        <canvas id="simCanvas" class="sim-canvas" width="680" height="400" role="img" aria-label="Khung vẽ mô phỏng 3D tương tác theo động học Craig MDH"></canvas>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-ghost need-idle" onclick="api('/api/home/axis?axis=0')">Home J1</button>
+        <button class="btn btn-ghost need-idle" onclick="api('/api/home/axis?axis=1')">Home J2</button>
+        <button class="btn btn-ghost need-idle" onclick="api('/api/home/axis?axis=2')">Home J3</button>
+        <button class="btn btn-ghost need-idle" onclick="api('/api/home/axis?axis=3')">Home J4</button>
+        <button class="btn btn-ghost need-idle" onclick="api('/api/sethome?axis=4')">Set Home J5</button>
+        <button class="btn btn-ghost need-idle" onclick="api('/api/sethome?axis=5')">Set Home J6</button>
+        <button class="btn btn-ghost need-idle" onclick="api('/api/sethome?axis=255')">Set Home J5+J6</button>
+        <button class="btn btn-primary need-idle" onclick="api('/api/home/all')">🚀 HOME ALL (J1-J4)</button>
+        <button class="btn btn-warning" onclick="clearFault()">🛡️ CLEAR FAULT</button>
+        <button class="btn btn-danger" onclick="api('/api/stop')">⏹ STOP ALL</button>
       </div>
+    </div>
 
-      <div class="sim-hud-box" id="simHud" aria-live="polite">TELEMETRY HUD | Đang tính toán động học...</div>
-    </section>
+    <div class="grid-cards-3" id="jointCardsGrid"></div>
+  </div>
 
-    <div class="sim-ctrl-grid">
-      <!-- Card A: Cartesian Target -->
-      <section class="card" aria-labelledby="headingSimCart">
+  <!-- =========================================================================
+       TAB 3: CARTESIAN & DRAW STUDIO (Unified Motion & Trajectory Studio)
+  ========================================================================== -->
+  <div id="pane-motion" class="tab-pane" role="tabpanel" aria-labelledby="tab-motion">
+    <div class="grid-2col">
+      <!-- Left Column: Interactive Simulation Twin -->
+      <section class="card" aria-labelledby="headSimTwin">
         <div class="card-head">
-          <h2 id="headingSimCart">1. Tọa độ Cartesian IK (mm)</h2>
-          <span class="badge b-run" id="simIkBadge">IK OK</span>
+          <h2 id="headSimTwin">🎮 3D Trajectory &amp; IK Simulation Twin</h2>
+          <span class="badge b-run" id="simIkStatusBadge">IK OK</span>
         </div>
-        <div class="sim-slider-row">
-          <label for="simX">Target X:</label>
-          <input type="range" id="simX" min="-250" max="250" step="1" value="160" oninput="onSimCartChange()" aria-label="Tọa độ mục tiêu X">
-          <span class="val" id="simXVal">160 mm</span>
+        <div class="viewport-box">
+          <div class="viewport-toolbar">
+            <div class="toolbar-group">
+              <button class="tool-btn active" onclick="setSimView('3d', this)">3D Orbit</button>
+              <button class="tool-btn" onclick="setSimView('side', this)">Side (X-Z)</button>
+              <button class="tool-btn" onclick="setSimView('top', this)">Top (X-Y)</button>
+            </div>
+            <div class="toolbar-group">
+              <button class="tool-btn live-badge" id="btnSimLive" onclick="setSimSource('live')">🔴 Live Robot</button>
+              <button class="tool-btn sim-badge active" id="btnSimSim" onclick="setSimSource('sim')">🟢 Interactive Sim</button>
+              <button class="tool-btn" onclick="resetSimCam()">Reset Cam</button>
+            </div>
+          </div>
+          <canvas id="simCanvas" class="viewport-canvas" width="680" height="380" role="img" aria-label="Mô phỏng quỹ đạo 3D"></canvas>
         </div>
-        <div class="sim-slider-row">
-          <label for="simY">Target Y:</label>
-          <input type="range" id="simY" min="-250" max="250" step="1" value="0" oninput="onSimCartChange()" aria-label="Tọa độ mục tiêu Y">
-          <span class="val" id="simYVal">0 mm</span>
+
+        <div class="hud-pill-bar">
+          <div class="hud-item"><span class="lbl">Sim TCP (X, Y, Z)</span><span class="val accent" id="hudSimTcp">-- mm</span></div>
+          <div class="hud-item"><span class="lbl">Reach Status</span><span class="val" id="hudSimReach">Hợp lệ trong tầm với</span></div>
+          <div class="hud-item"><span class="lbl">Playback</span><span class="val" id="hudSimPlay">0%</span></div>
         </div>
-        <div class="sim-slider-row">
-          <label for="simZ">Target Z:</label>
-          <input type="range" id="simZ" min="-10" max="350" step="1" value="10" oninput="onSimCartChange()" aria-label="Tọa độ mục tiêu Z">
-          <span class="val" id="simZVal">10 mm</span>
-        </div>
-        <div class="row" style="margin-top:10px">
-          <button class="btn primary need-idle" onclick="sendSimPoseToRobot()">⚡ NẠP VỊ TRÍ XUỐNG ROBOT</button>
+
+        <div style="margin-top:10px;display:flex;align-items:center;gap:8px">
+          <button class="btn btn-ghost" id="btnSimPlay" onclick="toggleSimPlay()">▶ Chạy mô phỏng (Play)</button>
+          <input type="range" id="simScrub" min="0" max="100" value="0" style="flex:1;accent-color:var(--primary);cursor:pointer" oninput="onSimScrubChange(this.value)">
+          <span class="meta" id="simScrubVal" style="min-width:38px;text-align:right">0%</span>
         </div>
       </section>
 
-      <!-- Card B: Joint Angles -->
-      <section class="card" aria-labelledby="headingSimJoints">
-        <div class="card-head">
-          <h2 id="headingSimJoints">2. Góc khớp Joint (Độ)</h2>
-          <span class="meta">Đồng bộ 2 chiều</span>
+      <!-- Right Column: Dual Motion Panels (Direct Move / Shape Draw) -->
+      <div>
+        <div class="mode-toggle-bar">
+          <button class="mode-toggle-btn active" id="btnToggleMove" onclick="switchMotionMode('move')">📍 Di chuyển điểm (Move IK)</button>
+          <button class="mode-toggle-btn" id="btnToggleDraw" onclick="switchMotionMode('draw')">✏️ Vẽ hình (Draw Shape)</button>
         </div>
-        <div id="simJointSliders"></div>
-      </section>
 
-      <!-- Card C: Presets -->
-      <section class="card" aria-labelledby="headingSimPresets">
-        <div class="card-head"><h2 id="headingSimPresets">3. Tư thế mẫu (Presets)</h2></div>
-        <div class="preset-grid">
-          <button class="btn ghost" onclick="applySimPreset('home')">Home (0°)</button>
-          <button class="btn ghost" onclick="applySimPreset('draw')">Draw Ready</button>
-          <button class="btn ghost" onclick="applySimPreset('reach_fwd')">Reach +X</button>
-          <button class="btn ghost" onclick="applySimPreset('reach_back')">Reach -X</button>
-          <button class="btn ghost" onclick="applySimPreset('fold')">Folded</button>
-        </div>
-      </section>
+        <!-- Panel A: Direct Cartesian Move -->
+        <section class="card" id="panelCartMove" aria-labelledby="headCartMove">
+          <div class="card-head">
+            <h2 id="headCartMove">📍 Di chuyển Cartesian TCP</h2>
+            <span class="meta">Bút vuông góc mặt bàn</span>
+          </div>
+          <div class="preset-pills">
+            <span class="preset-pill" onclick="applySimPreset('home')">Home (0°)</span>
+            <span class="preset-pill" onclick="applySimPreset('draw')">Ready Draw</span>
+            <span class="preset-pill" onclick="applySimPreset('reach_fwd')">Reach +X</span>
+            <span class="preset-pill" onclick="applySimPreset('reach_back')">Reach -X</span>
+            <span class="preset-pill" onclick="applySimPreset('fold')">Folded</span>
+          </div>
 
-      <!-- Card D: Trajectory Animator -->
-      <section class="card" aria-labelledby="headingSimAnimator">
-        <div class="card-head"><h2 id="headingSimAnimator">4. Mô phỏng vẽ (Trajectory Animator)</h2></div>
-        <div class="row" style="margin-bottom:8px">
-          <button class="btn ghost active" id="btnSimLine" onclick="setSimPathType('line')">Draw Line</button>
-          <button class="btn ghost" id="btnSimCirc" onclick="setSimPathType('circle')">Draw Circle</button>
-          <button class="btn primary" id="btnSimPlay" onclick="toggleSimPlay()">▶ Play</button>
-        </div>
-        <div class="sim-slider-row">
-          <label for="simScrub">Scrub:</label>
-          <input type="range" id="simScrub" min="0" max="100" step="1" value="0" oninput="onSimScrubChange(this.value)" aria-label="Thanh trượt xem trước quỹ đạo vẽ">
-          <span class="val" id="simScrubVal">0%</span>
-        </div>
-      </section>
+          <div class="slider-row">
+            <label for="simX">Target X:</label>
+            <input type="range" id="simX" min="-250" max="250" step="1" value="160" oninput="onSimCartChange()">
+            <span class="val" id="simXVal">160 mm</span>
+          </div>
+          <div class="slider-row">
+            <label for="simY">Target Y:</label>
+            <input type="range" id="simY" min="-250" max="250" step="1" value="0" oninput="onSimCartChange()">
+            <span class="val" id="simYVal">0 mm</span>
+          </div>
+          <div class="slider-row">
+            <label for="simZ">Target Z:</label>
+            <input type="range" id="simZ" min="-10" max="350" step="1" value="10" oninput="onSimCartChange()">
+            <span class="val" id="simZVal">10 mm</span>
+          </div>
+
+          <div class="input-grid" style="margin-top:10px">
+            <div class="input-field"><label for="mvFeed">Tốc độ Feed (mm/s)</label><input type="number" id="mvFeed" value="30"></div>
+          </div>
+
+          <div class="btn-row">
+            <button class="btn btn-primary btn-block need-idle" onclick="sendSimPoseToRobot()">⚡ NẠP VỊ TRÍ XUỐNG ROBOT</button>
+          </div>
+        </section>
+
+        <!-- Panel B: Shape Drawing Studio -->
+        <section class="card" id="panelCartDraw" style="display:none" aria-labelledby="headCartDraw">
+          <div class="card-head">
+            <h2 id="headCartDraw">✏️ Vẽ hình trên mặt giấy</h2>
+            <span class="meta">Line / Circle Planner</span>
+          </div>
+          <div class="input-field" style="margin-bottom:10px">
+            <label for="dwShape">Chọn hình vẽ</label>
+            <select id="dwShape" onchange="onDrawShapeChange()">
+              <option value="line">Line (Đoạn thẳng)</option>
+              <option value="circle">Circle (Đường tròn)</option>
+            </select>
+          </div>
+
+          <div class="input-grid">
+            <div class="input-field"><label id="dwA1Lbl" for="dwA1">X1 (mm)</label><input type="number" id="dwA1" value="100"></div>
+            <div class="input-field"><label id="dwA2Lbl" for="dwA2">Y1 (mm)</label><input type="number" id="dwA2" value="-70"></div>
+            <div class="input-field"><label id="dwA3Lbl" for="dwA3">X2 (mm)</label><input type="number" id="dwA3" value="180"></div>
+            <div class="input-field" id="dwA4Group"><label id="dwA4Lbl" for="dwA4">Y2 (mm)</label><input type="number" id="dwA4" value="70"></div>
+            <div class="input-field"><label for="dwZ">Z Giấy (mm)</label><input type="number" id="dwZ" value="10"></div>
+            <div class="input-field"><label for="dwFeed">Feed (mm/s)</label><input type="number" id="dwFeed" value="20"></div>
+          </div>
+
+          <div class="btn-row">
+            <button class="btn btn-success need-idle" onclick="startDraw()" style="flex:1">✏️ BẮT ĐẦU VẼ (START DRAW)</button>
+            <button class="btn btn-ghost" onclick="syncDrawToSim()">Xem trước 3D</button>
+            <button class="btn btn-danger" onclick="api('/api/stop')">DỪNG (ABORT)</button>
+          </div>
+        </section>
+
+        <!-- Panel C: Fine Joint Sliders Fold -->
+        <section class="card" aria-labelledby="headSimJointSliders">
+          <div class="card-head">
+            <h2 id="headSimJointSliders">🎛️ Tinh chỉnh từng khớp (Sim Angles)</h2>
+          </div>
+          <div id="simJointSliders"></div>
+        </section>
+      </div>
     </div>
   </div>
 
-  <!-- ============ JOINTS ============ -->
-  <div id="joints" class="tab-pane" role="tabpanel" aria-labelledby="tab-joints">
-    <section class="card" aria-labelledby="headingJointCtrl">
-      <div class="card-head"><h2 id="headingJointCtrl">Điều khiển khớp thủ công</h2><span class="meta">jog tương đối theo bước</span></div>
-      <div class="step-label"><span class="lbl">Bước jog:</span><div class="stepsel" id="stepSel" role="group" aria-label="Chọn bước góc Jog"></div><span class="muted" id="stepVal">1.0°</span></div>
-      <div class="grid-joints" id="jointGrid" role="list"></div>
-    </section>
-  </div>
-
-  <!-- ============ HOMING ============ -->
-  <div id="home" class="tab-pane" role="tabpanel" aria-labelledby="tab-home">
-    <section class="card" aria-labelledby="headingAutoHome">
-      <div class="card-head"><h2 id="headingAutoHome">Homing tự động (TMC J1–J4)</h2></div>
-      <div class="row">
-        <button class="btn primary need-idle" onclick="api('/api/home/all')">HOME ALL</button>
-        <span class="muted">Từng khớp:</span>
-        <button class="btn ghost need-idle" onclick="api('/api/home/axis?axis=0')">Home J1</button>
-        <button class="btn ghost need-idle" onclick="api('/api/home/axis?axis=1')">Home J2</button>
-        <button class="btn ghost need-idle" onclick="api('/api/home/axis?axis=2')">Home J3</button>
-        <button class="btn ghost need-idle" onclick="api('/api/home/axis?axis=3')">Home J4</button>
-      </div>
-      <p class="muted" style="margin-top:10px">J1/J2: min-stop → về GIỮA hành trình. J3/J4: min-stop/stall + lùi 2°.</p>
-    </section>
-    <section class="card" aria-labelledby="headingSetHome">
-      <div class="card-head"><h2 id="headingSetHome">Set-Home &amp; Calibration</h2><span class="meta">lưu NVS</span></div>
-      <div class="grid-joints" id="setHomeGrid" role="list"></div>
-    </section>
-  </div>
-
-  <!-- ============ CARTESIAN ============ -->
-  <div id="cart" class="tab-pane" role="tabpanel" aria-labelledby="tab-cart">
-    <section class="card" aria-labelledby="headingCartMove">
-      <div class="card-head"><h2 id="headingCartMove">Di chuyển TCP (bút hướng xuống)</h2><span class="meta mono" id="poseNow2">--</span></div>
-      <p class="muted" style="margin-bottom:12px">Yêu cầu đã HOME J1–J4. Home TCP = (177, 0, 365). Giấy vẽ đặt dưới bút, Z nhỏ hơn khi hạ.</p>
-      <div class="row">
-        <div class="input-group"><label for="mvX">X (mm)</label><input type="number" id="mvX" step="any" placeholder="X" value="160" aria-label="Tọa độ đích X (mm)"></div>
-        <div class="input-group"><label for="mvY">Y (mm)</label><input type="number" id="mvY" step="any" placeholder="Y" value="0" aria-label="Tọa độ đích Y (mm)"></div>
-        <div class="input-group"><label for="mvZ">Z (mm)</label><input type="number" id="mvZ" step="any" placeholder="Z" value="10" aria-label="Tọa độ đích Z (mm)"></div>
-        <div class="input-group"><label for="mvFeed">Feed (mm/s)</label><input type="number" id="mvFeed" step="any" placeholder="feed" value="30" aria-label="Tốc độ di chuyển feedrate (mm/s)"></div>
-        <button class="btn primary need-idle" onclick="moveTo()" style="align-self:flex-end">MOVE</button>
-      </div>
-    </section>
-  </div>
-
-  <!-- ============ DRAW ============ -->
-  <div id="draw" class="tab-pane" role="tabpanel" aria-labelledby="tab-draw">
-    <section class="card" aria-labelledby="headingDrawShape">
-      <div class="card-head"><h2 id="headingDrawShape">Vẽ hình (bút trên giấy)</h2></div>
-      <canvas id="cv" width="420" height="260" role="img" aria-label="Bản vẽ 2D xem trước nét vẽ" style="background:#090d16;border:1px solid var(--color-border);border-radius:var(--radius-sm);display:block;margin-bottom:12px;max-width:100%;height:auto"></canvas>
-      <label for="dwShape">Hình</label>
-      <select id="dwShape" onchange="onDrawShapeChange()">
-        <option value="line">Line (Đoạn thẳng)</option>
-        <option value="circle">Circle (Đường tròn)</option>
-      </select>
-      <div class="row" style="margin-bottom:10px">
-        <div class="input-group"><label for="dwA1" id="dwA1Lbl">X1</label><input type="number" step="any" id="dwA1" placeholder="100" value="100" aria-labelledby="dwA1Lbl"></div>
-        <div class="input-group"><label for="dwA2" id="dwA2Lbl">Y1</label><input type="number" step="any" id="dwA2" placeholder="-70" value="-70" aria-labelledby="dwA2Lbl"></div>
-        <div class="input-group"><label for="dwA3" id="dwA3Lbl">X2</label><input type="number" step="any" id="dwA3" placeholder="180" value="180" aria-labelledby="dwA3Lbl"></div>
-        <div class="input-group" id="dwA4Group"><label for="dwA4" id="dwA4Lbl">Y2</label><input type="number" step="any" id="dwA4" placeholder="70" value="70" aria-labelledby="dwA4Lbl"></div>
-        <div class="input-group"><label for="dwZ">Z giấy</label><input type="number" step="any" id="dwZ" placeholder="10" value="10" aria-label="Cao độ mặt giấy Z (mm)"></div>
-        <div class="input-group"><label for="dwFeed">Feed</label><input type="number" step="any" id="dwFeed" placeholder="20" value="20" aria-label="Tốc độ vẽ feedrate (mm/s)"></div>
-      </div>
-      <div class="row">
-        <button class="btn ok need-idle" onclick="startDraw()">START DRAW</button>
-        <button class="btn danger" onclick="api('/api/stop')">ABORT</button>
-        <button class="btn ghost" onclick="previewShape()">PREVIEW</button>
-      </div>
-    </section>
-  </div>
-
-  <!-- ============ WIFI ============ -->
-  <div id="wifi" class="tab-pane" role="tabpanel" aria-labelledby="tab-wifi">
-    <div class="dash-grid">
-      <section class="card" aria-labelledby="headingWifiNow">
-        <div class="card-head"><h2 id="headingWifiNow">Kết nối hiện tại</h2></div>
-        <div class="stat-line"><span class="k">Chế độ</span><span class="v" id="wfMode" class="badge b-info">-</span></div>
-        <div class="stat-line"><span class="k">IP</span><span class="v mono" id="wfIp">-</span></div>
-        <div class="stat-line"><span class="k">SSID</span><span class="v" id="wfSsidNow">-</span></div>
-        <div class="stat-line"><span class="k">RSSI</span><span class="v" id="wfRssi">-</span></div>
-      </section>
-      <section class="card" aria-labelledby="headingWifiCfg">
-        <div class="card-head"><h2 id="headingWifiCfg">Cấu hình WiFi</h2></div>
-        <label for="wfSsid">SSID</label>
-        <input type="text" id="wfSsid" placeholder="Tên mạng WiFi" autocomplete="off">
-        <label for="wfPass">Mật khẩu</label>
-        <input type="password" id="wfPass" placeholder="Mật khẩu WiFi" autocomplete="current-password">
-        <div class="row" style="margin-top:8px">
-          <button class="btn ok" onclick="saveWifi()">LƯU &amp; KHỞI ĐỘNG LẠI</button>
+  <!-- =========================================================================
+       TAB 4: SETTINGS & WIFI
+  ========================================================================== -->
+  <div id="pane-settings" class="tab-pane" role="tabpanel" aria-labelledby="tab-settings">
+    <div class="grid-2col">
+      <section class="card" aria-labelledby="headWifiCfg">
+        <div class="card-head">
+          <h2 id="headWifiCfg">📶 Cấu hình Mạng WiFi (NVS)</h2>
         </div>
+        <div class="stat-row"><span class="k">Trạng thái kết nối</span><span class="v" id="wfModeText">STA OK</span></div>
+        <div class="stat-row"><span class="k">Địa chỉ IP hiện tại</span><span class="v" id="wfIpText">192.168.1.2</span></div>
+        <div class="stat-row"><span class="k">Mạng đang kết nối</span><span class="v" id="wfSsidNowText">-</span></div>
+        <div class="stat-row"><span class="k">Cường độ sóng RSSI</span><span class="v" id="wfRssiText">- dBm</span></div>
+
+        <div style="margin-top:14px">
+          <div class="input-field" style="margin-bottom:8px">
+            <label for="wfSsid">Tên mạng WiFi mới (SSID)</label>
+            <input type="text" id="wfSsid" placeholder="Nhập tên WiFi..." autocomplete="off">
+          </div>
+          <div class="input-field" style="margin-bottom:12px">
+            <label for="wfPass">Mật khẩu WiFi mới</label>
+            <input type="password" id="wfPass" placeholder="Nhập mật khẩu..." autocomplete="current-password">
+          </div>
+          <button class="btn btn-success btn-block" onclick="saveWifi()">💾 LƯU VÀO NVS &amp; KHỞI ĐỘNG LẠI</button>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="headHardwareRef">
+        <div class="card-head">
+          <h2 id="headHardwareRef">⚙️ Thông số Động học &amp; Phần cứng</h2>
+          <span class="meta">Craig MDH</span>
+        </div>
+        <div class="stat-row"><span class="k">D1 (Trụ đế)</span><span class="v">139.0 mm</span></div>
+        <div class="stat-row"><span class="k">A2 (Cánh tay dưới)</span><span class="v">138.0 mm</span></div>
+        <div class="stat-row"><span class="k">A3 + D4 (Cẳng tay)</span><span class="v">88.0 + 126.0 mm (L=153.7mm)</span></div>
+        <div class="stat-row"><span class="k">D6 + Tool (Bút vẽ)</span><span class="v">31.0 + 20.0 mm (D_eff=51.0mm)</span></div>
+        <div class="stat-row"><span class="k">Bộ truyền động</span><span class="v">J1-J4: TMC2209 | J5-J6: A4988</span></div>
+        <div class="stat-row"><span class="k">Cảm biến vị trí</span><span class="v">AS5600 × 6 (PCA9548A I2C)</span></div>
       </section>
     </div>
   </div>
 </main>
 
-<button id="estop" class="btn danger" onclick="api('/api/stop')" aria-label="Dừng khẩn cấp toàn bộ động cơ">&#9888; E-STOP</button>
+<button id="estop" class="btn btn-danger" onclick="api('/api/stop')" aria-label="Dừng khẩn cấp toàn bộ cánh tay robot">⚠️ E-STOP</button>
 <div id="toast" role="status" aria-live="assertive"></div>
 
 <script>
@@ -647,15 +629,15 @@ const JOINT_LIMITS = [
 const AXES = ["J1 Base Yaw", "J2 Shoulder", "J3 Elbow", "J4 Wrist Pan", "J5 Wrist Tilt", "J6 Tool Roll"];
 
 const THEME_PALETTE = {
-  grid: '#1e293b',
-  axisPlane: '#06b6d4',
-  linkBase: '#64748b',
+  grid: '#1f2937',
+  axisPlane: '#0284c7',
+  linkBase: '#475569',
   linkUpper: '#0ea5e9',
   linkFore1: '#10b981',
   linkFore2: '#059669',
   penTool: '#f43f5e',
   jointFill: '#f59e0b',
-  jointBorder: '#0f172a',
+  jointBorder: '#0b0f19',
   reachCircle: '#38bdf8'
 };
 
@@ -665,9 +647,7 @@ const THEME_PALETTE = {
 function deg2rad(d){ return d * Math.PI / 180.0; }
 function rad2deg(r){ return r * 180.0 / Math.PI; }
 
-function mat4Id(){
-  return [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
-}
+function mat4Id(){ return [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]; }
 function mat4Mul(a, b){
   const out = new Array(16);
   for(let r=0; r<4; r++){
@@ -694,50 +674,20 @@ function craigMDH(a, alphaDeg, d, thetaDeg){
 }
 
 function forwardKinematics(enc){
-  const th = [
-    enc[0],
-    enc[1] - 90.0, 
-    enc[2],
-    enc[3],
-    enc[4],
-    enc[5]
-  ];
-
+  const th = [ enc[0], enc[1] - 90.0, enc[2], enc[3], enc[4], enc[5] ];
   let T = mat4Id();
   T = mat4Mul(T, craigMDH(0.0, 0.0, D1, th[0]));
   const p_sh = [T[3], T[7], T[11]];
-
   T = mat4Mul(T, craigMDH(0.0, -90.0, 0.0, th[1]));
-
   T = mat4Mul(T, craigMDH(A2, 0.0, 0.0, th[2]));
   const p_el = [T[3], T[7], T[11]];
-
-  const p_bend = [
-    T[0]*A3 + T[3],
-    T[4]*A3 + T[7],
-    T[8]*A3 + T[11]
-  ];
-
+  const p_bend = [ T[0]*A3 + T[3], T[4]*A3 + T[7], T[8]*A3 + T[11] ];
   T = mat4Mul(T, craigMDH(A3, -90.0, D4, th[3]));
   const p_wr = [T[3], T[7], T[11]];
-
   T = mat4Mul(T, craigMDH(0.0, 90.0, 0.0, th[4]));
-
   T = mat4Mul(T, craigMDH(0.0, -90.0, D6, th[5]));
-  const p_tcp = [
-    T[2]*D_TOOL + T[3],
-    T[6]*D_TOOL + T[7],
-    T[10]*D_TOOL + T[11]
-  ];
-
-  return {
-    base: [0, 0, 0],
-    shoulder: p_sh,
-    elbow: p_el,
-    fore_bend: p_bend,
-    wrist: p_wr,
-    tcp: p_tcp
-  };
+  const p_tcp = [ T[2]*D_TOOL + T[3], T[6]*D_TOOL + T[7], T[10]*D_TOOL + T[11] ];
+  return { base: [0, 0, 0], shoulder: p_sh, elbow: p_el, fore_bend: p_bend, wrist: p_wr, tcp: p_tcp };
 }
 
 /* =============================================================================
@@ -790,18 +740,7 @@ function ikPenDown(tx, ty, tz){
 }
 
 /* =============================================================================
-   4. FLAW & SAFETY DETECTOR
-============================================================================= */
-function auditPose(angles, lm){
-  const flaws = [], warns = [];
-  for(let i=0; i<6; i++){
-    if(angles[i] < JOINT_LIMITS[i][0] - 0.1 || angles[i] > JOINT_LIMITS[i][1] + 0.1) flaws.push(`J${i+1} Vượt giới hạn`);
-  }
-  return { flaws, warns };
-}
-
-/* =============================================================================
-   5. 3D & MULTI-VIEW CANVAS ENGINE
+   4. 3D CANVAS RENDERER ENGINE
 ============================================================================= */
 class Canvas3DRenderer {
   constructor(canvasId) {
@@ -819,15 +758,18 @@ class Canvas3DRenderer {
     const cv = this.canvas;
     cv.addEventListener('mousedown', e => {
       this.isDragging = true;
-      this.lastX = e.clientX;
-      this.lastY = e.clientY;
+      this.lastX = e.clientX; this.lastY = e.clientY;
     });
     window.addEventListener('mousemove', e => {
       if(!this.isDragging) return;
       const dx = e.clientX - this.lastX, dy = e.clientY - this.lastY;
       this.lastX = e.clientX; this.lastY = e.clientY;
-      if(this.viewMode === '3d') { this.cam.yaw += dx * 0.7; this.cam.pitch = Math.max(-85, Math.min(85, this.cam.pitch - dy * 0.7)); }
-      else { this.cam.panX += dx; this.cam.panY += dy; }
+      if(this.viewMode === '3d') {
+        this.cam.yaw += dx * 0.7;
+        this.cam.pitch = Math.max(-85, Math.min(85, this.cam.pitch - dy * 0.7));
+      } else {
+        this.cam.panX += dx; this.cam.panY += dy;
+      }
       this.renderCurrent();
     });
     window.addEventListener('mouseup', () => { this.isDragging = false; });
@@ -934,7 +876,7 @@ class Canvas3DRenderer {
 }
 
 /* =============================================================================
-   6. STATE & APP CONTROLLER
+   5. STATE & CONTROLLERS
 ============================================================================= */
 let dashRenderer, simRenderer;
 let simAngles = [0, 0, 0, 0, 0, 0];
@@ -944,11 +886,10 @@ let simWaypoints = [];
 let simPlayAnimId = null;
 let simLastAnimTime = 0;
 let simScrubIdx = 0;
-let stepSize = 1.0, pollTimer = null, failN = 0, toastTimer = null, lastPose = null;
-let lastJointFlagsStr = '';
+let stepSize = 1.0, pollTimer = null, failN = 0, toastTimer = null;
 
-function initSimulationUI() {
-  dashRenderer = new Canvas3DRenderer('poseCanvas');
+function initStudio() {
+  dashRenderer = new Canvas3DRenderer('dashCanvas');
   simRenderer = new Canvas3DRenderer('simCanvas');
 
   const jContainer = document.getElementById('simJointSliders');
@@ -957,9 +898,9 @@ function initSimulationUI() {
     for(let i=0; i<6; i++){
       const lim = JOINT_LIMITS[i];
       jContainer.insertAdjacentHTML('beforeend', `
-        <div class="sim-slider-row">
-          <label for="simJ${i}">J${i+1} (${AXES[i].split(' ')[1]}):</label>
-          <input type="range" id="simJ${i}" min="${lim[0]}" max="${lim[1]}" step="0.5" value="${simAngles[i]}" oninput="onSimJointChange(${i}, this.value)" aria-label="Góc khớp J${i+1}">
+        <div class="slider-row">
+          <label for="simJ${i}">J${i+1}:</label>
+          <input type="range" id="simJ${i}" min="${lim[0]}" max="${lim[1]}" step="0.5" value="${simAngles[i]}" oninput="onSimJointChange(${i}, this.value)">
           <span class="val" id="simJ${i}Val">${simAngles[i].toFixed(1)}°</span>
         </div>
       `);
@@ -973,7 +914,7 @@ function initSimulationUI() {
 function setDashView(v, btn){
   dashRenderer.viewMode = v;
   if(btn){
-    btn.parentElement.querySelectorAll('.sim-pill-btn').forEach(b => b.classList.remove('active'));
+    btn.parentElement.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
   }
   dashRenderer.renderCurrent();
@@ -986,7 +927,7 @@ function resetDashCam(){
 function setSimView(v, btn){
   simRenderer.viewMode = v;
   if(btn){
-    btn.parentElement.querySelectorAll('.sim-pill-btn').forEach(b => b.classList.remove('active'));
+    btn.parentElement.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
   }
   simRenderer.renderCurrent();
@@ -998,12 +939,9 @@ function resetSimCam(){
 
 function setSimSource(src){
   simSource = src;
-  const bLive = document.getElementById('btnSrcLive');
-  const bSim = document.getElementById('btnSrcSim');
+  const bLive = document.getElementById('btnSimLive'), bSim = document.getElementById('btnSimSim');
   if(bLive) bLive.classList.toggle('active', src === 'live');
   if(bSim) bSim.classList.toggle('active', src === 'sim');
-  const lbl = document.getElementById('simSourceLabel');
-  if(lbl) lbl.textContent = (src === 'live') ? '[GƯƠNG ROBOT THẬT (LIVE)]' : '[CHẾ ĐỘ MÔ PHỎNG]';
   if(src === 'live' && window.lastRobotAngles){
     updateSimFromAngles(window.lastRobotAngles);
   }
@@ -1012,7 +950,6 @@ function setSimSource(src){
 function updateSimFromAngles(angles){
   simAngles = [...angles];
   const lm = forwardKinematics(simAngles);
-  const audit = auditPose(simAngles, lm);
 
   for(let i=0; i<6; i++){
     const slider = document.getElementById(`simJ${i}`);
@@ -1032,17 +969,10 @@ function updateSimFromAngles(angles){
 
   simRenderer.render(lm, simWaypoints);
 
-  const statusBadge = audit.flaws.length === 0 && audit.warns.length === 0 ? '[OK: BÌNH THƯỜNG]' :
-                     (audit.flaws.length > 0 ? '[LỖI CẢNH BÁO]' : '[CẢNH BÁO]');
-  let hudText = `TELEMETRY HUD | ${statusBadge}\n` +
-                `TCP Position: X=${lm.tcp[0].toFixed(1)} mm  Y=${lm.tcp[1].toFixed(1)} mm  Z=${lm.tcp[2].toFixed(1)} mm  |  Wrist: (${lm.wrist[0].toFixed(1)}, ${lm.wrist[1].toFixed(1)}, ${lm.wrist[2].toFixed(1)})\n` +
-                `Joint Angles: J1:${simAngles[0].toFixed(1)}° | J2:${simAngles[1].toFixed(1)}° | J3:${simAngles[2].toFixed(1)}° | J4:${simAngles[3].toFixed(1)}° | J5:${simAngles[4].toFixed(1)}° | J6:${simAngles[5].toFixed(1)}°\n`;
-  if(audit.flaws.length > 0) hudText += `FLAWS: ${audit.flaws.join(' ; ')}`;
-  else if(audit.warns.length > 0) hudText += `WARNINGS: ${audit.warns.join(' ; ')}`;
-  else hudText += `STATUS: Động học hợp lệ, an toàn không va chạm.`;
-
-  const hudEl = document.getElementById('simHud');
-  if(hudEl) hudEl.textContent = hudText;
+  const hudSimTcp = document.getElementById('hudSimTcp');
+  if(hudSimTcp) hudSimTcp.textContent = `X=${lm.tcp[0].toFixed(1)} Y=${lm.tcp[1].toFixed(1)} Z=${lm.tcp[2].toFixed(1)}`;
+  const hudSimReach = document.getElementById('hudSimReach');
+  if(hudSimReach) hudSimReach.textContent = `Wrist: (${lm.wrist[0].toFixed(1)}, ${lm.wrist[1].toFixed(1)}, ${lm.wrist[2].toFixed(1)})`;
 }
 
 function onSimJointChange(axis, val){
@@ -1061,7 +991,7 @@ function onSimCartChange(){
   document.getElementById('simZVal').textContent = z.toFixed(1) + ' mm';
 
   const res = ikPenDown(x, y, z);
-  const badge = document.getElementById('simIkBadge');
+  const badge = document.getElementById('simIkStatusBadge');
   if(res.ok){
     if(badge){ badge.textContent = 'IK OK'; badge.className = 'badge b-run'; }
     updateSimFromAngles(res.angles);
@@ -1072,18 +1002,11 @@ function onSimCartChange(){
 
 function applySimPreset(type){
   setSimSource('sim');
-  if(type === 'home'){
-    updateSimFromAngles([0, 0, 0, 0, 0, 0]);
-  } else if(type === 'draw'){
-    const ik = ikPenDown(160, 0, 10);
-    if(ik.ok) updateSimFromAngles(ik.angles);
-  } else if(type === 'reach_fwd'){
-    updateSimFromAngles([0, 90, 0, 0, -DELTA_WRIST, 0]);
-  } else if(type === 'reach_back'){
-    updateSimFromAngles([0, -90, 0, 0, -DELTA_WRIST, 0]);
-  } else if(type === 'fold'){
-    updateSimFromAngles([0, 45, 90, 0, -45, 0]);
-  }
+  if(type === 'home') updateSimFromAngles([0, 0, 0, 0, 0, 0]);
+  else if(type === 'draw'){ const ik = ikPenDown(160, 0, 10); if(ik.ok) updateSimFromAngles(ik.angles); }
+  else if(type === 'reach_fwd') updateSimFromAngles([0, 90, 0, 0, -DELTA_WRIST, 0]);
+  else if(type === 'reach_back') updateSimFromAngles([0, -90, 0, 0, -DELTA_WRIST, 0]);
+  else if(type === 'fold') updateSimFromAngles([0, 45, 90, 0, -45, 0]);
 }
 
 function generateSimPath(){
@@ -1103,20 +1026,14 @@ function generateSimPath(){
   if(scrubEl) scrubEl.max = Math.max(1, simWaypoints.length - 1);
 }
 
-function setSimPathType(type){
-  simPathType = type;
-  const bLine = document.getElementById('btnSimLine'), bCirc = document.getElementById('btnSimCirc');
-  if(bLine) bLine.classList.toggle('active', type === 'line');
-  if(bCirc) bCirc.classList.toggle('active', type === 'circle');
-  generateSimPath();
-  onSimScrubChange(0);
-}
-
 function onSimScrubChange(val){
   const idx = parseInt(val);
   simScrubIdx = idx;
   const scrubVal = document.getElementById('simScrubVal');
-  if(scrubVal) scrubVal.textContent = `${Math.round(idx / Math.max(1, simWaypoints.length-1) * 100)}%`;
+  const hudSimPlay = document.getElementById('hudSimPlay');
+  const pct = `${Math.round(idx / Math.max(1, simWaypoints.length-1) * 100)}%`;
+  if(scrubVal) scrubVal.textContent = pct;
+  if(hudSimPlay) hudSimPlay.textContent = pct;
   if(simWaypoints[idx]){
     const wp = simWaypoints[idx];
     const ik = ikPenDown(wp.x, wp.y, wp.z);
@@ -1141,9 +1058,9 @@ function toggleSimPlay(){
   if(simPlayAnimId){
     cancelAnimationFrame(simPlayAnimId);
     simPlayAnimId = null;
-    if(btn) btn.textContent = '▶ Play';
+    if(btn) btn.textContent = '▶ Chạy mô phỏng (Play)';
   } else {
-    if(btn) btn.textContent = '⏸ Pause';
+    if(btn) btn.textContent = '⏸ Tạm dừng (Pause)';
     simLastAnimTime = performance.now();
     simPlayAnimId = requestAnimationFrame(simAnimStep);
   }
@@ -1151,11 +1068,72 @@ function toggleSimPlay(){
 
 function sendSimPoseToRobot(){
   const lm = forwardKinematics(simAngles);
-  post('/api/move', `x=${lm.tcp[0].toFixed(2)}&y=${lm.tcp[1].toFixed(2)}&z=${lm.tcp[2].toFixed(2)}&feed=30`);
+  const feed = document.getElementById('mvFeed') ? document.getElementById('mvFeed').value : 30;
+  post('/api/move', `x=${lm.tcp[0].toFixed(2)}&y=${lm.tcp[1].toFixed(2)}&z=${lm.tcp[2].toFixed(2)}&feed=${feed}`);
+}
+
+function switchMotionMode(mode){
+  const bMove = document.getElementById('btnToggleMove'), bDraw = document.getElementById('btnToggleDraw');
+  const pMove = document.getElementById('panelCartMove'), pDraw = document.getElementById('panelCartDraw');
+  if(mode === 'move'){
+    bMove.classList.add('active'); bDraw.classList.remove('active');
+    pMove.style.display = 'block'; pDraw.style.display = 'none';
+  } else {
+    bDraw.classList.add('active'); bMove.classList.remove('active');
+    pDraw.style.display = 'block'; pMove.style.display = 'none';
+  }
+}
+
+function onDrawShapeChange(){
+  const sh = document.getElementById('dwShape').value;
+  const a1Lbl = document.getElementById('dwA1Lbl'), a2Lbl = document.getElementById('dwA2Lbl'), a3Lbl = document.getElementById('dwA3Lbl');
+  const a4Group = document.getElementById('dwA4Group');
+  if(sh === 'circle'){
+    if(a1Lbl) a1Lbl.textContent = 'Tâm CX';
+    if(a2Lbl) a2Lbl.textContent = 'Tâm CY';
+    if(a3Lbl) a3Lbl.textContent = 'Bán kính R';
+    if(a4Group) a4Group.style.display = 'none';
+  } else {
+    if(a1Lbl) a1Lbl.textContent = 'X1 (mm)';
+    if(a2Lbl) a2Lbl.textContent = 'Y1 (mm)';
+    if(a3Lbl) a3Lbl.textContent = 'X2 (mm)';
+    if(a4Group) a4Group.style.display = 'flex';
+  }
+  syncDrawToSim();
+}
+
+function syncDrawToSim(){
+  const sh = document.getElementById('dwShape').value;
+  simPathType = sh;
+  simWaypoints = [];
+  const v = id => parseFloat(document.getElementById(id).value) || 0;
+  const z = v('dwZ');
+  if(sh === 'circle'){
+    const cx = v('dwA1'), cy = v('dwA2'), r = v('dwA3');
+    for(let a=0; a<=Math.PI*2; a+=0.15){
+      simWaypoints.push({ x: cx + r*Math.cos(a), y: cy + r*Math.sin(a), z: z, drawing: true });
+    }
+  } else {
+    const x1 = v('dwA1'), y1 = v('dwA2'), x2 = v('dwA3'), y2 = v('dwA4');
+    for(let s=0; s<=1.0; s+=0.04){
+      simWaypoints.push({ x: x1 + s*(x2-x1), y: y1 + s*(y2-y1), z: z, drawing: true });
+    }
+  }
+  const scrubEl = document.getElementById('simScrub');
+  if(scrubEl) scrubEl.max = Math.max(1, simWaypoints.length - 1);
+  onSimScrubChange(0);
+}
+
+function startDraw(){
+  const sh = document.getElementById('dwShape').value;
+  const v = id => parseFloat(document.getElementById(id).value) || 0;
+  let b = sh === 'line' ? `shape=line&x1=${v('dwA1')}&y1=${v('dwA2')}&x2=${v('dwA3')}&y2=${v('dwA4')}` : `shape=circle&cx=${v('dwA1')}&cy=${v('dwA2')}&r=${v('dwA3')}`;
+  b += `&z=${v('dwZ')}&feed=${document.getElementById('dwFeed').value || 20}`;
+  post('/api/draw', b);
 }
 
 /* =============================================================================
-   7. STANDARD WEB APP HANDLERS & STATUS POLLER
+   6. REST API & UI BINDINGS
 ============================================================================= */
 function toast(msg, cls){
   const t = document.getElementById('toast');
@@ -1170,209 +1148,183 @@ function api(url){
   return fetch(url).then(r => r.text()).then(t => {
     toast((t === 'OK' ? '✓ ' : '') + t, t === 'OK' ? 'ok' : 'warn');
     return t;
-  }).catch(() => toast('Lỗi mạng / Mất kết nối tới robot', 'err'));
+  }).catch(() => toast('Lỗi mạng / Mất kết nối robot', 'err'));
 }
 function post(url, body){
   return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })
     .then(r => r.text())
     .then(t => toast((t === 'OK' ? '✓ ' : '') + t, t === 'OK' ? 'ok' : 'warn'))
-    .catch(() => toast('Lỗi mạng / Mất kết nối tới robot', 'err'));
+    .catch(() => toast('Lỗi mạng / Mất kết nối robot', 'err'));
 }
 function clearFault(){ post('/api/jog', 'fault_clear=1'); }
-
-document.querySelectorAll('.tab-btn[data-t]').forEach(b => {
-  b.onclick = () => {
-    document.querySelectorAll('.tab-btn').forEach(x => { x.classList.remove('active'); x.setAttribute('aria-selected', 'false'); });
-    document.querySelectorAll('.tab-pane').forEach(x => x.classList.remove('active'));
-    b.classList.add('active'); b.setAttribute('aria-selected', 'true');
-    const target = document.getElementById(b.dataset.t);
-    if(target) target.classList.add('active');
-    if(b.dataset.t === 'sim' && simRenderer) simRenderer.renderCurrent();
-    if(b.dataset.t === 'dash' && dashRenderer) dashRenderer.renderCurrent();
-  };
-});
-
-[0.5, 1, 5, 15].forEach(s => {
-  const b = document.createElement('button');
-  b.className = 'stepbtn' + (s === stepSize ? ' active' : '');
-  b.textContent = s + '°';
-  b.setAttribute('aria-label', `Bước jog ${s} độ`);
-  b.onclick = () => {
-    stepSize = s;
-    document.querySelectorAll('.stepbtn').forEach(x => x.classList.remove('active'));
-    b.classList.add('active');
-    const sv = document.getElementById('stepVal'); if(sv) sv.textContent = s.toFixed(1).replace('.0','') + '°';
-  };
-  const stepSel = document.getElementById('stepSel');
-  if(stepSel) stepSel.appendChild(b);
-});
-
+function jog(axis, dir){ post('/api/jog', `axis=${axis}&deg=${dir * stepSize}`); }
 function confirmClearCalib(axisIdx){
   if(confirm(`Xóa cân chỉnh vị trí J${axisIdx + 1}? Giá trị zero đã lưu trong NVS sẽ bị xóa.`)){
     api(`/api/clearcalib?axis=${axisIdx}`);
   }
 }
-
-function buildCards(){
-  const g = document.getElementById('jointGrid');
-  const sg = document.getElementById('setHomeGrid');
-  if(g) g.innerHTML = '';
-  if(sg) sg.innerHTML = '';
-  for(let i=0; i<6; i++){
-    if(g) g.insertAdjacentHTML('beforeend',
-     `<div class="jcard" role="region" aria-label="Điều khiển khớp ${AXES[i]}">
-        <div class="jname"><span>${AXES[i]}</span><span class="jdeg" id="jd${i}">--</span></div>
-        <div class="jenc" id="je${i}">encoder: --</div>
-        <div class="jflags" id="jf${i}"></div>
-        <div class="jctrl">
-          <div class="jbtns">
-            <button class="btn danger" onclick="jog(${i},-1)" aria-label="Jog ${AXES[i]} âm">&#8630; &minus;</button>
-            <button class="btn primary" onclick="jog(${i},1)" aria-label="Jog ${AXES[i]} dương">+ &#8634;</button>
-          </div>
-        </div>
-      </div>`);
-    if(sg) sg.insertAdjacentHTML('beforeend',
-     `<div class="jcard" role="region" aria-label="Cân chỉnh ${AXES[i]}">
-        <div class="jname"><span>${AXES[i]}</span></div>
-        <div class="jbtns">
-          <button class="btn ok need-idle" onclick="api('/api/sethome?axis=${i}')" aria-label="Đặt vị trí zero cho ${AXES[i]}">Set Home</button>
-          <button class="btn warn" onclick="confirmClearCalib(${i})" aria-label="Xóa dữ liệu zero NVS cho ${AXES[i]}">Clear Calib</button>
-        </div>
-      </div>`);
-  }
-}
-buildCards();
-
-function jog(axis, dir){ post('/api/jog', `axis=${axis}&deg=${dir * stepSize}`); }
-function moveTo(){
-  const b = `x=${document.getElementById('mvX').value||0}&y=${document.getElementById('mvY').value||0}&z=${document.getElementById('mvZ').value||0}&feed=${document.getElementById('mvFeed').value||30}`;
-  post('/api/move', b);
-}
 function saveWifi(){
   const s = document.getElementById('wfSsid').value.trim(), p = document.getElementById('wfPass').value;
-  if(!s){ toast('Vui lòng nhập tên mạng WiFi (SSID)', 'warn'); return; }
+  if(!s){ toast('Vui lòng nhập tên WiFi (SSID)', 'warn'); return; }
   post('/api/wifi', `ssid=${encodeURIComponent(s)}&pass=${encodeURIComponent(p)}`)
-    .then(() => {
-      const sub = document.getElementById('sub');
-      if(sub) sub.textContent = 'Đã lưu cấu hình. Robot đang khởi động lại...';
-      toast('Đã lưu WiFi. Khởi động lại sau 1s...', 'ok');
-    });
+    .then(() => toast('Đã lưu WiFi! Robot đang khởi động lại...', 'ok'));
 }
 
-function onDrawShapeChange(){
-  const sh = document.getElementById('dwShape').value;
-  const a1Lbl = document.getElementById('dwA1Lbl');
-  const a2Lbl = document.getElementById('dwA2Lbl');
-  const a3Lbl = document.getElementById('dwA3Lbl');
-  const a4Group = document.getElementById('dwA4Group');
-  if(sh === 'circle'){
-    if(a1Lbl) a1Lbl.textContent = 'Tâm CX';
-    if(a2Lbl) a2Lbl.textContent = 'Tâm CY';
-    if(a3Lbl) a3Lbl.textContent = 'Bán kính R';
-    if(a4Group) a4Group.style.display = 'none';
-  } else {
-    if(a1Lbl) a1Lbl.textContent = 'X1';
-    if(a2Lbl) a2Lbl.textContent = 'Y1';
-    if(a3Lbl) a3Lbl.textContent = 'X2';
-    if(a4Group) a4Group.style.display = 'flex';
+// Navigation Tabs
+document.querySelectorAll('.nav-tab[data-t]').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('.nav-tab').forEach(x => { x.classList.remove('active'); x.setAttribute('aria-selected', 'false'); });
+    document.querySelectorAll('.tab-pane').forEach(x => x.classList.remove('active'));
+    b.classList.add('active'); b.setAttribute('aria-selected', 'true');
+    const target = document.getElementById(b.dataset.t);
+    if(target) target.classList.add('active');
+    if(b.dataset.t === 'pane-dash' && dashRenderer) dashRenderer.renderCurrent();
+    if(b.dataset.t === 'pane-motion' && simRenderer) simRenderer.renderCurrent();
+  };
+});
+
+// Step selector
+[0.5, 1, 5, 15, 30, 45].forEach(s => {
+  const b = document.createElement('button');
+  b.className = 'step-btn' + (s === stepSize ? ' active' : '');
+  b.textContent = s + '°';
+  b.onclick = () => {
+    stepSize = s;
+    document.querySelectorAll('.step-btn').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+  };
+  const container = document.getElementById('stepSelector');
+  if(container) container.appendChild(b);
+});
+
+// Build Joint Cards & Quick Status Rows
+function buildJointCards(){
+  const grid = document.getElementById('jointCardsGrid');
+  const dashRows = document.getElementById('dashJointRows');
+  if(grid) grid.innerHTML = '';
+  if(dashRows) dashRows.innerHTML = '';
+
+  for(let i=0; i<6; i++){
+    if(grid){
+      grid.insertAdjacentHTML('beforeend', `
+        <div class="jcard">
+          <div class="jcard-top">
+            <span class="jcard-name">${AXES[i]}</span>
+            <span class="jcard-deg" id="jd${i}">0.0°</span>
+          </div>
+          <div class="jcard-enc" id="je${i}">Encoder: --</div>
+          <div class="jcard-flags" id="jf${i}"></div>
+          <div class="jog-controls">
+            <button class="jog-btn" onclick="jog(${i},-1)" aria-label="Jog ${AXES[i]} âm">↺ &minus;</button>
+            <button class="jog-btn" onclick="jog(${i},1)" aria-label="Jog ${AXES[i]} dương">+ ↻</button>
+          </div>
+          <div class="jog-calib-row">
+            <button class="btn btn-ghost need-idle" onclick="api('/api/sethome?axis=${i}')">Set Home</button>
+            <button class="btn btn-ghost" onclick="confirmClearCalib(${i})">Clear NVS</button>
+          </div>
+        </div>
+      `);
+    }
+    if(dashRows){
+      dashRows.insertAdjacentHTML('beforeend', `
+        <div class="stat-row">
+          <span class="k">${AXES[i].split(' ')[0]} (${AXES[i].split(' ')[1]})</span>
+          <span class="v" id="dashJd${i}">0.0°</span>
+        </div>
+      `);
+    }
   }
 }
+buildJointCards();
 
-function startDraw(){
-  const sh = document.getElementById('dwShape').value;
-  const v = id => parseFloat(document.getElementById(id).value) || 0;
-  let b = sh === 'line' ? `shape=line&x1=${v('dwA1')}&y1=${v('dwA2')}&x2=${v('dwA3')}&y2=${v('dwA4')}` : `shape=circle&cx=${v('dwA1')}&cy=${v('dwA2')}&r=${v('dwA3')}`;
-  b += `&z=${v('dwZ')}&feed=${document.getElementById('dwFeed').value||20}`;
-  post('/api/draw', b);
-}
-function previewShape(){
-  const cv = document.getElementById('cv');
-  if(!cv) return;
-  const ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
-  ctx.clearRect(0, 0, W, H);
-  const sh = document.getElementById('dwShape').value;
-  const v = id => parseFloat(document.getElementById(id).value) || 0;
-  const ox = W/2, oy = H/2, sc = 0.8;
-  ctx.strokeStyle = '#334155'; ctx.strokeRect(0, 0, W, H);
-  ctx.strokeStyle = '#f43f5e'; ctx.lineWidth = 2;
-  if(sh === 'line'){
-    ctx.beginPath();
-    ctx.moveTo(ox + v('dwA1')*sc, oy - v('dwA2')*sc);
-    ctx.lineTo(ox + v('dwA3')*sc, oy - v('dwA4')*sc);
-    ctx.stroke();
-  } else {
-    ctx.beginPath();
-    ctx.arc(ox + v('dwA1')*sc, oy - v('dwA2')*sc, v('dwA3')*sc, 0, Math.PI*2);
-    ctx.stroke();
-  }
-}
-
+/* =============================================================================
+   7. STATUS POLLER & TELEMETRY UPDATER
+============================================================================= */
 function updateUI(d){
   const m = d.mode || 'idle';
-  const modeWord = document.getElementById('modeWord');
-  const modeBadge = document.getElementById('mode');
-  const map = { idle: { w: 'IDLE', c: 'b-idle' }, homing: { w: 'HOMING', c: 'b-run' }, jog: { w: 'JOG', c: 'b-run' }, cart: { w: 'CART', c: 'b-run' }, draw: { w: 'DRAW', c: 'b-run' }, fault: { w: 'FAULT', c: 'b-fault' } };
-  const mm = map[m] || { w: m.toUpperCase(), c: 'b-idle' };
-  if(modeWord) { modeWord.textContent = mm.w; modeWord.className = 'mode-word ' + (m === 'fault' ? 'fault' : (m !== 'idle' ? 'run' : '')); }
-  if(modeBadge) { modeBadge.textContent = m; modeBadge.className = 'badge ' + mm.c; }
+  const modeText = document.getElementById('dashModeText');
+  const modeBadge = document.getElementById('dashModeBadge');
+  const map = { idle: 'b-idle', homing: 'b-run', jog: 'b-run', cart: 'b-run', draw: 'b-run', fault: 'b-fault' };
+  if(modeText) { modeText.textContent = m.toUpperCase(); modeText.className = 'mode-text ' + (m === 'fault' ? 'fault' : (m !== 'idle' ? 'run' : '')); }
+  if(modeBadge) { modeBadge.textContent = m; modeBadge.className = 'badge ' + (map[m] || 'b-idle'); }
 
-  const subEl = document.getElementById('sub');
-  if(subEl) subEl.textContent = `${d.wifi.ssid || '(AP)'} · ${d.wifi.ip}`;
+  const connLabel = document.getElementById('connLabel');
+  if(connLabel) connLabel.textContent = `${d.wifi.ssid || '(AP)'} · ${d.wifi.ip}`;
+
   let hn = 0; d.joints.forEach(j => hn += j.homed ? 1 : 0);
-  const homedEl = document.getElementById('homedN');
-  if(homedEl) homedEl.textContent = `${hn}/6`;
-  const wifiInfo = document.getElementById('wifiInfo');
-  if(wifiInfo) wifiInfo.textContent = `${(d.wifi.mode||'').toUpperCase()}${d.wifi.rssi ? (' · ' + d.wifi.rssi + ' dBm') : ''}`;
+  const homedCount = document.getElementById('dashHomedCount');
+  if(homedCount) homedCount.textContent = `${hn}/6`;
+
+  const wifiInfo = document.getElementById('dashWifiInfo');
+  if(wifiInfo) wifiInfo.textContent = `${(d.wifi.mode||'').toUpperCase()} · RSSI ${d.wifi.rssi || 0} dBm`;
+
+  const wfModeText = document.getElementById('wfModeText');
+  if(wfModeText) wfModeText.textContent = (d.wifi.mode||'').toUpperCase();
+  const wfIpText = document.getElementById('wfIpText');
+  if(wfIpText) wfIpText.textContent = d.wifi.ip;
+  const wfSsidNowText = document.getElementById('wfSsidNowText');
+  if(wfSsidNowText) wfSsidNowText.textContent = d.wifi.ssid || '(AP Fallback)';
+  const wfRssiText = document.getElementById('wfRssiText');
+  if(wfRssiText) wfRssiText.textContent = `${d.wifi.rssi || 0} dBm`;
 
   document.querySelectorAll('.need-idle').forEach(b => { b.disabled = (d.busy || m === 'fault'); });
 
   const robotAngles = d.joints.map(j => j.deg);
   window.lastRobotAngles = robotAngles;
 
-  // Render Dashboard 3D
+  // Render Dashboard Live 3D Twin
   const lmLive = forwardKinematics(robotAngles);
   if(dashRenderer) dashRenderer.render(lmLive, null);
-  const hudDash = `TCP: X=${lmLive.tcp[0].toFixed(1)} Y=${lmLive.tcp[1].toFixed(1)} Z=${lmLive.tcp[2].toFixed(1)} mm | Wrist: (${lmLive.wrist[0].toFixed(1)}, ${lmLive.wrist[1].toFixed(1)}, ${lmLive.wrist[2].toFixed(1)})`;
-  const dashHudEl = document.getElementById('dashHud');
-  if(dashHudEl) dashHudEl.textContent = hudDash;
 
-  if(d.pose){
-    const s = `(${d.pose.x.toFixed(1)}, ${d.pose.y.toFixed(1)}, ${d.pose.z.toFixed(1)})`;
-    const p1 = document.getElementById('poseNow'); if(p1) p1.textContent = s;
-    const p2 = document.getElementById('poseNow2'); if(p2) p2.textContent = s;
-  }
+  const dashPoseLabel = document.getElementById('dashPoseLabel');
+  if(dashPoseLabel) dashPoseLabel.textContent = `TCP: (${lmLive.tcp[0].toFixed(1)}, ${lmLive.tcp[1].toFixed(1)}, ${lmLive.tcp[2].toFixed(1)})`;
+  const hudDashTcp = document.getElementById('hudDashTcp');
+  if(hudDashTcp) hudDashTcp.textContent = `X=${lmLive.tcp[0].toFixed(1)} Y=${lmLive.tcp[1].toFixed(1)} Z=${lmLive.tcp[2].toFixed(1)}`;
+  const hudDashWrist = document.getElementById('hudDashWrist');
+  if(hudDashWrist) hudDashWrist.textContent = `(${lmLive.wrist[0].toFixed(1)}, ${lmLive.wrist[1].toFixed(1)}, ${lmLive.wrist[2].toFixed(1)})`;
 
   if(simSource === 'live'){
     updateSimFromAngles(robotAngles);
   }
 
+  // Update Joint Cards & Quick Status
   d.joints.forEach((j, i) => {
     const jd = document.getElementById('jd' + i); if(jd) jd.textContent = j.deg.toFixed(1) + '°';
-    const je = document.getElementById('je' + i); if(je) je.textContent = 'encoder: ' + (j.encOK ? j.encDeg.toFixed(1) + '°' : 'MẤT KẾT NỐI');
-    const jf = document.getElementById('jf' + i); if(jf){
-      const f = [];
-      f.push(`<span class="${j.homed ? 'f-h' : 'f-e'}">${j.homed ? (j.restored ? 'HOMED (NVS)' : 'HOMED') : 'CHƯA HOME'}</span>`);
-      if(j.drift) f.push('<span class="f-d">DRIFT!</span>');
-      if(!j.encOK) f.push('<span class="f-e">ENC ERR</span>');
-      const fHtml = f.join(' · ');
-      if(jf.innerHTML !== fHtml) jf.innerHTML = fHtml;
+    const dashJd = document.getElementById('dashJd' + i); if(dashJd) dashJd.textContent = j.deg.toFixed(1) + '°';
+    const je = document.getElementById('je' + i); if(je) je.textContent = 'Encoder: ' + (j.encOK ? j.encDeg.toFixed(1) + '°' : 'MẤT KẾT NỐI');
+    const jf = document.getElementById('jf' + i);
+    if(jf){
+      const flags = [];
+      flags.push(`<span class="${j.homed ? 'flag-homed' : 'flag-unhomed'}">${j.homed ? (j.restored ? 'HOMED (NVS)' : 'HOMED') : 'CHƯA HOME'}</span>`);
+      if(j.drift) flags.push('<span class="flag-drift">DRIFT</span>');
+      if(!j.encOK) flags.push('<span class="flag-encerr">ENC ERR</span>');
+      jf.innerHTML = flags.join(' · ');
     }
   });
+
+  // Homing Chips
+  for(let i=0; i<4; i++){
+    const hc = document.getElementById('hc' + i);
+    if(hc){
+      hc.classList.toggle('done', d.joints[i].homed);
+    }
+  }
 }
 
 function setOnline(on){
-  const c = document.getElementById('conn');
-  if(c) c.classList.toggle('offline', !on);
-  const s = document.getElementById('sub');
-  if(!on && s) s.textContent = 'MẤT KẾT NỐI — Đang thử lại...';
+  const pill = document.getElementById('connPill');
+  if(pill) pill.classList.toggle('offline', !on);
+  const label = document.getElementById('connLabel');
+  if(!on && label) label.textContent = 'MẤT KẾT NỐI — Đang thử lại...';
 }
+
 function pollOnce(){
   fetch('/api/status').then(r => r.json())
     .then(d => { failN = 0; setOnline(true); updateUI(d); })
     .catch(() => { if(++failN >= 3) setOnline(false); });
 }
 
-initSimulationUI();
+initStudio();
 setInterval(pollOnce, 300);
 pollOnce();
 </script>
@@ -1408,10 +1360,17 @@ void handleJog() {
         srv->send(200, "text/plain", armPtr->submit(c) ? "OK" : "busy");
         return;
     }
+    if (!srv->hasArg("axis") || !srv->hasArg("deg")) {
+        srv->send(400, "text/plain", "missing axis or deg");
+        return;
+    }
     const int axis = srv->arg("axis").toInt();
     const float deg = srv->arg("deg").toFloat();
     if (axis < 0 || axis >= NUM_MOTORS) { srv->send(400, "text/plain", "bad axis"); return; }
-    if (fabsf(deg) < 0.01f || fabsf(deg) > 180.0f) { srv->send(400, "text/plain", "bad deg"); return; }
+    if (!std::isfinite(deg) || fabsf(deg) < 0.01f || fabsf(deg) > 180.0f) {
+        srv->send(400, "text/plain", "bad deg");
+        return;
+    }
     ArmCommand c;
     c.type = ArmCommand::JOG_REL;
     c.axis = static_cast<uint8_t>(axis);
@@ -1431,10 +1390,21 @@ void handleStop() {
 
 void handleMove() {
     if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    if (!srv->hasArg("x") || !srv->hasArg("y") || !srv->hasArg("z")) {
+        srv->send(400, "text/plain", "missing x, y, or z");
+        return;
+    }
     const float x = srv->arg("x").toFloat();
     const float y = srv->arg("y").toFloat();
     const float z = srv->arg("z").toFloat();
-    if (z < -15.0f || z > 435.0f) { srv->send(400, "text/plain", "z out of range"); return; }
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+        srv->send(400, "text/plain", "non-finite coordinates");
+        return;
+    }
+    if (z < -15.0f || z > 435.0f || (x * x + y * y > 350.0f * 350.0f)) {
+        srv->send(400, "text/plain", "z or xy out of range");
+        return;
+    }
     ArmCommand c;
     c.type = ArmCommand::MOVE_CART;
     c.p[0] = x; c.p[1] = y; c.p[2] = z;
@@ -1494,6 +1464,7 @@ void handleHomeAll() {
 
 void handleHomeAxis() {
     if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    if (!srv->hasArg("axis")) { srv->send(400, "text/plain", "missing axis"); return; }
     const int axis = srv->arg("axis").toInt();
     if (axis < 0 || axis >= 4) { srv->send(400, "text/plain", "axis 0..3 only"); return; }
     if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
@@ -1506,8 +1477,9 @@ void handleHomeAxis() {
 
 void handleSetHome() {
     if (jointsPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    if (!srv->hasArg("axis")) { srv->send(400, "text/plain", "missing axis"); return; }
     const int axis = srv->arg("axis").toInt();
-    if (axis < 0 || axis >= NUM_MOTORS) { srv->send(400, "text/plain", "bad axis"); return; }
+    if (axis < 0 || (axis >= NUM_MOTORS && axis != 255)) { srv->send(400, "text/plain", "bad axis"); return; }
     if (armPtr != nullptr && armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
     ArmCommand c;
     c.type = ArmCommand::SET_HOME;
@@ -1518,11 +1490,12 @@ void handleSetHome() {
 
 void handleClearCalib() {
     if (jointsPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
-    // Flash Write Isolation Guard: Cáº¥m xÃ³a NVS khi robot Ä‘ang chuyá»ƒn Ä‘á»™ng
+    // Flash Write Isolation Guard: Cấm xóa NVS khi robot đang chuyển động
     if (armPtr != nullptr && armPtr->busy()) {
         srv->send(409, "text/plain", "CANNOT_WRITE_FLASH_WHILE_MOVING");
         return;
     }
+    if (!srv->hasArg("axis")) { srv->send(400, "text/plain", "missing axis"); return; }
     const int axis = srv->arg("axis").toInt();
     if (axis < 0 || axis >= NUM_MOTORS) { srv->send(400, "text/plain", "bad axis"); return; }
     jointsPtr->forgetHome(static_cast<uint8_t>(axis));
@@ -1531,7 +1504,7 @@ void handleClearCalib() {
 
 void handleWifiSave() {
     if (wifiPtr == nullptr || nvsPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
-    // Flash Write Isolation Guard: Cáº¥m ghi NVS khi robot Ä‘ang chuyá»ƒn Ä‘á»™ng
+    // Flash Write Isolation Guard: Cấm ghi NVS khi robot đang chuyển động
     if (armPtr != nullptr && armPtr->busy()) {
         srv->send(409, "text/plain", "CANNOT_WRITE_FLASH_WHILE_MOVING");
         return;
@@ -1548,16 +1521,23 @@ void handleWifiSave() {
         return;
     }
     srv->send(200, "application/json", "{\"saved\":true,\"reboot\":true}");
-    Serial.println("[WEB] WiFi creds moi da luu â€” restart sau 1s...");
+    Serial.println("[WEB] WiFi creds moi da luu — restart sau 1s...");
     delay(1000);
     ESP.restart();
 }
 
 void handleWorkPlaneCalib() {
     if (workPlanePtr == nullptr) { srv->send(500, "text/plain", "WorkPlane not initialized"); return; }
+    if (armPtr != nullptr && armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
     const Point3D p1{srv->arg("p1x").toFloat(), srv->arg("p1y").toFloat(), srv->arg("p1z").toFloat()};
     const Point3D p2{srv->arg("p2x").toFloat(), srv->arg("p2y").toFloat(), srv->arg("p2z").toFloat()};
     const Point3D p3{srv->arg("p3x").toFloat(), srv->arg("p3y").toFloat(), srv->arg("p3z").toFloat()};
+    if (!std::isfinite(p1.x) || !std::isfinite(p1.y) || !std::isfinite(p1.z) ||
+        !std::isfinite(p2.x) || !std::isfinite(p2.y) || !std::isfinite(p2.z) ||
+        !std::isfinite(p3.x) || !std::isfinite(p3.y) || !std::isfinite(p3.z)) {
+        srv->send(400, "application/json", "{\"calibrated\":false,\"error\":\"Non-finite coordinates\"}");
+        return;
+    }
     if (workPlanePtr->setThreePointCalibration(p1, p2, p3)) {
         srv->send(200, "application/json", "{\"calibrated\":true,\"error\":\"\"}");
     } else {
@@ -1568,6 +1548,7 @@ void handleWorkPlaneCalib() {
 
 void handleWorkPlaneToggle() {
     if (workPlanePtr == nullptr) { srv->send(500, "text/plain", "WorkPlane not initialized"); return; }
+    if (armPtr != nullptr && armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
     const bool en = (srv->arg("en").toInt() != 0);
     workPlanePtr->setEnabled(en);
     srv->send(200, "application/json", workPlanePtr->isEnabled() ? "{\"enabled\":true}" : "{\"enabled\":false}");
@@ -1577,7 +1558,7 @@ void handleWorkPlaneStatus() {
     if (workPlanePtr == nullptr) { srv->send(500, "text/plain", "WorkPlane not initialized"); return; }
     const Point3D o = workPlanePtr->getOrigin();
     const Point3D n = workPlanePtr->getNormal();
-    char buf[256];
+    char buf[512];
     snprintf(buf, sizeof(buf),
              "{\"isCalibrated\":%s,\"isEnabled\":%s,\"origin\":[%.2f,%.2f,%.2f],\"normal\":[%.3f,%.3f,%.3f],\"error\":\"%s\"}",
              workPlanePtr->isCalibrated() ? "true" : "false",

@@ -52,17 +52,17 @@ constexpr uint8_t NUM_MOTORS                    = 6;
 constexpr uint8_t MAX_WAYPOINTS                 = 32;
 
 // Chiều quay logic: +1 nếu step CW ứng với góc khớp tăng dương (hiệu chỉnh lúc lắp).
-// J2/J3/J4 quay ngược chiều motor (gear âm trước đây) -> bây giờ gear bỏ dấu, dời dấu vào đây.
-constexpr int8_t AXIS_STEP_SIGN[NUM_MOTORS]     = { +1, -1, -1, -1, +1, +1 };
+// J2 và J3: góc dương là hướng vươn ra ngoài.
+constexpr int8_t AXIS_STEP_SIGN[NUM_MOTORS]     = { +1, +1, +1, -1, +1, +1 };
 // Chiều đo của encoder AS5600 so với góc khớp dương (hiệu chỉnh lúc lắp).
-constexpr int8_t AXIS_ENC_SIGN[NUM_MOTORS]      = { +1, +1, +1, +1, +1, +1 };
+constexpr int8_t AXIS_ENC_SIGN[NUM_MOTORS]      = { +1, +1, +1, -1, +1, -1 };
 
 // ==============================================================================
 // 3. I2C SENSOR BUS (PCA9548A Multiplexer + AS5600 Magnetic Encoders)
 // ==============================================================================
 constexpr int8_t SDA_PIN                        = 8;
 constexpr int8_t SCL_PIN                        = 9;
-constexpr uint32_t I2C_FREQUENCY                = 800000; // 800kHz Fast-Mode Plus
+constexpr uint32_t I2C_FREQUENCY                = 40000;  // 40kHz Low-Speed Standard Mode (chống nhiễu/méo xung tối đa cho cáp dài J5/J6)
 
 constexpr uint8_t PCA_ADDR                      = 0x70;
 constexpr uint8_t AS5600_ADDR                   = 0x36;
@@ -72,12 +72,14 @@ constexpr uint8_t NUM_SENSORS                   = 6;
 constexpr uint8_t AS5600_AGC_MIN_HEALTHY        = 30;
 constexpr uint8_t AS5600_AGC_MAX_HEALTHY        = 225;
 
-// Sensor Task configuration (Core 0, 200Hz)
-constexpr uint32_t SENSOR_TASK_PERIOD_MS        = 5;
+// Sensor Task configuration (Core 0, 20ms 50Hz)
+// SensorScanTask chạy Core 0 (RF/WiFi core) — WiFi chỉ dùng interrupt sau khi kết nối,
+// không chiếm CPU liên tục. Tách biệt hoàn toàn với arm_motion (Core 1).
+constexpr uint32_t SENSOR_TASK_PERIOD_MS        = 20;
 constexpr uint32_t SENSOR_TASK_STACK_SIZE       = 4096;
 constexpr UBaseType_t SENSOR_TASK_PRIORITY      = 4;
 constexpr BaseType_t SENSOR_TASK_CORE           = 0;
-constexpr uint32_t SENSOR_I2C_MUTEX_TIMEOUT_MS  = 10;
+constexpr uint32_t SENSOR_I2C_MUTEX_TIMEOUT_MS  = 30;
 constexpr uint32_t WDT_TIMEOUT_SEC              = 5;
 
 // ==============================================================================
@@ -85,8 +87,9 @@ constexpr uint32_t WDT_TIMEOUT_SEC              = 5;
 // ==============================================================================
 constexpr uint8_t ENDSTOP_ACTIVE_STATE          = LOW;    // Pull-up active low
 
-constexpr int8_t J1_MIN_PIN                     = 5;
-constexpr int8_t J1_MAX_PIN                     = 6;
+// Endstop pins (nhãn MIN/MAX tương ứng với hướng góc - và +)
+constexpr int8_t J1_MIN_PIN                     = 6;
+constexpr int8_t J1_MAX_PIN                     = 5;
 constexpr int8_t J2_MIN_PIN                     = 7;
 constexpr int8_t J2_MAX_PIN                     = 10;
 constexpr int8_t J3_MIN_PIN                     = 11;
@@ -124,7 +127,7 @@ constexpr uint16_t DEFAULT_HOMING_CURRENT       = 350;    // Ultra-low current f
 constexpr uint16_t HOMING_CURRENT_J1            = 800;    // Base Yaw (mA) — cần traverse full range, ISR endstop bảo vệ chạm
 constexpr uint16_t HOMING_CURRENT_J2            = 1000;    // Shoulder Pitch (mA)
 constexpr uint16_t HOMING_CURRENT_J3            = 1000;    // Elbow Pitch (mA)
-constexpr uint16_t HOMING_CURRENT_J4            = 300;    // Wrist Roll (mA)
+constexpr uint16_t HOMING_CURRENT_J4            = 450;    // Wrist Roll (mA) — dòng vừa đủ êm, chạm nhẹ cữ kẹt cứng không rung lắc
 constexpr uint16_t HOMING_CURRENT_J5            = 0;      // A4988 - VREF cứng
 constexpr uint16_t HOMING_CURRENT_J6            = 0;      // A4988 - VREF cứng
 
@@ -140,9 +143,9 @@ constexpr uint16_t DEFAULT_AXIS_HOMING_CURRENTS[NUM_MOTORS] = {
 constexpr uint32_t HOMING_STEP_INTERVAL_J1      = 1800;   // us/step
 constexpr uint32_t HOMING_STEP_INTERVAL_J2      = 1500;
 constexpr uint32_t HOMING_STEP_INTERVAL_J3      = 1500;
-constexpr uint32_t HOMING_STEP_INTERVAL_J4      = 1800;
-constexpr uint32_t HOMING_STEP_INTERVAL_J5      = 1800;
-constexpr uint32_t HOMING_STEP_INTERVAL_J6      = 1800;
+constexpr uint32_t HOMING_STEP_INTERVAL_J4      = 2000;   // 500 steps/sec (torque cao, ít rung cho J4)
+constexpr uint32_t HOMING_STEP_INTERVAL_J5      = 2500;   // 400 steps/sec (torque cao nhất cho A4988)
+constexpr uint32_t HOMING_STEP_INTERVAL_J6      = 2500;
 
 constexpr uint32_t DEFAULT_AXIS_HOMING_SPEEDS[NUM_MOTORS] = {
     HOMING_STEP_INTERVAL_J1,
@@ -154,27 +157,52 @@ constexpr uint32_t DEFAULT_AXIS_HOMING_SPEEDS[NUM_MOTORS] = {
 };
 
 constexpr uint8_t DEFAULT_HOLD_SCALE            = 30;     // TMC2209 ihold scale
-constexpr uint16_t DEFAULT_STALL_THRESHOLD      = 0;      // StallGuard threshold (0 = disabled)
+constexpr uint16_t DEFAULT_STALL_THRESHOLD      = 135;    // StallGuard4 SGTHRS threshold (0..255, độ nhạy cao ngắt nhẹ khi chạm)
 
 // Homing fusion: endstop + StallGuard + encoder + step counting
 constexpr float HOME_BACKOFF_DEG                = 2.0f;   // Lùi ra sau khi chạm endstop/stall
-constexpr uint16_t STALL_SG_LEVEL               = 100;    // SG_RESULT < mức này => nghi stall (tune thực tế)
-constexpr uint8_t STALL_CONSECUTIVE_POLLS       = 3;      // Poll liên tiếp xác nhận stall
+constexpr uint16_t STALL_SG_LEVEL               = 70;     // SG_RESULT < 70 khi tải tăng (nhạy hơn, ngắt sớm)
+constexpr uint8_t STALL_CONSECUTIVE_POLLS       = 2;      // Poll liên tiếp xác nhận stall
 constexpr uint32_t HOMING_JOINT_TIMEOUT_MS      = 30000;  // Timeout tối đa cho 1 khớp
-constexpr uint32_t HOMING_POLL_MS               = 5;      // Chu kỳ giám sát endstop/stall trong FSM
+constexpr uint32_t HOMING_POLL_MS               = 20;     // Chu kỳ giám sát endstop/stall trong FSM (20ms giảm tải UART)
+
+// Homing 2 tốc độ (quét 2 cữ J1..J4): FAST tìm cữ thô, SLOW tiếp cận lại lấy mốc chính xác.
+// Glitch ở pha FAST tự hồi phục vì pha SLOW dò lại đúng cữ đó; VERIFY đối chiếu encoder độc lập.
+constexpr uint32_t HOMING_SLOW_SCAN_INTERVAL_US = 3000;   // us/step pha tiếp cận chậm (mốc chính xác, ít đập cữ)
+constexpr uint8_t  HOMING_MAX_ATTEMPTS          = 2;      // Số lần thử tối đa mỗi khớp trước khi hủy chuỗi
+constexpr float    HOMING_VERIFY_TOL_BASE_DEG   = 0.5f;   // Verify tại home: dung sai gốc (độ raw encoder)
+constexpr float    HOMING_VERIFY_TOL_SPAN_PCT   = 1.0f;   // Verify: + % của nửa span (chịu sai số steps/deg đo được)
+constexpr float    HOMING_STALL_WINDOW_MIN_DEG  = 1.2f;   // Cửa sổ step-lag tối thiểu (độ) — phải > 2x ngưỡng dưới
+constexpr float    HOMING_STALL_ENC_DELTA_DEG   = 2.5f;   // Encoder dịch < ngưỡng trong cửa sổ => stall (nhạy, dừng ngay khi chạm)
+constexpr int32_t  HOMING_STALL_WINDOW_MIN_STEPS = 120;   // Sàn cửa sổ (120 bước ~ 0.24s) — phát hiện kẹt nhanh chóng
+// Span encoder tối thiểu sau khi quét đủ 2 cữ: thấp hơn ngưỡng này (motor đã đi hàng trăm
+// bước) chứng tỏ encoder đóng băng/đọc lỗi → HỦY khớp, không home ảo.
+constexpr float    HOMING_MIN_ENC_SPAN_DEG[NUM_MOTORS] = { 30.0f, 30.0f, 30.0f, 15.0f, 10.0f, 10.0f };
+constexpr float    HOMING_TRIM_MAX_TRAVEL_DEG  = 5.0f;    // Giới hạn hành trình mỗi lần trim VERIFY (chống trim chạy loạn đâm endstop)
+constexpr uint8_t  HOMING_BACKOFF_MAX_EXTEND    = 3;      // Số lần nới rộng backoff (2.5°→5°→10°→20°) khi công tắc chưa nhả (hysteresis đòn bẩy)
 
 // Speed & Acceleration Timing (microseconds per step pulse)
-constexpr uint32_t DEFAULT_STEP_INTERVAL_US     = 400;    // Target step interval -> 2500 steps/sec
+constexpr uint32_t DEFAULT_STEP_INTERVAL_US     = 500;    // Target step interval -> ~2000 steps/sec
 constexpr uint32_t HOMING_STEP_INTERVAL_US      = 1600;   // Fallback homing speed
 constexpr uint32_t MIN_STEP_INTERVAL_US         = 120;    // Max speed limit -> ~8333 steps/sec
 constexpr uint32_t MAX_STEP_INTERVAL_US         = 2500;   // Starting speed interval
 constexpr uint32_t DEFAULT_ACCEL_RATE           = 12;
 
+// Tốc độ Jog độc lập từng khớp (us/step):
+constexpr uint32_t DEFAULT_AXIS_JOG_SPEEDS[NUM_MOTORS] = {
+    400,   // J1 (6:1): 2500 steps/sec -> 46.88 deg/sec (jog 15° chỉ 0.32s)
+    350,   // J2 (20:1): 2857 steps/sec -> 16.07 deg/sec (jog 15° chỉ 0.93s)
+    350,   // J3 (20:1): 2857 steps/sec -> 16.07 deg/sec (jog 15° chỉ 0.93s)
+    400,   // J4 (4:1): 2500 steps/sec -> 70.31 deg/sec (jog 15° chỉ 0.21s)
+    500,   // J5 (3:1): 2000 steps/sec -> 75.00 deg/sec
+    500    // J6 (3:1): 2000 steps/sec -> 75.00 deg/sec
+};
+
 // Schmitt-Trigger Deadband for closed-loop holding
 constexpr float DEFAULT_DEADBAND_ENTER          = 0.3f;   // Enter holding window (degrees)
 constexpr float DEFAULT_DEADBAND_EXIT           = 0.8f;   // Exit holding window (degrees)
 constexpr float DEFAULT_ANGLE_TOLERANCE         = 0.5f;   // Tolerance (degrees)
-constexpr float RUNAWAY_ERROR_THRESHOLD         = 5.0f;   // Runaway threshold (degrees)
+constexpr float RUNAWAY_ERROR_THRESHOLD         = 25.0f;  // Runaway threshold (degrees) — nới rộng cho hộp số planetary có backlash lớn (~10°-15°)
 
 // Drawing (Cartesian trajectory, pen = tool coaxial J6)
 constexpr float PEN_LIFT_MM                     = 5.0f;   // Độ nâng bút giữa các nét (Z-raise)
@@ -210,7 +238,7 @@ constexpr float J1_MIN_LIMIT                    = -90.0f; // 270 deg total strok
 constexpr float J1_MAX_LIMIT                    = +90.0f;
 constexpr float J2_MIN_LIMIT                    = -90.0f;  // 180 deg total stroke
 constexpr float J2_MAX_LIMIT                    = +90.0f;
-constexpr float J3_MIN_LIMIT                    = 0.0f;   // Khuỷu 1 chiều: không gập âm (0 = duỗi thẳng)
+constexpr float J3_MIN_LIMIT                    = -90.0f;  // 180 deg total stroke (-90..+90)
 constexpr float J3_MAX_LIMIT                    = +90.0f;
 constexpr float J4_MIN_LIMIT                    = -180.0f;
 constexpr float J4_MAX_LIMIT                    = +180.0f;

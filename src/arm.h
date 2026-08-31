@@ -2,6 +2,7 @@
 #define ARM_H
 
 #include <Arduino.h>
+#include <atomic>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
@@ -45,6 +46,7 @@ struct ArmCommand {
 class ArmController {
 public:
     ArmController();
+    ~ArmController() = default;
 
     ArmController(const ArmController&) = delete;
     ArmController& operator=(const ArmController&) = delete;
@@ -55,8 +57,6 @@ public:
     // Đưa lệnh vào hàng đợi. Trả false nếu đầy/đang bận với lệnh không thể trộn.
     [[nodiscard]] bool submit(const ArmCommand& cmd, uint32_t timeoutMs = 10);
     [[nodiscard]] bool busy() const;
-
-    void estopFromISR();   // ISR endstop gọi khi có chạm ngoài homing
 
     [[nodiscard]] ArmMode mode() const;
     String statusJson();
@@ -77,7 +77,7 @@ private:
 
     QueueHandle_t queue{nullptr};
     TaskHandle_t task{nullptr};
-    volatile ArmMode mode_{ArmMode::IDLE};
+    std::atomic<ArmMode> mode_{ArmMode::IDLE};
     uint32_t driftTickCounter{0};
 };
 

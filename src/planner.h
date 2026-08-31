@@ -41,7 +41,8 @@ public:
         TRAVELING,     // di chuyển tới điểm bắt đầu (bút đang nâng)
         DROPPING,      // hạ bút xuống z vẽ
         DRAWING,       // đang sinh + chạy các segment
-        FINISHED_LIFT  // nâng bút kết thúc
+        FINISHED_LIFT,  // bắt đầu nâng bút kết thúc
+        WAIT_FINAL_LIFT // chờ nâng bút xong rồi finishAll
     };
 
     Planner();

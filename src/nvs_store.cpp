@@ -46,11 +46,13 @@ NvsStore::JointHome NvsStore::loadJointHome(uint8_t axis) const {
 
 void NvsStore::saveJointHome(uint8_t axis, float rawDeg) {
     if (!ok_ || axis >= NUM_MOTORS) return;
+    // Ghi giá trị TRƯỚC, valid flag SAU CÙNG: nếu mất nguồn giữa chừng,
+    // valid vẫn false -> boot sau không phục hồi từ dữ liệu rác.
     char key[12];
-    snprintf(key, sizeof(key), "j%u_valid", axis);
-    prefs_.putBool(key, true);
     snprintf(key, sizeof(key), "j%u_raw", axis);
     prefs_.putFloat(key, rawDeg);
+    snprintf(key, sizeof(key), "j%u_valid", axis);
+    prefs_.putBool(key, true);
 }
 
 void NvsStore::clearJointHome(uint8_t axis) {
@@ -78,13 +80,14 @@ NvsStore::CalibData NvsStore::loadCalib(uint8_t axis) const {
 
 void NvsStore::saveCalib(uint8_t axis, float encSign, float stepsPerDeg) {
     if (!ok_ || axis >= NUM_MOTORS) return;
+    // Ghi giá trị TRƯỚC, valid flag SAU CÙNG (nguyên tắc commit-flag).
     char key[14];
-    snprintf(key, sizeof(key), "j%u_cvalid", axis);
-    prefs_.putBool(key, true);
     snprintf(key, sizeof(key), "j%u_esign", axis);
     prefs_.putFloat(key, encSign);
     snprintf(key, sizeof(key), "j%u_mspd", axis);
     prefs_.putFloat(key, stepsPerDeg);
+    snprintf(key, sizeof(key), "j%u_cvalid", axis);
+    prefs_.putBool(key, true);
 }
 
 void NvsStore::clearCalib(uint8_t axis) {

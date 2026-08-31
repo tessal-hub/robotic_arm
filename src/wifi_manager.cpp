@@ -9,6 +9,7 @@ void WifiManager::begin(NvsStore* nvsStore) {
     if (haveCreds) {
         Serial.printf("[WIFI] Thu STA voi creds NVS: %s\n", storedSsid_.c_str());
         WiFi.mode(WIFI_STA);
+        WiFi.setAutoReconnect(true);
         WiFi.begin(storedSsid_.c_str(), pass.c_str());
         const uint32_t t0 = millis();
         while (WiFi.status() != WL_CONNECTED &&

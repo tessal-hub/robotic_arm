@@ -38,6 +38,33 @@ static WebServer g_server(WEB_SERVER_PORT);
 static ArmController g_arm;
 
 void setup() {
+    // 0) Khóa LOW và cấu hình push-pull 40mA cho tất cả các chân STEP/DIR của 6 motor ngay từ đầu
+    for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+        const uint8_t sp = g_motors[i].getStepPin();
+        const uint8_t dp = g_motors[i].getDirPin();
+        gpio_config_t cfg = {};
+        cfg.pin_bit_mask = (1ULL << sp);
+        cfg.mode = GPIO_MODE_OUTPUT;
+        cfg.pull_up_en = GPIO_PULLUP_DISABLE;
+        cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        cfg.intr_type = GPIO_INTR_DISABLE;
+        gpio_config(&cfg);
+        gpio_set_level(static_cast<gpio_num_t>(sp), 0);
+        gpio_set_drive_capability(static_cast<gpio_num_t>(sp), GPIO_DRIVE_CAP_3);
+
+        if (dp != PIN_UNSET && dp != 255) {
+            gpio_config_t dirCfg = {};
+            dirCfg.pin_bit_mask = (1ULL << dp);
+            dirCfg.mode = GPIO_MODE_OUTPUT;
+            dirCfg.pull_up_en = GPIO_PULLUP_DISABLE;
+            dirCfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+            dirCfg.intr_type = GPIO_INTR_DISABLE;
+            gpio_config(&dirCfg);
+            gpio_set_level(static_cast<gpio_num_t>(dp), 0);
+            gpio_set_drive_capability(static_cast<gpio_num_t>(dp), GPIO_DRIVE_CAP_3);
+        }
+    }
+
     Serial.begin(115200);
     delay(200);
     Serial.printf("\n\n=== %s v%s (%s) ===\n", FW_NAME, FW_VERSION, FW_BUILD_DATE);
@@ -68,7 +95,7 @@ void setup() {
     g_sensor.begin();
     g_joints.begin(motorPtrs, &g_sensor);
     g_joints.attachNvs(&g_nvs);
-    delay(300); // cho sensor task quét ít nhất vài vòng trước khi restore
+    delay(400); // cho sensor task quét ít nhất vài vòng trước khi restore
     const uint8_t restoredCount = g_joints.restoreFromNVS();
     Serial.printf("[MAIN] Restore tu NVS: %u khop (khong can home lai neu du 6)\n",
                   restoredCount);
