@@ -2633,3 +2633,36 @@ Khi người dùng bấm Jog $+30^\circ$:
 
 
 
+---
+
+## 2026-08-31 — Sprint 0 Safety & Real-time (P0 #1-4 Domain Clean)
+
+### Việc đã làm
+- What: Hoàn thiện Sprint 0 (P0 #1-4 Domain Clean) — gom 5 task trước thành gate tích hợp:
+  - **Task1 SafetyManager core** (`src/safety_manager.h/.cpp`): single owner `SafetyState {NORMAL,E_STOP,HOMING,FAULT}`, `pending/isrTime/latched` per-channel, `pollEndstops(nowUs)` debounce 50 ms + `digitalRead==LOW` mới latch, `assertHoming()` cho phép latch không E_STOP, `tryClearFault()` chỉ true khi `!anyPressed() && !hasAnyDriftFault()`. Host test `test_safety_manager.cpp` 10 cases.
+  - **Task2 ISR no-delay** (`src/endstop.*`): `isrHandler` tối minimal <3µs — chỉ `pending=true + isrTime=esp_timer_get_time()`, bỏ `esp_rom_delay_us(25)` và `gpio_get_level` khỏi ISR, forward qua `SafetyManager::isrNotify()`. Đã fix recursion `clearAllLatches` → `forceClear`.
+  - **Task3 Motor+Arm globals removal** (`src/motor.*`, `src/arm.*`, `src/homing.*`): xóa `g_emergencyStop/g_homingActive`, inject `SafetyManager*` qua `setSafetyManager()`, `Motor::onStepTimer` check `safety_->isEStop()` đầu timer (≤20µs), `ArmController` sở hữu `unique_ptr<SafetyManager>` và gọi `pollEndstops()` + `isMotionAllowed()` mỗi tick.
+  - **Task4 Non-blocking homing** (`src/config.h` + `HOMING_BACKOFF_SETTLE_MS=30`, `src/homing.h/.cpp`): enum thêm `WARMUP_SETTLE_WAIT/BACKOFF_SETTLE_WAIT/VERIFY_SETTLE_WAIT` (tổng 12 phases), `enterScanBackoff()` thay `delay(30)` bằng `phase=BACKOFF_SETTLE_WAIT + settleStartMs_=millis()`, `tickScan` 3 case `if(now-settleStartMs_<30/200/350) return` — motion task không block, WDT không đói. `toJson` cập nhật phase names.
+  - **Task5 TrajectoryValidator** (`src/trajectory_validator.h/.cpp`): pure C++ lightweight B — `validate(Job,cur)` làm 1/3/5 IK (`kin::ikPenDown` + `WorkPlane::toRobotXYZ` nếu enabled), `Planner::submit()` gọi đầu tiên, fail → `lastError_` → `ArmController::execute()` map → HTTP 400 `{"error":"OUT_OF_REACH","segment":failIndex}`. Host test 7 cases.
+  - **Task6 Integration**: fix `test_joint_logic` (J2/J3 `AXIS_STEP_SIGN` +1, khớp `config.h`) và `test_homing_logic` (nới stall-window margin theo `HOMING_STALL_ENC_DELTA_DEG=2.5`), chuẩn hóa `tools/run_host_tests.sh` 7 suites strict `|| exit 1` (kinematics 2230, joint_logic, work_plane, trajectory_validator 7, homing_logic, safety_manager 10, homing_nonblocking 13). Cập nhật `docs/SYSTEM_OVERVIEW.html` 4 tabs (RTOS ISR <3µs, Modules 15 cards + SafetyManager/TrajectoryValidator, FSM BACKOFF_SETTLE_WAIT diagram, Safety 6→16 invariants) và footer `Generated 2026-08-31 Sprint 0`.
+- Why: Xóa 2 vi phạm real-time nghiêm trọng (ISR `delay 25µs` làm miss step ticks, `delay(30)` trong `arm_motion` block 3 ticks), gom safety phân tán (`g_emergencyStop` rải rác) về single owner, chặn job ngoài workspace trước khi chạy thay vì dừng giữa quỹ đạo, giữ nguyên hành vi cơ khí (timeout 30/200/350ms, debounce 50ms, DH/gears/pins, UART mutex, driver always enabled).
+- How: Hướng B Domain Clean — SafetyManager là single owner của `SafetyState` (ISR chỉ pending+timestamp, Homing FSM thêm `BACKOFF_SETTLE_WAIT` non-blocking, TrajectoryValidator pure tách khỏi Planner). Xóa globals, semantics `tryClearFault()` rõ, `millis()` vs `esp_timer_get_time()` phân biệt (homing dùng `millis()`, safety dùng `esp_timer`). Giữ mọi hằng số cơ khí, chỉ đổi cơ chế.
+
+### Build gate
+- `~/.platformio/penv/bin/pio run` → **SUCCESS** (RAM 15.2% 49,780 B / 327,680 B, Flash 27.1% 904,593 B / 3,342,336 B, 0 errors, 0 warnings)
+- `bash tools/run_host_tests.sh` → **7 suites ALL PASSED**:
+  - kinematics: `FK home wrist=(126.000,0.000,365.000) tcp=(177.000,0.000,365.000) IK roundtrip ok=2230 fail=0` + Differential Wrist PASSED
+  - joint logic: ALL PASSED
+  - work plane: ALL PASSED
+  - trajectory validator: ALL PASSED (7 tests)
+  - homing logic: ALL PASSED
+  - safety manager: ALL PASSED (10 tests)
+  - homing nonblocking: ALL PASSED (13 tests) — `config_backoff_settle_ms ==30`, `no_delay_blocking`, `BACKOFF_SETTLE_WAIT` 30ms / `WARMUP 200ms` / `VERIFY 350ms`
+- `python -m html.parser docs/SYSTEM_OVERVIEW.html` → parse OK, balanced tags
+
+### Việc còn lại
+- Sprint 1 P1 #5-9 (Foundation): NVS Config Store (DH/gears/current/soft-limit NVS-hóa), Structured Logging, Memory Monitoring (heap/stack WDT), I2C Fault Recovery (PCA9548A/AS5600 bus recover), Step Timer Optimize (esp_timer 50kHz DDA).
+- Sprint 2 P2 #10-13 (Architecture): DI / RobotContext, HAL, LittleFS Frontend, WebSocket.
+- Sprint 3 bỏ qua theo quyết định owner (P3 #14-21).
+- Commissioning hardware: chạy Home All J1→J4 liên tiếp kiểm tra không WDT, đo ISR latency <10ms, pre-flight move ngoài reach → HTTP 400, jog clamp soft-limit, drift 25° debounce.
+

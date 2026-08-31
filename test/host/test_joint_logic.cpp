@@ -32,16 +32,16 @@ static void testCwForDeltaJ1PositiveSign() {
 }
 
 static void testCwForDeltaJ2NegativeSign() {
-    // J2 AXIS_STEP_SIGN = -1: positive joint angle needs ccw (cw=false)
-    CHECK(AXIS_STEP_SIGN[1] < 0, "J2 STEP_SIGN negative");
-    CHECK(cwForDelta(1, +10.0f) == false, "J2 +delta => ccw");
-    CHECK(cwForDelta(1, -10.0f) == true, "J2 -delta => cw");
+    // J2 AXIS_STEP_SIGN = +1 (config.h: góc dương vươn ra ngoài)
+    CHECK(AXIS_STEP_SIGN[1] > 0, "J2 STEP_SIGN positive");
+    CHECK(cwForDelta(1, +10.0f) == true, "J2 +delta => cw");
+    CHECK(cwForDelta(1, -10.0f) == false, "J2 -delta => ccw");
 }
 
 static void testCwForDeltaJ3NegativeSign() {
-    CHECK(AXIS_STEP_SIGN[2] < 0, "J3 STEP_SIGN negative");
-    CHECK(cwForDelta(2, +5.0f) == false, "J3 +delta => ccw");
-    CHECK(cwForDelta(2, -5.0f) == true, "J3 -delta => cw");
+    CHECK(AXIS_STEP_SIGN[2] > 0, "J3 STEP_SIGN positive");
+    CHECK(cwForDelta(2, +5.0f) == true, "J3 +delta => cw");
+    CHECK(cwForDelta(2, -5.0f) == false, "J3 -delta => ccw");
 }
 
 static void testStepsPerDegreePositive() {

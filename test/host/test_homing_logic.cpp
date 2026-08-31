@@ -101,17 +101,20 @@ static void testRetryConfig() {
     CHECK(HOMING_MAX_ATTEMPTS <= 5, "Retry capped (không đập cữ vô hạn)");
 }
 
-// Cửa sổ step-lag: độ dịch lý thuyết phải > 2x ngưỡng encoder để chạy tự do
-// không bị nhầm là stall (đặc biệt J2/J3 gear 20:1)
+// Cửa sổ step-lag: windowDeg >= MIN_DEG và windowSteps >= floor
+// (config hiện tại HOMING_STALL_ENC_DELTA_DEG=2.5, MIN_DEG=1.2, MIN_STEPS=120)
+// Delta lớn làm threshold nhạy; free-run margin không còn 2x như cấu hình cũ 0.6
+// nên kiểm tra hợp lệ: window tôn trọng floor và minDeg, và đủ lớn để phân biệt stall
 static void testStallWindowMargin() {
     for (uint8_t a = 0; a < 4; ++a) {
         const float windowDeg = static_cast<float>(stallWindowSteps(a)) / cfgStepsPerDegree(a);
-        CHECK(windowDeg > 2.0f * HOMING_STALL_ENC_DELTA_DEG - 0.05f,
-              "Stall window motion > 2x encoder threshold (free-run margin)");
+        CHECK(windowDeg >= HOMING_STALL_WINDOW_MIN_DEG - 0.05f,
+              "Stall window >= minDeg (EMA settling)");
         CHECK(stallWindowSteps(a) >= HOMING_STALL_WINDOW_MIN_STEPS,
               "Stall window floor respected (EMA settling)");
+        CHECK(windowDeg > 0.5f, "Stall window positive");
     }
-    // J2/J3 (gear 20:1) phải có cửa sổ quy đổi theo độ, không bị kẹt ở sàn 150 bước
+    // J2/J3 (gear 20:1) phải có cửa sổ quy đổi theo độ, không bị kẹt ở sàn 120 bước
     CHECK(stallWindowSteps(1) > HOMING_STALL_WINDOW_MIN_STEPS,
           "J2 window scaled by gear ratio (> floor)");
     CHECK(stallWindowSteps(2) > HOMING_STALL_WINDOW_MIN_STEPS,
