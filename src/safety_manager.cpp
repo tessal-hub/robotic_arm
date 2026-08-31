@@ -29,9 +29,9 @@ SafetyManager::SafetyManager(Endstops* es, JointModel* jm) {
   };
   state_.store(SafetyState::NORMAL, std::memory_order_release);
   homingActive_ = false;
-  for (auto &row : pending_) row.fill(false);
-  for (auto &row : pendingTime_) row.fill(0);
-  for (auto &row : latched_) row.fill(false);
+  for (auto &row : pending_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
+  for (auto &row : pendingTime_) for (auto &v : row) v.store(0, std::memory_order_relaxed);
+  for (auto &row : latched_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
 }
 
 void SafetyManager::pollEndstops() {
@@ -48,21 +48,22 @@ void SafetyManager::pollEndstops() {
 void SafetyManager::isrNotify(uint8_t axis, EndstopWhich which, int64_t isrTimeUs) {
   if (axis >= NUM_MOTORS) return;
   uint8_t idx = (which == EndstopWhich::MIN) ? 0 : 1;
-  pending_[axis][idx] = true;
-  pendingTime_[axis][idx] = isrTimeUs;
+  pending_[axis][idx].store(true, std::memory_order_relaxed);
+  pendingTime_[axis][idx].store(isrTimeUs, std::memory_order_relaxed);
 }
 
 void SafetyManager::pollEndstops(uint64_t nowUs) {
   for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
     for (uint8_t wi = 0; wi < 2; ++wi) {
-      if (!pending_[a][wi]) continue;
-      int64_t delta = static_cast<int64_t>(nowUs) - pendingTime_[a][wi];
+      if (!pending_[a][wi].load(std::memory_order_relaxed)) continue;
+      int64_t pt = pendingTime_[a][wi].load(std::memory_order_relaxed);
+      int64_t delta = static_cast<int64_t>(nowUs) - pt;
       if (delta < DEBOUNCE_US) continue; // not yet debounced, keep pending
       EndstopWhich w = (wi == 0) ? EndstopWhich::MIN : EndstopWhich::MAX;
       bool pressed = false;
       if (isPressed_) pressed = isPressed_(a, w);
       if (pressed) {
-        latched_[a][wi] = true;
+        latched_[a][wi].store(true, std::memory_order_relaxed);
         if (!homingActive_) {
           SafetyState cur = state_.load(std::memory_order_acquire);
           if (cur != SafetyState::E_STOP) {
@@ -78,7 +79,7 @@ void SafetyManager::pollEndstops(uint64_t nowUs) {
       } else {
         // GPIO HIGH at poll time -> glitch, no latch
       }
-      pending_[a][wi] = false;
+      pending_[a][wi].store(false, std::memory_order_relaxed);
     }
   }
 }
@@ -109,10 +110,10 @@ bool SafetyManager::tryClearFault() {
   bool drift = false;
   if (hasDrift_) drift = hasDrift_();
   if (pressed || drift) return false;
-  for (auto &row : latched_) row.fill(false);
-  for (auto &row : pending_) row.fill(false);
+  for (auto &row : latched_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
+  for (auto &row : pending_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
   // pendingTime not needed clear but for completeness
-  for (auto &row : pendingTime_) row.fill(0);
+  for (auto &row : pendingTime_) for (auto &v : row) v.store(0, std::memory_order_relaxed);
   if (clearLatches_) clearLatches_();
   if (clearDrift_) clearDrift_();
   state_.store(SafetyState::NORMAL, std::memory_order_release);
@@ -136,7 +137,7 @@ SafetyState SafetyManager::state() const {
 bool SafetyManager::anyLatched() const {
   for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
     for (uint8_t wi = 0; wi < 2; ++wi) {
-      if (latched_[a][wi]) return true;
+      if (latched_[a][wi].load(std::memory_order_relaxed)) return true;
     }
   }
   return false;

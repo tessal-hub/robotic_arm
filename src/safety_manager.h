@@ -22,9 +22,8 @@ public:
 #ifdef ARDUINO
   // Firmware constructor with real types
   SafetyManager(Endstops* es, JointModel* jm);
-#endif
-
-  // Generic constructor for host mocks (and also works for firmware via template)
+#else
+  // Generic constructor for host mocks (host only — avoids overload ambiguity on firmware)
   template<typename E, typename J>
   SafetyManager(E* es, J* jm) {
     // Capture isPressed
@@ -50,10 +49,11 @@ public:
     };
     state_.store(SafetyState::NORMAL, std::memory_order_release);
     homingActive_ = false;
-    for (auto &row : pending_) row.fill(false);
-    for (auto &row : pendingTime_) row.fill(0);
-    for (auto &row : latched_) row.fill(false);
+    for (auto &row : pending_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
+    for (auto &row : pendingTime_) for (auto &v : row) v.store(0, std::memory_order_relaxed);
+    for (auto &row : latched_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
   }
+#endif
 
   void isrNotify(uint8_t axis, EndstopWhich which, int64_t isrTimeUs);
   void pollEndstops(uint64_t nowUs); // test-injectable
@@ -74,8 +74,8 @@ private:
   std::function<void()> clearDrift_;
   std::atomic<SafetyState> state_{SafetyState::NORMAL};
   bool homingActive_{false};
-  std::array<std::array<bool,2>, NUM_MOTORS> pending_{};
-  std::array<std::array<int64_t,2>, NUM_MOTORS> pendingTime_{};
-  std::array<std::array<bool,2>, NUM_MOTORS> latched_{};
+  std::array<std::array<std::atomic<bool>,2>, NUM_MOTORS> pending_{};
+  std::array<std::array<std::atomic<int64_t>,2>, NUM_MOTORS> pendingTime_{};
+  std::array<std::array<std::atomic<bool>,2>, NUM_MOTORS> latched_{};
   static constexpr int64_t DEBOUNCE_US = 50000; // 50ms
 };
