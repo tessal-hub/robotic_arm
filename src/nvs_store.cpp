@@ -2,6 +2,18 @@
 
 namespace {
 constexpr const char* NS = "arm-cfg";
+constexpr const char* WIFI_VALID_KEY = "wf_valid";
+constexpr const char* WIFI_SSID_KEY = "wf_ssid";
+constexpr const char* WIFI_PASS_KEY = "wf_pass";
+
+bool putStringVerified(Preferences& prefs, const char* key, const String& value) {
+    const size_t written = prefs.putString(key, value);
+    if (!value.isEmpty() && written != value.length()) return false;
+
+    // Preferences::putString() returns strlen(value), therefore an empty string
+    // returns 0 even after a successful commit. Verify the stored key/value.
+    return prefs.isKey(key) && prefs.getString(key, "") == value;
+}
 }
 
 void NvsStore::begin() {
@@ -11,22 +23,32 @@ void NvsStore::begin() {
 
 bool NvsStore::loadWifiCreds(String& ssid, String& pass) const {
     if (!ok_) return false;
-    ssid = prefs_.getString("wf_ssid", "");
-    pass = prefs_.getString("wf_pass", "");
+
+    // Legacy records have no wf_valid key. Accept them until the next save,
+    // while a present false flag always means an interrupted/incomplete update.
+    if (prefs_.isKey(WIFI_VALID_KEY) && !prefs_.getBool(WIFI_VALID_KEY, false)) {
+        ssid = "";
+        pass = "";
+        return false;
+    }
+    ssid = prefs_.getString(WIFI_SSID_KEY, "");
+    pass = prefs_.getString(WIFI_PASS_KEY, "");
     return ssid.length() > 0;
 }
 
 bool NvsStore::saveWifiCreds(const String& ssid, const String& pass) {
     if (!ok_ || ssid.isEmpty()) return false;
-    const bool w1 = prefs_.putString("wf_ssid", ssid);
-    const bool w2 = prefs_.putString("wf_pass", pass);
-    return w1 && w2;
+    if (prefs_.putBool(WIFI_VALID_KEY, false) != 1) return false;
+    if (!putStringVerified(prefs_, WIFI_SSID_KEY, ssid)) return false;
+    if (!putStringVerified(prefs_, WIFI_PASS_KEY, pass)) return false;
+    return prefs_.putBool(WIFI_VALID_KEY, true) == 1;
 }
 
 void NvsStore::clearWifiCreds() {
     if (ok_) {
-        prefs_.remove("wf_ssid");
-        prefs_.remove("wf_pass");
+        if (prefs_.putBool(WIFI_VALID_KEY, false) != 1) return;
+        prefs_.remove(WIFI_SSID_KEY);
+        prefs_.remove(WIFI_PASS_KEY);
     }
 }
 
@@ -44,15 +66,16 @@ NvsStore::JointHome NvsStore::loadJointHome(uint8_t axis) const {
     return h;
 }
 
-void NvsStore::saveJointHome(uint8_t axis, float rawDeg) {
-    if (!ok_ || axis >= NUM_MOTORS) return;
-    // Ghi giá trị TRƯỚC, valid flag SAU CÙNG: nếu mất nguồn giữa chừng,
-    // valid vẫn false -> boot sau không phục hồi từ dữ liệu rác.
-    char key[12];
-    snprintf(key, sizeof(key), "j%u_raw", axis);
-    prefs_.putFloat(key, rawDeg);
-    snprintf(key, sizeof(key), "j%u_valid", axis);
-    prefs_.putBool(key, true);
+bool NvsStore::saveJointHome(uint8_t axis, float rawDeg) {
+    if (!ok_ || axis >= NUM_MOTORS) return false;
+    char valueKey[12];
+    char validKey[12];
+    snprintf(valueKey, sizeof(valueKey), "j%u_raw", axis);
+    snprintf(validKey, sizeof(validKey), "j%u_valid", axis);
+
+    if (prefs_.putBool(validKey, false) != 1) return false;
+    if (prefs_.putFloat(valueKey, rawDeg) != sizeof(float)) return false;
+    return prefs_.putBool(validKey, true) == 1;
 }
 
 void NvsStore::clearJointHome(uint8_t axis) {
@@ -78,16 +101,19 @@ NvsStore::CalibData NvsStore::loadCalib(uint8_t axis) const {
     return c;
 }
 
-void NvsStore::saveCalib(uint8_t axis, float encSign, float stepsPerDeg) {
-    if (!ok_ || axis >= NUM_MOTORS) return;
-    // Ghi giá trị TRƯỚC, valid flag SAU CÙNG (nguyên tắc commit-flag).
-    char key[14];
-    snprintf(key, sizeof(key), "j%u_esign", axis);
-    prefs_.putFloat(key, encSign);
-    snprintf(key, sizeof(key), "j%u_mspd", axis);
-    prefs_.putFloat(key, stepsPerDeg);
-    snprintf(key, sizeof(key), "j%u_cvalid", axis);
-    prefs_.putBool(key, true);
+bool NvsStore::saveCalib(uint8_t axis, float encSign, float stepsPerDeg) {
+    if (!ok_ || axis >= NUM_MOTORS) return false;
+    char signKey[14];
+    char spdKey[14];
+    char validKey[14];
+    snprintf(signKey, sizeof(signKey), "j%u_esign", axis);
+    snprintf(spdKey, sizeof(spdKey), "j%u_mspd", axis);
+    snprintf(validKey, sizeof(validKey), "j%u_cvalid", axis);
+
+    if (prefs_.putBool(validKey, false) != 1) return false;
+    if (prefs_.putFloat(signKey, encSign) != sizeof(float)) return false;
+    if (prefs_.putFloat(spdKey, stepsPerDeg) != sizeof(float)) return false;
+    return prefs_.putBool(validKey, true) == 1;
 }
 
 void NvsStore::clearCalib(uint8_t axis) {

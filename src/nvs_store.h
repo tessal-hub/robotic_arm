@@ -31,7 +31,7 @@ public:
         float rawDeg{0.0f};   // góc encoder [0,360) tại thời điểm joint = 0°
     };
     [[nodiscard]] JointHome loadJointHome(uint8_t axis) const;
-    void saveJointHome(uint8_t axis, float rawDeg);
+    bool saveJointHome(uint8_t axis, float rawDeg);
     void clearJointHome(uint8_t axis);
     // --- Joint calibration parameters ---
     struct CalibData {
@@ -40,7 +40,7 @@ public:
         float stepsPerDeg{0.0f};
     };
     [[nodiscard]] CalibData loadCalib(uint8_t axis) const;
-    void saveCalib(uint8_t axis, float encSign, float stepsPerDeg);
+    bool saveCalib(uint8_t axis, float encSign, float stepsPerDeg);
     void clearCalib(uint8_t axis);
 
 private:

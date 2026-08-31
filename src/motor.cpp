@@ -27,6 +27,8 @@ Motor::Motor(HardwareSerial* serial, float rSense, uint8_t uartAddress,
       accelSteps(60),
       decelSteps(60),
       continuousMode(false),
+      coordinatedMode(false),
+      preparedRun(false),
       currentMa(DEFAULT_NORMAL_CURRENT),
       spreadCycleMode(true),
       microstepsVal(DEFAULT_MICROSTEPS),
@@ -101,9 +103,10 @@ void IRAM_ATTR Motor::onStepTimer(void* arg) {
         self->absSteps.fetch_add(self->dirCW.load(std::memory_order_relaxed) ? 1 : -1,
                                  std::memory_order_relaxed);
 
-        if (counter < self->accelSteps) {
+        const bool coordinated = self->coordinatedMode.load(std::memory_order_relaxed);
+        if (!coordinated && counter < self->accelSteps) {
             nextInterval = calculateSCurveInterval(counter, self->accelSteps, self->startSpeedUs, self->targetSpeedUs.load(std::memory_order_relaxed));
-        } else if (remaining <= self->decelSteps) {
+        } else if (!coordinated && remaining <= self->decelSteps) {
             nextInterval = calculateSCurveInterval(remaining, self->decelSteps, self->startSpeedUs, self->targetSpeedUs.load(std::memory_order_relaxed));
         }
 
@@ -124,7 +127,10 @@ void IRAM_ATTR Motor::onStepTimer(void* arg) {
     }
 
     if (nextInterval < MIN_STEP_INTERVAL_US) nextInterval = MIN_STEP_INTERVAL_US;
-    if (nextInterval > MAX_STEP_INTERVAL_US) nextInterval = MAX_STEP_INTERVAL_US;
+    if (!self->coordinatedMode.load(std::memory_order_relaxed) &&
+        nextInterval > MAX_STEP_INTERVAL_US) {
+        nextInterval = MAX_STEP_INTERVAL_US;
+    }
 
     bool estop = false;
 #ifdef ARDUINO
@@ -139,7 +145,10 @@ void IRAM_ATTR Motor::onStepTimer(void* arg) {
 }
 
 bool Motor::takeUart(uint32_t timeoutMs) {
-    if (!isTMC || uartMutex == nullptr || *uartMutex == nullptr) return true;
+    if (!isTMC) return true;
+    // A TMC transaction without the shared mutex can corrupt another driver's
+    // datagram. Missing startup synchronization therefore fails closed.
+    if (uartMutex == nullptr || *uartMutex == nullptr) return false;
     if (timeoutMs == portMAX_DELAY) return xSemaphoreTake(*uartMutex, portMAX_DELAY) == pdTRUE;
     return xSemaphoreTake(*uartMutex, pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
 }
@@ -331,6 +340,8 @@ void Motor::run(bool cw, uint32_t steps) {
     }
     if (stepTimer != nullptr) esp_timer_stop(stepTimer);
     running.store(false, std::memory_order_relaxed);
+    preparedRun.store(false, std::memory_order_relaxed);
+    coordinatedMode.store(false, std::memory_order_relaxed);
 
     if (!enabled.load(std::memory_order_relaxed)) enable(true);
     if (!setDirection(cw)) {
@@ -366,6 +377,8 @@ void Motor::run(bool cw, uint32_t steps) {
 void Motor::runContinuous(bool cw) {
     if (stepTimer != nullptr) esp_timer_stop(stepTimer);
     running.store(false, std::memory_order_relaxed);
+    preparedRun.store(false, std::memory_order_relaxed);
+    coordinatedMode.store(false, std::memory_order_relaxed);
 
     if (!enabled.load(std::memory_order_relaxed)) enable(true);
     if (!setDirection(cw)) {
@@ -387,10 +400,59 @@ void Motor::runContinuous(bool cw) {
     if (stepTimer != nullptr) esp_timer_start_once(stepTimer, currentSpeedUs.load(std::memory_order_relaxed));
 }
 
+bool Motor::prepareCoordinatedRun(bool cw, uint32_t steps, uint32_t intervalUs) {
+    if (steps == 0 || stepTimer == nullptr) return false;
+
+    esp_timer_stop(stepTimer);
+    running.store(false, std::memory_order_release);
+    preparedRun.store(false, std::memory_order_relaxed);
+
+    if (!enabled.load(std::memory_order_relaxed)) enable(true);
+    if (!enabled.load(std::memory_order_relaxed) || !setDirection(cw)) {
+        Serial.printf("[MOTOR] %s khong prepare duoc coordinated run\n", label);
+        return false;
+    }
+
+    if (intervalUs < MIN_STEP_INTERVAL_US) intervalUs = MIN_STEP_INTERVAL_US;
+    continuousMode.store(false, std::memory_order_relaxed);
+    coordinatedMode.store(true, std::memory_order_relaxed);
+    targetSteps.store(steps, std::memory_order_relaxed);
+    stepsRemaining.store(steps, std::memory_order_relaxed);
+    stepCounter.store(0, std::memory_order_relaxed);
+    accelSteps = 0;
+    decelSteps = 0;
+    startSpeedUs = intervalUs;
+    targetSpeedUs.store(intervalUs, std::memory_order_relaxed);
+    currentSpeedUs.store(intervalUs, std::memory_order_relaxed);
+    preparedRun.store(true, std::memory_order_release);
+    return true;
+}
+
+bool Motor::startPreparedRun() {
+    if (!preparedRun.exchange(false, std::memory_order_acq_rel) ||
+        stepTimer == nullptr || stepsRemaining.load(std::memory_order_relaxed) == 0) {
+        return false;
+    }
+
+    running.store(true, std::memory_order_release);
+    const esp_err_t err = esp_timer_start_once(
+        stepTimer, currentSpeedUs.load(std::memory_order_relaxed));
+    if (err != ESP_OK) {
+        running.store(false, std::memory_order_release);
+        stepsRemaining.store(0, std::memory_order_relaxed);
+        targetSteps.store(0, std::memory_order_relaxed);
+        coordinatedMode.store(false, std::memory_order_relaxed);
+        return false;
+    }
+    return true;
+}
+
 void Motor::stop() {
     if (stepTimer != nullptr) esp_timer_stop(stepTimer);
     running.store(false, std::memory_order_release);
+    preparedRun.store(false, std::memory_order_release);
     continuousMode.store(false, std::memory_order_relaxed);
+    coordinatedMode.store(false, std::memory_order_relaxed);
     stepsRemaining.store(0, std::memory_order_relaxed);
     targetSteps = 0;
     gpio_set_level(static_cast<gpio_num_t>(stepPin), 0);
@@ -398,7 +460,9 @@ void Motor::stop() {
 
 void IRAM_ATTR Motor::stopFromISR() {
     running.store(false, std::memory_order_release);
+    preparedRun.store(false, std::memory_order_release);
     continuousMode.store(false, std::memory_order_relaxed);
+    coordinatedMode.store(false, std::memory_order_relaxed);
     stepsRemaining.store(0, std::memory_order_relaxed);
     targetSteps = 0;
     if (isHighPin) GPIO.out1_w1tc.val = stepPinMaskHigh;

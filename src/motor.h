@@ -50,6 +50,8 @@ private:
     uint32_t accelSteps{60};
     uint32_t decelSteps{60};
     std::atomic<bool> continuousMode{false};
+    std::atomic<bool> coordinatedMode{false};
+    std::atomic<bool> preparedRun{false};
 
     uint16_t currentMa{DEFAULT_NORMAL_CURRENT};
     bool spreadCycleMode{true};
@@ -95,6 +97,11 @@ public:
     [[nodiscard]] bool setDirection(bool cw);
     void run(bool cw, uint32_t steps);
     void runContinuous(bool cw);
+    // Planner path: configure every axis first, then start all axes only after every
+    // UART direction write succeeded. Constant-rate intervals may exceed the jog
+    // profile's MAX_STEP_INTERVAL_US so low-step axes finish with the dominant axis.
+    [[nodiscard]] bool prepareCoordinatedRun(bool cw, uint32_t steps, uint32_t intervalUs);
+    [[nodiscard]] bool startPreparedRun();
     void stop();
     void stopFromISR();
     void enable(bool en = true);
