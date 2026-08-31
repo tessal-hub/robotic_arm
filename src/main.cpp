@@ -42,6 +42,8 @@ void setup() {
     for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
         const uint8_t sp = g_motors[i].getStepPin();
         const uint8_t dp = g_motors[i].getDirPin();
+        pinMode(sp, OUTPUT);
+        digitalWrite(sp, LOW);
         gpio_config_t cfg = {};
         cfg.pin_bit_mask = (1ULL << sp);
         cfg.mode = GPIO_MODE_OUTPUT;
@@ -53,6 +55,8 @@ void setup() {
         gpio_set_drive_capability(static_cast<gpio_num_t>(sp), GPIO_DRIVE_CAP_3);
 
         if (dp != PIN_UNSET && dp != 255) {
+            pinMode(dp, OUTPUT);
+            digitalWrite(dp, LOW);
             gpio_config_t dirCfg = {};
             dirCfg.pin_bit_mask = (1ULL << dp);
             dirCfg.mode = GPIO_MODE_OUTPUT;
@@ -82,8 +86,8 @@ void setup() {
         g_motors[i].setUartMutex(&g_uartMutex);
     }
     for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
-        g_motors[i].begin(DEFAULT_NORMAL_CURRENT, DEFAULT_MICROSTEPS,
-                          true, DEFAULT_HOLD_SCALE);
+        g_motors[i].begin(DEFAULT_AXIS_RUN_CURRENTS[i], DEFAULT_MICROSTEPS,
+                          false, DEFAULT_HOLD_SCALE);
     }
 
     // 4) Endstops (ISR abort an toàn)

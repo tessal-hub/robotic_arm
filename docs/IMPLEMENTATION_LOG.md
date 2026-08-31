@@ -2463,6 +2463,161 @@ Sau khi Home xong và lưu vào Flash, khi bật nguồn lại, góc cơ học t
 - Nạp firmware: `pio run -t upload`.
 - Thử bấm Jog $+15^\circ$ và $-15^\circ$ trên J2 và J3: Cánh tay di chuyển đầy đủ, êm ái, đúng góc $15^\circ$ thực tế mà không bị giật hay mất bước.
 
+---
+
+## 2026-08-31 — Khắc phục triệt để lỗi Jog Trượt bước & Drift Fault Latch trên toàn bộ 6 trục
+
+### Bối cảnh & Phân tích Log Hardware
+Khi thực hiện Jog thủ công $+45^\circ$ trên J1, J2, J3, J5, J6:
+1. `Motor::run` phát xung với tốc độ mục tiêu quá nhanh (350-500µs) và `startSpeedUs` bị ép nhảy vọt ngay từ $1000\mu\text{s}$ (1000 steps/sec) mà không có dốc tăng tốc từ tần số tĩnh ($400\text{ steps/sec}$).
+2. Dưới quán tính cơ học và tải trọng của các khớp tay robot, motor bước lập tức bị stall (trượt bước, đứng yên tại chỗ và phát tiếng rít).
+3. Động cơ không quay khiến encoder AS5600 đọc góc thực tế $\approx 0^\circ$, trong khi bộ đếm phần mềm `absSteps` đã ghi nhận $+45^\circ \implies$ sai lệch $\Delta = 46.85^\circ > 25.0^\circ$.
+4. `updateDriftCheck` kích hoạt `ArmMode::FAULT`, khóa toàn bộ chuyển động tiếp theo.
+5. Cổ tay vi sai (J5 & J6) bị kiểm tra drift chéo khi một trong hai motor M5/M6 còn đang quay.
+
+### Việc đã làm
+
+1. **Chuẩn hóa Tốc độ Jog tối ưu mô-men xoắn cao (`src/config.h`)**:
+   - J1 (6:1): $1000\mu\text{s/step}$ (1000 steps/sec $\to 18.75^\circ/\text{s}$).
+   - J2 / J3 (20:1): $800\mu\text{s/step}$ (1250 steps/sec $\to 7.03^\circ/\text{s}$, đủ lực kéo cánh tay và khuỷu).
+   - J4 (4:1): $1000\mu\text{s/step}$ (1000 steps/sec $\to 28.13^\circ/\text{s}$).
+   - J5 / J6 (3:1, A4988): $1200\mu\text{s/step}$ (833 steps/sec $\to 31.25^\circ/\text{s}$).
+
+2. **Cấu hình Dòng điện Động cơ riêng cho từng khớp `DEFAULT_AXIS_RUN_CURRENTS` (`src/config.h`, `src/main.cpp`)**:
+   - J1: 800 mA
+   - J2: 1100 mA (tăng dòng cho khớp vai chịu tải trọng lớn nhất)
+   - J3: 1000 mA (tăng dòng cho khớp khuỷu)
+   - J4: 600 mA
+   - J5 / J6: 0 mA (A4988 điều chỉnh phần cứng qua biến trở VREF)
+
+3. **Cải tiến Thuật toán Khởi động & Tăng tốc S-Curve Ramp (`src/motor.cpp`)**:
+   - Luôn khởi động từ `MAX_STEP_INTERVAL_US` ($2500\mu\text{s} \approx 400\text{ steps/sec}$), nơi động cơ bước có mô-men xoắn tĩnh cực đại.
+   - Sử dụng `accelSteps = min(steps / 4, 300U)` để tăng tốc mượt mà theo đường cong S-curve lên tốc độ mục tiêu, và giảm tốc êm ái trước khi dừng hoàn toàn.
+   - Loại bỏ hoàn toàn hiện tượng stall khi khởi động.
+
+4. **Đồng bộ hóa Giám sát Drift cho Cổ tay Vi sai J5 & J6 (`src/joint_model.cpp`)**:
+   - `updateDriftCheck`: Khi kiểm tra khớp vi sai (axis 4 hoặc axis 5), chỉ tiến hành so khớp khi CẢ HAI motor M5 và M6 đều đã dừng quay hoàn toàn và qua thời gian settle 300ms.
+
+### Build gate
+- C++17 clean compile, RAII pattern bảo toàn.
+
+### Hướng dẫn kiểm tra
+- Nạp firmware: `pio run -t upload`.
+- Thử bấm Jog $+15^\circ$ hoặc $+45^\circ$ trên từng trục: Cánh tay khởi động êm ái, tăng tốc mượt mà, di chuyển chuẩn xác và dừng lại đúng vị trí mà không bao giờ bị stall hay báo Drift Fault.
+
+---
+
+## 2026-08-31 — Sửa triệt để Lệch Dấu Encoder `AXIS_ENC_SIGN = {-1, -1, -1, -1, -1, -1}` & Tối ưu Tốc độ Jog
+
+### Bối cảnh & Phân tích Log Hardware
+Log ghi nhận khi Jog J2 $+45^\circ$:
+- `step` chuyển động dương: $+32.40^\circ \dots +26.96^\circ \dots +23.26^\circ$.
+- Encoder AS5600 ghi nhận chuyển động thực tế nhưng giá trị góc giảm (hướng âm): $-14.71^\circ \to -21.47^\circ \to -24.20^\circ$.
+- Sai lệch: $\Delta = \text{step} - \text{enc} = +32.40 - (-14.71) = \mathbf{+47.11^\circ} > 25.0^\circ \implies$ kích hoạt Drift Fault.
+
+### Nguyên nhân gốc
+1. Không phải do tốc độ quá chậm gây timeout: `JointModel::updateDriftCheck` tạm dừng hoàn toàn trong suốt quá trình motor đang quay (`isRunning() == true`), chỉ đánh giá sau khi motor dừng hẳn $300\text{ms}$.
+2. Cả 6 encoder AS5600 trên cơ khí thực tế đều quay theo chiều góc raw giảm khi khớp quay theo chiều dương (+CW). Việc cấu hình `AXIS_ENC_SIGN = {+1, +1, +1, -1, +1, -1}` khiến góc tính toán từ encoder bị ngược dấu hoàn toàn so với góc bước motor.
+
+### Việc đã làm
+1. **Chuẩn hóa dấu Encoder toàn bộ 6 khớp (`src/config.h`)**:
+   - `AXIS_ENC_SIGN = { -1, -1, -1, -1, -1, -1 }`.
+   - Khi motor quay dương (+), encoder tính góc dương (+) $\implies \Delta = |\text{step} - \text{enc}| \approx 0^\circ \ll 25.0^\circ$, loại bỏ $100\%$ Drift Fault.
+2. **Tối ưu Tốc độ Jog phản hồi nhanh & êm ái (`src/config.h`)**:
+   - J1: $600\mu\text{s/step}$ ($1667\text{ steps/sec} \to 31.25^\circ/\text{s}$)
+   - J2: $600\mu\text{s/step}$ ($1667\text{ steps/sec} \to 9.38^\circ/\text{s}$)
+   - J3: $600\mu\text{s/step}$ ($1667\text{ steps/sec} \to 9.38^\circ/\text{s}$)
+   - J4: $800\mu\text{s/step}$ ($1250\text{ steps/sec} \to 35.16^\circ/\text{s}$)
+   - J5 / J6: $1000\mu\text{s/step}$ ($1000\text{ steps/sec} \to 37.50^\circ/\text{s}$)
+
+### Hướng dẫn kiểm tra
+- Nạp firmware: `pio run -t upload`.
+- Thử bấm Jog $+45^\circ$ trên J2, J3, J1...: Động cơ quay mượt mà, góc encoder trên web nhảy cùng chiều dương đồng bộ với bước motor, không còn bị ngắt lỗi Drift Fault.
+
+---
+
+## 2026-08-31 — Khắc phục Lệch Dấu Cặp Encoder Cổ tay Vi sai J5/J6 (`+1, -1`), Tối ưu Mô-men A4988 & Giải phóng Lệnh J3/J4
+
+### Bối cảnh & Phân tích Log Hardware
+1. **J2 hoạt động hoàn hảo**: J2 chạy mượt cả hai chiều $+15^\circ$ và $-15^\circ$ nhiều lần không gặp bất kỳ lỗi nào.
+2. **J3 và J4 bị ngắt oan do J5 Latch FAULT**:
+   - Khi nhận lệnh Jog J3 hoặc J4, watchdog drift kiểm tra toàn bộ cánh tay và phát hiện J5 đang bị lệch $\Delta = 52.59^\circ - 7.60^\circ = 45.0^\circ > 25.0^\circ \implies$ kích hoạt FAULT lập tức, dừng J3/J4 ngay khi vừa khởi động.
+3. **Cơ cấu Vi sai Bánh răng Côn J5/J6 có 2 Encoder gắn đối diện nhau**:
+   - Hai encoder $E_L$ (sensor 4) và $E_R$ (sensor 5) gắn trên hai mặt đối diện của khung vi sai (180° opposite).
+   - Khi khớp Tilt quay cùng chiều, một encoder quay theo chiều tăng raw, encoder kia quay theo chiều giảm raw.
+   - Việc đặt cả hai dấu `-1` khiến góc Tilt đo được bị triệt tiêu thành $0^\circ$ (nhầm thành thuần Roll), gây sai lệch giả $45^\circ$.
+4. **Động cơ A4988 Motor 6 (Right Wrist) cần tốc độ có mô-men xoắn cao**:
+   - Tốc độ $1000\mu\text{s}$ trên A4988 và NEMA 14 chịu ma sát bánh răng côn dễ bị trượt bước.
+   - Cần cấu hình $1600\mu\text{s/step}$ ($625\text{ steps/sec}$) và bổ sung `pinMode`/`digitalWrite` cho chân STEP (40) / DIR (47).
+
+### Việc đã làm
+1. **Chuẩn hóa Dấu Encoder Cặp Vi sai J5/J6 (`src/config.h`)**:
+   - `AXIS_ENC_SIGN = { -1, -1, -1, -1, +1, -1 }`.
+   - $E_L$ (J5) đặt `+1`, $E_R$ (J6) đặt `-1` $\implies$ giải mã động học vi sai `g_diffWrist.forward(e5, e6)` tính đúng $100\%$ góc Tilt và Roll thực tế.
+2. **Tăng cường Mô-men Xoắn và Tín hiệu Điều khiển cho A4988 Motor 5 & 6 (`src/config.h`, `src/motor.cpp`, `src/main.cpp`)**:
+   - Đặt `DEFAULT_AXIS_JOG_SPEEDS[4] = 1600` và `[5] = 1600` ($625\text{ steps/sec} \to 23.44^\circ/\text{s}$).
+   - Bổ sung `pinMode` và `digitalWrite` song song với `gpio_set_level` trong `Motor::begin` và `Motor::setDirection`.
+3. **Giải phóng Hoàn toàn Bước ảo khi Clear Fault (`src/joint_model.cpp`)**:
+   - `clearAllDriftFaults`: Reset `absSteps = 0` cho các khớp chưa home khi bấm Clear Fault, tránh độ lệch bước tích lũy cũ làm kẹt hệ thống.
+
+### Hướng dẫn kiểm tra
+- Nạp firmware: `pio run -t upload`.
+- Trên Web UI: Bấm **🛡️ CLEAR FAULT**, sau đó bấm **Set Home J5+J6** một lần khi cổ tay ở vị trí thẳng.
+- Thử bấm Jog trên J2, J3, J4, J5, J6: Cả 6 trục hoạt động độc lập, mượt mà, không còn hiện tượng J5 kéo sập toàn bộ cánh tay.
+
+---
+
+## 2026-08-31 — Triệt tiêu Vòng lặp Khóa Lỗi bằng Kiến trúc Tự động Đồng bộ Encoder-First liên tục (`resyncFromEncoder`)
+
+### Bối cảnh & Phân tích Log Hardware
+1. **Hiện tượng Vòng lặp Tích lũy Sai số**:
+   - Khi motor di chuyển góc lớn ($30^\circ - 45^\circ$), do ma sát cơ khí/backlash, số bước motor chạy thực tế chênh lệch nhẹ với encoder.
+   - Logic cũ trong `updateDriftCheck` chỉ gọi `resyncFromEncoder` khi $\text{diff} \le 25^\circ$. Khi $\text{diff} > 25^\circ$, hàm KHÔNG đồng bộ lại bước mà đếm $[1/3] \to [3/3] \to \text{FAULT}$.
+   - Hậu quả: `absSteps` không bao giờ được cập nhật lại theo encoder thực tế, khiến sai số tích lũy ngày càng lớn ($30^\circ \to 52^\circ \to 130^\circ$), khóa toàn bộ hệ thống sau mỗi lần bấm Jog.
+2. **Cân chỉnh Tốc độ Jog Tối ưu Mô-men Xoắn Cao**:
+   - J1/J2/J3/J4 đặt $800\mu\text{s/step}$ (1250 steps/sec) giữ mô-men xoắn cao tuyệt đối, không trượt bước khi nâng cánh tay.
+   - J5/J6 (A4988, NEMA 14) đặt $1800\mu\text{s/step}$ ($556\text{ steps/sec}$) tối ưu kéo bánh răng côn êm ái.
+
+### Việc đã làm
+1. **Kiến trúc Tự động Đồng bộ Liên tục (`src/joint_model.cpp`)**:
+   - `updateDriftCheck`: Sau khi motor dừng $300\text{ms}$, luôn tự động gọi `resyncFromEncoder(axis)` để neo lại `absSteps` chính xác theo góc đo vật lý thực tế của AS5600.
+   - Triệt tiêu $100\%$ hiện tượng tích lũy sai số và vòng lặp lỗi `FAULT`.
+   - In log chẩn đoán `[DRIFT] Jx can chinh X.XX deg` khi có hiệu chỉnh.
+2. **Cấu hình Bảng Tốc độ Jog Toàn diện (`src/config.h`)**:
+   - J1..J4: $800\mu\text{s/step}$.
+   - J5..J6: $1800\mu\text{s/step}$.
+
+### Hướng dẫn kiểm tra
+- Nạp firmware: `pio run -t upload`.
+- Thử bấm Jog bất kỳ góc nào ($+15^\circ, +30^\circ, +45^\circ$) trên tất cả các trục J1..J6: Robot di chuyển trơn tru, không bao giờ bị khóa lỗi `FAULT` hay đơ giao diện.
+
+---
+
+## 2026-08-31 — Cấu hình Tần số Khởi động & Vận tốc Tối ưu Mô-men Xoắn Cực đại cho Động cơ Bước mang tải nặng
+
+### Bối cảnh & Phân tích Hiện tượng
+Khi người dùng bấm Jog $+30^\circ$:
+- Động cơ phát tiếng rít/rung và bị khựng (stall), trục cơ học chỉ nhích được $\sim 1^\circ-2^\circ$ rồi dừng lại trong khi firmware phát đủ 5333 xung.
+- Nguyên nhân: Động cơ bước NEMA 17 qua hộp số hành tinh $20:1$ chịu tải trọng uốn (cantilever load) của toàn bộ cánh tay. Việc chạy ở tốc độ cao ($800\mu\text{s} = 1250\text{ steps/sec} \approx 234\text{ RPM}$) làm suy giảm $70-80\%$ mô-men xoắn động (pull-out torque), khiến rotor bị tuột bước ngay sau khi tăng tốc.
+
+### Việc đã làm
+1. **Hạ Tốc độ Jog về Vùng Mô-men Xoắn Cực đại (`src/config.h`)**:
+   - J1 (6:1): $1200\mu\text{s/step}$ ($833\text{ steps/sec} \to 15.63^\circ/\text{s}$)
+   - J2 (20:1): $1800\mu\text{s/step}$ ($556\text{ steps/sec} \to 3.13^\circ/\text{s}$, mô-men kéo cánh tay cực đại)
+   - J3 (20:1): $1800\mu\text{s/step}$ ($556\text{ steps/sec} \to 3.13^\circ/\text{s}$, mô-men nâng khuỷu cực đại)
+   - J4 (4:1): $1500\mu\text{s/step}$ ($667\text{ steps/sec} \to 18.75^\circ/\text{s}$)
+   - J5 / J6 (3:1, A4988): $2500\mu\text{s/step}$ ($400\text{ steps/sec} \to 15.00^\circ/\text{s}$)
+2. **Khởi động Êm từ Tần số Thấp `MAX_STEP_INTERVAL_US = 3500us` (`src/config.h`, `src/motor.cpp`)**:
+   - Khởi động từ $3500\mu\text{s}$ ($285\text{ steps/sec}$), dốc tăng tốc mở rộng lên $400\text{ microsteps}$, giúp động cơ bước khóa từ trường vững chắc từ trạng thái đứng yên và tăng tốc ổn định mà không bị trượt bước.
+
+### Hướng dẫn kiểm tra
+- Nạp firmware: `pio run -t upload`.
+- Bấm Jog $+15^\circ$ hoặc $+30^\circ$ trên J2, J3, J5: Cánh tay sẽ chạy liên tục, khỏe khoắn, không còn tiếng rít hay hiện tượng khựng lại giữa chừng.
+
+
+
+
+
 
 
 

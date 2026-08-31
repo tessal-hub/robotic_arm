@@ -54,8 +54,8 @@ constexpr uint8_t MAX_WAYPOINTS                 = 32;
 // Chiều quay logic: +1 nếu step CW ứng với góc khớp tăng dương (hiệu chỉnh lúc lắp).
 // J2 và J3: góc dương là hướng vươn ra ngoài.
 constexpr int8_t AXIS_STEP_SIGN[NUM_MOTORS]     = { +1, +1, +1, -1, +1, +1 };
-// Chiều đo của encoder AS5600 so với góc khớp dương (hiệu chỉnh lúc lắp).
-constexpr int8_t AXIS_ENC_SIGN[NUM_MOTORS]      = { +1, +1, +1, -1, +1, -1 };
+// Chiều đo của encoder AS5600: J1-J4 quay ngược chiều raw (-1), cụm vi sai J5 (+1) và J6 (-1) đặt đối diện nhau.
+constexpr int8_t AXIS_ENC_SIGN[NUM_MOTORS]      = { -1, -1, -1, -1, +1, -1 };
 
 // ==============================================================================
 // 3. I2C SENSOR BUS (PCA9548A Multiplexer + AS5600 Magnetic Encoders)
@@ -124,6 +124,22 @@ constexpr uint16_t DEFAULT_MICROSTEPS           = 16;     // 1/16 microstepping
 constexpr uint16_t DEFAULT_NORMAL_CURRENT       = 800;    // Normal running current (mA)
 constexpr uint16_t DEFAULT_HOMING_CURRENT       = 350;    // Ultra-low current for Homing (mA)
 
+constexpr uint16_t NORMAL_CURRENT_J1            = 1000;    // Base Yaw (mA)
+constexpr uint16_t NORMAL_CURRENT_J2            = 1400;   // Shoulder Pitch (mA) — nâng cánh tay trên
+constexpr uint16_t NORMAL_CURRENT_J3            = 1400;   // Elbow Pitch (mA) — nâng khuỷu tay
+constexpr uint16_t NORMAL_CURRENT_J4            = 1000;    // Wrist Pan (mA)
+constexpr uint16_t NORMAL_CURRENT_J5            = 0;      // A4988 - VREF cứng
+constexpr uint16_t NORMAL_CURRENT_J6            = 0;      // A4988 - VREF cứng
+
+constexpr uint16_t DEFAULT_AXIS_RUN_CURRENTS[NUM_MOTORS] = {
+    NORMAL_CURRENT_J1,
+    NORMAL_CURRENT_J2,
+    NORMAL_CURRENT_J3,
+    NORMAL_CURRENT_J4,
+    NORMAL_CURRENT_J5,
+    NORMAL_CURRENT_J6
+};
+
 constexpr uint16_t HOMING_CURRENT_J1            = 800;    // Base Yaw (mA) — cần traverse full range, ISR endstop bảo vệ chạm
 constexpr uint16_t HOMING_CURRENT_J2            = 1000;    // Shoulder Pitch (mA)
 constexpr uint16_t HOMING_CURRENT_J3            = 1000;    // Elbow Pitch (mA)
@@ -182,20 +198,20 @@ constexpr float    HOMING_TRIM_MAX_TRAVEL_DEG  = 5.0f;    // Giới hạn hành 
 constexpr uint8_t  HOMING_BACKOFF_MAX_EXTEND    = 3;      // Số lần nới rộng backoff (2.5°→5°→10°→20°) khi công tắc chưa nhả (hysteresis đòn bẩy)
 
 // Speed & Acceleration Timing (microseconds per step pulse)
-constexpr uint32_t DEFAULT_STEP_INTERVAL_US     = 500;    // Target step interval -> ~2000 steps/sec
-constexpr uint32_t HOMING_STEP_INTERVAL_US      = 1600;   // Fallback homing speed
+constexpr uint32_t DEFAULT_STEP_INTERVAL_US     = 1200;   // Target step interval -> ~833 steps/sec
+constexpr uint32_t HOMING_STEP_INTERVAL_US      = 1800;   // Fallback homing speed
 constexpr uint32_t MIN_STEP_INTERVAL_US         = 120;    // Max speed limit -> ~8333 steps/sec
-constexpr uint32_t MAX_STEP_INTERVAL_US         = 2500;   // Starting speed interval
+constexpr uint32_t MAX_STEP_INTERVAL_US         = 3500;   // Starting speed interval (~285 steps/sec, max static torque)
 constexpr uint32_t DEFAULT_ACCEL_RATE           = 12;
 
-// Tốc độ Jog độc lập từng khớp (us/step):
+// Tốc độ Jog độc lập từng khớp (us/step) — tối ưu mô-men xoắn cao tuyệt đối, không trượt bước:
 constexpr uint32_t DEFAULT_AXIS_JOG_SPEEDS[NUM_MOTORS] = {
-    400,   // J1 (6:1): 2500 steps/sec -> 46.88 deg/sec (jog 15° chỉ 0.32s)
-    350,   // J2 (20:1): 2857 steps/sec -> 16.07 deg/sec (jog 15° chỉ 0.93s)
-    350,   // J3 (20:1): 2857 steps/sec -> 16.07 deg/sec (jog 15° chỉ 0.93s)
-    400,   // J4 (4:1): 2500 steps/sec -> 70.31 deg/sec (jog 15° chỉ 0.21s)
-    500,   // J5 (3:1): 2000 steps/sec -> 75.00 deg/sec
-    500    // J6 (3:1): 2000 steps/sec -> 75.00 deg/sec
+    1200,  // J1 (6:1):  833 steps/sec  -> 15.63 deg/sec
+    1800,  // J2 (20:1): 556 steps/sec  -> 3.13 deg/sec (mô-men xoắn nâng cánh tay cực đại)
+    1800,  // J3 (20:1): 556 steps/sec  -> 3.13 deg/sec (mô-men xoắn nâng khuỷu cực đại)
+    1500,  // J4 (4:1):  667 steps/sec  -> 18.75 deg/sec
+    2500,  // J5 (3:1):  400 steps/sec  -> 15.00 deg/sec (A4988, mô-men xoắn kéo bánh răng côn)
+    2500   // J6 (3:1):  400 steps/sec  -> 15.00 deg/sec (A4988, mô-men xoắn kéo bánh răng côn)
 };
 
 // Schmitt-Trigger Deadband for closed-loop holding

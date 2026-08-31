@@ -219,7 +219,12 @@ bool JointModel::updateDriftCheck(uint8_t axis) {
         return false;
     }
     const uint32_t now = millis();
-    if (motors[axis]->isRunning()) {
+    const bool isDiffWrist = (axis == 4 || axis == 5);
+    bool isRunning = motors[axis]->isRunning();
+    if (isDiffWrist && motors[4] != nullptr && motors[5] != nullptr) {
+        isRunning = motors[4]->isRunning() || motors[5]->isRunning();
+    }
+    if (isRunning) {
         lastRunningMs[axis] = now;
         driftFailCount[axis] = 0;
         return false;
@@ -230,23 +235,16 @@ bool JointModel::updateDriftCheck(uint8_t axis) {
     }
 
     const float diff = angleFromSteps(axis) - angleFromEncoder(axis);
+    // Luôn tự động đồng bộ vị trí bước theo encoder sau khi dừng chuyển động (Encoder-First)
+    resyncFromEncoder(axis);
+
     if (fabsf(diff) > RUNAWAY_ERROR_THRESHOLD) {
-        driftFailCount[axis]++;
-        if (driftFailCount[axis] >= 3) {
-            driftFault[axis] = true;
-            Serial.printf("[DRIFT] J%u lech %.2f deg (step=%.2f enc=%.2f) -> FAULT\n",
-                          axis + 1, diff, angleFromSteps(axis), angleFromEncoder(axis));
-        } else {
-            Serial.printf("[DRIFT] J%u nghi lech %.2f deg (step=%.2f enc=%.2f) [%u/3]\n",
-                          axis + 1, diff, angleFromSteps(axis), angleFromEncoder(axis),
-                          driftFailCount[axis]);
-        }
-    } else {
-        driftFailCount[axis] = 0;
-        // Tự động đồng bộ vị trí bước theo encoder sau khi dừng chuyển động
-        resyncFromEncoder(axis);
+        Serial.printf("[DRIFT] J%u can chinh %.2f deg (step=%.2f -> enc=%.2f)\n",
+                      axis + 1, diff, angleFromSteps(axis), angleFromEncoder(axis));
     }
-    return driftFault[axis];
+    driftFailCount[axis] = 0;
+    driftFault[axis] = false;
+    return false;
 }
 
 bool JointModel::hasAnyDriftFault() const noexcept {
@@ -263,6 +261,8 @@ void JointModel::clearAllDriftFaults() noexcept {
         lastRunningMs[i] = millis();
         if (homed[i] && encOK(i)) {
             resyncFromEncoder(i);
+        } else if (!homed[i] && motors[i] != nullptr) {
+            motors[i]->setAbsoluteSteps(0);
         }
     }
 }

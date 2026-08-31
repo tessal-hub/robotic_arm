@@ -198,6 +198,8 @@ TMC2209Diag Motor::getDriverStatus() {
 
 void Motor::begin(uint16_t initialCurrentMa, uint16_t initialMicrosteps,
                    bool initialSpreadCycle, uint8_t initialHoldScale, uint8_t iholddelay) {
+    pinMode(stepPin, OUTPUT);
+    digitalWrite(stepPin, LOW);
     gpio_config_t cfg = {};
     cfg.pin_bit_mask = (1ULL << stepPin);
     cfg.mode = GPIO_MODE_OUTPUT;
@@ -209,6 +211,8 @@ void Motor::begin(uint16_t initialCurrentMa, uint16_t initialMicrosteps,
     gpio_set_drive_capability(static_cast<gpio_num_t>(stepPin), GPIO_DRIVE_CAP_3);
 
     if (dirPin != 255) {
+        pinMode(dirPin, OUTPUT);
+        digitalWrite(dirPin, LOW);
         gpio_config_t dirCfg = {};
         dirCfg.pin_bit_mask = (1ULL << dirPin);
         dirCfg.mode = GPIO_MODE_OUTPUT;
@@ -290,6 +294,7 @@ void Motor::begin(uint16_t initialCurrentMa, uint16_t initialMicrosteps,
 bool Motor::setDirection(bool cw) {
     if (dirPin != 255) { // A4988 hoặc TMC có chân DIR vật lý
         dirCW.store(cw, std::memory_order_relaxed);
+        digitalWrite(dirPin, cw ? HIGH : LOW);
         gpio_set_level(static_cast<gpio_num_t>(dirPin), cw ? 1 : 0);
         return true;
     }
@@ -333,18 +338,18 @@ void Motor::run(bool cw, uint32_t steps) {
     stepCounter.store(0, std::memory_order_relaxed);
 
     const uint32_t targetInterval = targetSpeedUs.load(std::memory_order_relaxed);
-    if (steps < 80) {
-        // Chuyển động ngắn (1-2 độ): chạy thẳng tốc độ mục tiêu không cần tăng giảm tốc, phản hồi tức thì
-        accelSteps = 0;
-        decelSteps = 0;
-        startSpeedUs = targetInterval;
-        currentSpeedUs.store(targetInterval, std::memory_order_relaxed);
+    if (steps < 40) {
+        // Chuyển động siêu ngắn: khởi động êm ở tốc độ vừa phải
+        accelSteps = steps / 2;
+        decelSteps = steps - accelSteps;
+        startSpeedUs = (targetInterval > 2500U) ? targetInterval : 2500U;
+        currentSpeedUs.store(startSpeedUs, std::memory_order_relaxed);
     } else {
         accelSteps = steps / 4;
-        if (accelSteps > 150) accelSteps = 150;
+        if (accelSteps > 400) accelSteps = 400;
         decelSteps = accelSteps;
-        // Bắt đầu từ 1000us (~1000 steps/sec) tạo mô-men khởi động tức thì, không bị bò rùa 2500us
-        startSpeedUs = (targetInterval > 1000U) ? targetInterval : 1000U;
+        // Bắt đầu từ MAX_STEP_INTERVAL_US (3500us ~ 285 steps/sec) đảm bảo mô-men xoắn khởi động cực đại
+        startSpeedUs = (targetInterval > MAX_STEP_INTERVAL_US) ? targetInterval : MAX_STEP_INTERVAL_US;
         currentSpeedUs.store(startSpeedUs, std::memory_order_relaxed);
     }
 
