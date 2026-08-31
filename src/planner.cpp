@@ -44,6 +44,35 @@ bool Planner::submit(const Job& job) {
         curZ_ = fkNow.tcp.z;
     }
 
+    // Pre-flight lightweight B validation (§3.4) — reject out-of-reach BEFORE moving, HTTP 400
+    {
+        TrajectoryValidator::Job vj;
+        vj.type = static_cast<TrajectoryValidator::Job::Type>(job.shape);
+        vj.x1 = job.x1;
+        vj.y1 = job.y1;
+        vj.x2 = job.x2;
+        vj.y2 = job.y2;
+        vj.z = job.z;
+        vj.r = job.r;
+        vj.feedMmS = job.feedMmS;
+        vj.drawNow = job.drawNow;
+        kin::Pose curPose{curX_, curY_, curZ_};
+        validator_.setWorkPlane(workPlane);
+        ValidationResult vr = validator_.validate(vj, curPose);
+        if (!vr.ok) {
+            lastError_ = vr.reason;
+            lastFailIndex_ = vr.failIndex;
+            Serial.printf("[PLAN] REJECT %s: %s at %d (cur %.1f,%.1f,%.1f)\n",
+                          (job.shape == Shape::POINT)   ? "POINT"
+                          : (job.shape == Shape::LINE) ? "LINE"
+                                                       : "CIRCLE",
+                          vr.reason.c_str(), vr.failIndex, curPose.x, curPose.y, curPose.z);
+            return false;
+        }
+        lastError_ = "OK";
+        lastFailIndex_ = -1;
+    }
+
     job_ = job;
 
     switch (job_.shape) {

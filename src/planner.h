@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include "config.h"
+#include "trajectory_validator.h"
 
 class Motor;
 class JointModel;
@@ -64,8 +65,10 @@ public:
     void tick();
 
     [[nodiscard]] uint32_t segmentsDone() const noexcept { return segDone_; }
-    void setWorkPlane(class WorkPlane* wp) noexcept { workPlane = wp; }
+    void setWorkPlane(class WorkPlane* wp) noexcept { workPlane = wp; validator_.setWorkPlane(wp); }
     [[nodiscard]] class WorkPlane* getWorkPlane() const noexcept { return workPlane; }
+    [[nodiscard]] const String& lastError() const noexcept { return lastError_; }
+    [[nodiscard]] int lastFailIndex() const noexcept { return lastFailIndex_; }
 
 private:
     bool startMoveTo(float x, float y, float z, float feedMmS); // 1 segment tới đích
@@ -75,6 +78,9 @@ private:
     Motor* motors[NUM_MOTORS]{};
     JointModel* jm{nullptr};
     class WorkPlane* workPlane{nullptr};
+    TrajectoryValidator validator_{nullptr};
+    String lastError_{"OK"};
+    int lastFailIndex_{-1};
 
     Job job_{};
     bool hasJob_{false};

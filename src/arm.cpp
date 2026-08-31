@@ -8,7 +8,9 @@
 #include "planner.h"
 #include "safety_manager.h"
 #include "sensor.h"
+#include "trajectory_validator.h"
 #include "wifi_manager.h"
+#include "work_plane.h"
 
 #include <esp_task_wdt.h>
 
@@ -60,6 +62,67 @@ void ArmController::begin(Motor** motors_, Sensor* sensor_, Endstops* endstops_,
 
 bool ArmController::submit(const ArmCommand& cmd, uint32_t timeoutMs) {
     if (queue == nullptr) return false;
+    // Synchronous pre-flight validation for Cartesian jobs (§3.4 lightweight B) — HTTP 400 before moving
+    if ((cmd.type == ArmCommand::MOVE_CART || cmd.type == ArmCommand::DRAW_LINE ||
+         cmd.type == ArmCommand::DRAW_CIRCLE) &&
+        pl != nullptr && jm != nullptr) {
+        if (!busy()) {
+            Planner::Job tjob;
+            if (cmd.type == ArmCommand::MOVE_CART) {
+                tjob.shape = Planner::Shape::POINT;
+                tjob.x1 = cmd.p[0];
+                tjob.y1 = cmd.p[1];
+                tjob.z = cmd.p[2];
+                if (cmd.p[5] > 1.0f && cmd.p[5] < 200.0f) tjob.feedMmS = cmd.p[5];
+            } else if (cmd.type == ArmCommand::DRAW_LINE) {
+                tjob.shape = Planner::Shape::LINE;
+                tjob.x1 = cmd.p[0];
+                tjob.y1 = cmd.p[1];
+                tjob.x2 = cmd.p[2];
+                tjob.y2 = cmd.p[3];
+                tjob.z = cmd.p[4];
+                if (cmd.p[5] > 1.0f && cmd.p[5] < 200.0f) tjob.feedMmS = cmd.p[5];
+            } else {
+                tjob.shape = Planner::Shape::CIRCLE;
+                tjob.x1 = cmd.p[0];
+                tjob.y1 = cmd.p[1];
+                tjob.z = cmd.p[2];
+                tjob.r = cmd.p[3];
+                if (cmd.p[5] > 1.0f && cmd.p[5] < 200.0f) tjob.feedMmS = cmd.p[5];
+            }
+            float enc[6];
+            for (uint8_t i = 0; i < NUM_MOTORS; ++i) enc[i] = jm->angleFromSteps(i);
+            const kin::FkResult fk = kin::forward(enc);
+            kin::Pose curPose{fk.tcp.x, fk.tcp.y, fk.tcp.z};
+            WorkPlane* wp = pl->getWorkPlane();
+            if (wp != nullptr && wp->isEnabled()) {
+                const Point3D ucs = wp->fromRobotXYZ({fk.tcp.x, fk.tcp.y, fk.tcp.z});
+                curPose = {ucs.x, ucs.y, ucs.z};
+            }
+            TrajectoryValidator::Job vj;
+            vj.type = static_cast<TrajectoryValidator::Job::Type>(tjob.shape);
+            vj.x1 = tjob.x1;
+            vj.y1 = tjob.y1;
+            vj.x2 = tjob.x2;
+            vj.y2 = tjob.y2;
+            vj.z = tjob.z;
+            vj.r = tjob.r;
+            TrajectoryValidator vv(wp);
+            ValidationResult vr = vv.validate(vj, curPose);
+            if (!vr.ok) {
+                lastPlannerError_ = vr.reason;
+                lastPlannerFailIndex_ = vr.failIndex;
+                Serial.printf("[ARM] REJECT pre-flight %s: %s at %d\n",
+                              (tjob.shape == Planner::Shape::POINT)   ? "POINT"
+                              : (tjob.shape == Planner::Shape::LINE) ? "LINE"
+                                                                     : "CIRCLE",
+                              vr.reason.c_str(), vr.failIndex);
+                return false;
+            }
+            lastPlannerError_ = "OK";
+            lastPlannerFailIndex_ = -1;
+        }
+    }
     return xQueueSend(queue, &cmd, pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
 }
 
@@ -314,7 +377,16 @@ void ArmController::execute(const ArmCommand& cmd) {
             }
             if (cmd.p[5] > 1.0f && cmd.p[5] < 200.0f) job.feedMmS = cmd.p[5];
             mode_ = (cmd.type == ArmCommand::MOVE_CART) ? ArmMode::CART : ArmMode::DRAW;
-            if (!pl->submit(job)) mode_ = ArmMode::IDLE;
+            if (!pl->submit(job)) {
+                lastPlannerError_ = pl->lastError();
+                lastPlannerFailIndex_ = pl->lastFailIndex();
+                Serial.printf("[ARM] REJECT job submit: %s at %d\n", lastPlannerError_.c_str(),
+                              lastPlannerFailIndex_);
+                mode_ = ArmMode::IDLE;
+            } else {
+                lastPlannerError_ = "OK";
+                lastPlannerFailIndex_ = -1;
+            }
             break;
         }
 
@@ -395,7 +467,7 @@ void ArmController::applyJog(uint8_t axis, float deltaDeg) {
 
 String ArmController::statusJson() {
     String j;
-    j.reserve(3500);
+    j.reserve(3600);
     j = "{";
     j += "\"fw\":\"" FW_VERSION "\",";
     switch (mode_) {
@@ -425,11 +497,14 @@ String ArmController::statusJson() {
         j += buf;
     }
     if (pl != nullptr) {
-        char pb[64];
-        snprintf(pb, sizeof(pb), "\"planner\":{\"active\":%s,\"state\":%u,\"segs\":%u},",
-                 pl->isActive() ? "true" : "false",
-                 static_cast<unsigned>(pl->state()),
-                 static_cast<unsigned>(pl->segmentsDone()));
+        // Expose lastError/failIndex for pre-flight validator (§3.4) — HTTP 400 diagnostics via polling
+        const String& pe = (lastPlannerError_ != "OK" && lastPlannerError_.c_str()[0] != '\0') ? lastPlannerError_ : pl->lastError();
+        int pfi = (lastPlannerFailIndex_ != -1) ? lastPlannerFailIndex_ : pl->lastFailIndex();
+        char pb[160];
+        snprintf(pb, sizeof(pb),
+                 "\"planner\":{\"active\":%s,\"state\":%u,\"segs\":%u,\"lastError\":\"%s\",\"failIndex\":%d},",
+                 pl->isActive() ? "true" : "false", static_cast<unsigned>(pl->state()),
+                 static_cast<unsigned>(pl->segmentsDone()), pe.c_str(), pfi);
         j += pb;
     }
 

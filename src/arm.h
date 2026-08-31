@@ -62,6 +62,8 @@ public:
 
     [[nodiscard]] ArmMode mode() const;
     [[nodiscard]] SafetyManager* safety() noexcept { return safety_.get(); }
+    [[nodiscard]] const String& lastPlannerError() const noexcept { return lastPlannerError_; }
+    [[nodiscard]] int lastPlannerFailIndex() const noexcept { return lastPlannerFailIndex_; }
     String statusJson();
 
 private:
@@ -83,6 +85,8 @@ private:
     std::unique_ptr<SafetyManager> safety_{nullptr};
     std::atomic<ArmMode> mode_{ArmMode::IDLE};
     uint32_t driftTickCounter{0};
+    String lastPlannerError_{"OK"};
+    int lastPlannerFailIndex_{-1};
 };
 
 #endif // ARM_H
