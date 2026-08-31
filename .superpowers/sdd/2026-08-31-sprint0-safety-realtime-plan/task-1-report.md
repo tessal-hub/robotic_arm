@@ -75,4 +75,4 @@ ALL PASSED (10 tests)
 **Build gate:**
 - Host `g++` clean (no warnings with `-std=c++17`). Firmware header guard ensures no ambiguous overload under `-DARDUINO`.
 
-**Commit:** `1830870` (`18308700eccfe763ee093f3716ce376bbb0fd683`) — `fix(safety): make ISR pending atomic and guard ctor overload`
+**Commit:** `bbba22e` (`bbba22e8857fe8733f9027da94f69875d4d61277`) — `fix(safety): make ISR pending atomic and guard ctor overload`
