@@ -102,6 +102,9 @@ void HomingController::beginScan() {
     trimCount_ = 0;
     warmupSettling_ = false;
     warmupSettleStartMs_ = 0;
+    settleStartMs_ = 0;
+    pendingBackoffSteps_ = 0;
+    pendingBackoffCw_ = false;
     phaseStartMs_ = millis();
     lastPollMs_ = millis();
     // Xoá latch cũ không phải press thật (cả MIN và MAX)
@@ -216,15 +219,15 @@ void HomingController::enterScanBackoff() {
     // FIX #3: Xoá latch của endstop approachSide_ trước khi lùi, tránh latch cũ
     // gây false-positive khi kiểm tra "cong tac van nhan" sau backoff.
     if (es != nullptr) es->clearLatch(curAxis_, approachSide_);
-    delay(30); // 30ms settle cơ khí & tiếp điểm sau khi dừng đột ngột từ pha quét
-    // Lưu encoder trước khi lùi để chẩn đoán: motor có thực sự di chuyển không?
-    backoffStartEnc_ = (jm != nullptr && jm->encOK(curAxis_)) ? jm->rawEncoder(curAxis_) : 0.0f;
-    m.run(!cwApproach_, static_cast<uint32_t>(steps));
-    phase_ = HomePhase::SCAN_BACKOFF;
-    phaseStartMs_ = millis();
-    Serial.printf("[HOME] J%u: BACKOFF %lld steps (cw=%d, lan %u)\n",
-                  curAxis_ + 1, static_cast<long long>(steps), static_cast<int>(!cwApproach_),
-                  backoffExtend_ + 1);
+    // Non-blocking settle: thay delay(30) bằng BACKOFF_SETTLE_WAIT — motion task không bị block.
+    pendingBackoffSteps_ = steps;
+    pendingBackoffCw_ = !cwApproach_;
+    phase_ = HomePhase::BACKOFF_SETTLE_WAIT;
+    settleStartMs_ = millis();
+    phaseStartMs_ = settleStartMs_;
+    Serial.printf("[HOME] J%u: BACKOFF settle %u ms before %lld steps (cw=%d, lan %u)\n",
+                  curAxis_ + 1, HOMING_BACKOFF_SETTLE_MS, static_cast<long long>(steps),
+                  static_cast<int>(pendingBackoffCw_), backoffExtend_ + 1);
 }
 
 void HomingController::enterScanSlow() {
@@ -373,16 +376,7 @@ void HomingController::tickScan(uint32_t now, Motor& m) {
     switch (phase_) {
         case HomePhase::WARMUP: {
             if (now - phaseStartMs_ > HOMING_JOINT_TIMEOUT_MS) { m.stop(); finishJoint(false); return; }
-
-            // FIX #1 — WARMUP: (a) chờ motor dừng, (b) settle EMA 200ms, (c) đọc encAfter.
-            // encBefore_ đã được lấy trong enterWarmup() TRƯỚC khi motor chạy — baseline đúng.
-            // Trước đây encAfter được đọc ngay sau m.isRunning()→false (không settle), EMA chưa
-            // hội tụ → encAfter ≈ encBefore_ → delta ≈ 0 → false-fail "encoder không phản hồi".
             if (m.isRunning()) return; // chờ motor hoàn tất
-
-            // Công tắc vẫn nhấn sau bước "rời" ⇒ hướng theo mô hình đang đâm VÀO cữ
-            // (nhãn MIN/MAX đấu ngược hoặc pha motor đảo) hoặc motor bị kẹt. Probe thực
-            // nghiệm: thử chiều ngược đúng 1 lần — không phụ thuộc quy ước đấu dây.
             const bool minStill = es->hasPin(curAxis_, EndstopWhich::MIN) &&
                                   es->isPressed(curAxis_, EndstopWhich::MIN);
             const bool maxStill = es->hasPin(curAxis_, EndstopWhich::MAX) &&
@@ -394,45 +388,37 @@ void HomingController::tickScan(uint32_t now, Motor& m) {
                     finishJoint(false);
                     return;
                 }
-                // Nếu 1 công tắc đang nhấn, ta đang ở ngay cữ -> chuyển thẳng sang quét cữ an toàn
                 Serial.printf("[HOME] J%u: WARMUP tai vi tri endstop (%s) — tiep tuc scan\n",
                               curAxis_ + 1, minStill ? "MIN" : "MAX");
                 enterScanMin();
                 return;
             }
-
-            // Motor đã dừng, công tắc đã nhả — chờ EMA AS5600 settle rồi đọc encAfter.
-            // encBefore_ đã lấy trong enterWarmup() TRƯỚC khi motor phát bước; settle 200ms
-            // đủ để EMA (50Hz, alpha=0.2) hội tụ sau khi motor dừng → delta = encAfter - encBefore_
-            // phản ánh đúng chuyển động thực sự của khớp.
-            if (!warmupSettling_) {
-                warmupSettling_ = true;
-                warmupSettleStartMs_ = now;
-                return;
-            }
-            if (now - warmupSettleStartMs_ < WARMUP_ENC_SETTLE_MS) return;
-
+            // Motor đã dừng, công tắc đã nhả — chuyển sang settle wait non-blocking
+            phase_ = HomePhase::WARMUP_SETTLE_WAIT;
+            settleStartMs_ = now;
+            warmupSettling_ = true;
+            warmupSettleStartMs_ = now;
+            phaseStartMs_ = now;
+            return;
+        }
+        case HomePhase::WARMUP_SETTLE_WAIT: {
+            if (now - phaseStartMs_ > HOMING_JOINT_TIMEOUT_MS) { m.stop(); finishJoint(false); return; }
+            if (now - settleStartMs_ < WARMUP_ENC_SETTLE_MS) return;
             // Kiểm tra dịch chuyển encoder sau khi motor phát bước warmup (~3°).
             const float encAfter = (jm != nullptr) ? jm->rawEncoder(curAxis_) : 0.0f;
             const float delta = encAfter - encBefore_;
-            const bool hasEndstop = es != nullptr && (es->hasPin(curAxis_, EndstopWhich::MIN) ||
-                                                      es->hasPin(curAxis_, EndstopWhich::MAX));
-
             if (fabsf(delta) < ENC_DIR_DEADZONE_DEG[curAxis_]) {
                 if (jm != nullptr && jm->encOK(curAxis_)) {
-                    // Cảm biến I2C còn sống (có thể motor đang đứng sát cữ kẹt cứng không quay được bước warmup)
                     encDirMult_ = static_cast<float>(AXIS_ENC_SIGN[curAxis_]);
                     Serial.printf("[HOME] J%u: WARMUP encoder delta=%.2f < %.2f — fallback config encSign=%+.0f, tiep tuc scan\n",
                                   curAxis_ + 1, delta, ENC_DIR_DEADZONE_DEG[curAxis_], encDirMult_);
                     enterScanMin();
                     return;
                 }
-                // Cảm biến I2C mất kết nối
                 Serial.printf("[HOME] J%u: WARMUP encoder mat ket noi (I2C loi) — HUY KHOP\n", curAxis_ + 1);
                 finishJoint(false);
                 return;
             }
-            // Đo enc_dir_mult: dấu dịch chuyển encoder so với hướng bước dự định
             const float intendedJointSign = static_cast<float>(AXIS_STEP_SIGN[curAxis_]) *
                                              (warmupCW_ ? 1.0f : -1.0f);
             encDirMult_ = (delta * intendedJointSign >= 0.0f) ? 1.0f : -1.0f;
@@ -555,6 +541,20 @@ void HomingController::tickScan(uint32_t now, Motor& m) {
             }
             return;
         }
+        case HomePhase::BACKOFF_SETTLE_WAIT: {
+            if (now - phaseStartMs_ > HOMING_JOINT_TIMEOUT_MS) { m.stop(); finishJoint(false); return; }
+            if (now - settleStartMs_ < HOMING_BACKOFF_SETTLE_MS) return;
+            // Settle done — start backoff move non-blocking
+            backoffStartEnc_ = (jm != nullptr && jm->encOK(curAxis_)) ? jm->rawEncoder(curAxis_) : 0.0f;
+            Motor& m2 = *motors[curAxis_];
+            m2.run(pendingBackoffCw_, static_cast<uint32_t>(pendingBackoffSteps_));
+            phase_ = HomePhase::SCAN_BACKOFF;
+            phaseStartMs_ = now;
+            Serial.printf("[HOME] J%u: BACKOFF %lld steps (cw=%d, lan %u)\n",
+                          curAxis_ + 1, static_cast<long long>(pendingBackoffSteps_),
+                          static_cast<int>(pendingBackoffCw_), backoffExtend_ + 1);
+            return;
+        }
         case HomePhase::SCAN_BACKOFF: {
             if (now - phaseStartMs_ > HOMING_JOINT_TIMEOUT_MS) { m.stop(); finishJoint(false); return; }
             if (m.isRunning()) return;
@@ -665,12 +665,19 @@ void HomingController::tickScan(uint32_t now, Motor& m) {
             return;
         }
         case HomePhase::CENTERING: {
-            // Chờ bước chạy xong + 350ms cho EMA AS5600 ổn định rồi chuyển VERIFY
             if (now - phaseStartMs_ > HOMING_JOINT_TIMEOUT_MS) { m.stop(); finishJoint(false); return; }
             if (m.isRunning()) {
                 settleStartMs_ = now;
                 return;
             }
+            // Motor stopped — chuyển sang settle wait non-blocking trước khi VERIFY
+            phase_ = HomePhase::VERIFY_SETTLE_WAIT;
+            settleStartMs_ = now;
+            // phaseStartMs_ giữ nguyên để timeout tổng thể không reset quá sớm; settleStartMs_ dùng cho 350ms
+            return;
+        }
+        case HomePhase::VERIFY_SETTLE_WAIT: {
+            if (now - phaseStartMs_ > HOMING_JOINT_TIMEOUT_MS) { m.stop(); finishJoint(false); return; }
             if (now - settleStartMs_ < ENC_SETTLE_MS) return;
             enterVerify();
             return;
@@ -824,8 +831,9 @@ void HomingController::cancel() {
 
 String HomingController::toJson() const {
     static const char* PHASE_NAMES[] = {
-        "idle", "warmup", "scan_min", "scan_backoff", "scan_slow",
-        "scan_max", "centering", "verify", "done"
+        "idle", "warmup", "warmup_settle_wait", "scan_min", "scan_backoff",
+        "backoff_settle_wait", "scan_slow", "scan_max", "centering", "verify",
+        "verify_settle_wait", "done"
     };
     static_assert(sizeof(PHASE_NAMES) / sizeof(PHASE_NAMES[0]) ==
                       static_cast<uint8_t>(HomePhase::DONE) + 1,

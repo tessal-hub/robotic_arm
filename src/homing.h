@@ -12,13 +12,16 @@ class SafetyManager;
 
 enum class HomePhase : uint8_t {
     IDLE = 0,
-    WARMUP,        // Stage 1+2: hạ dòng + StealthChop, chạy +3° đo enc_dir_mult + hướng an toàn
-    SCAN_MIN,      // Stage 3: quét FAST tới cữ đầu tiên (MIN hoặc MAX tùy lắp đặt)
-    SCAN_BACKOFF,  // Stage 4: lùi khỏi cữ vừa chạm trước khi tiếp cận lại chậm
-    SCAN_SLOW,     // Stage 5: tiếp cận lại cữ ở tốc độ chậm -> mốc chính xác
-    SCAN_MAX,      // Stage 6: quét FAST tới cữ đối diện
-    CENTERING,     // Stage 7: chạy về tâm cơ khí / MIN+offset (J3) bằng bước tương đối
-    VERIFY,        // Stage 8: chờ EMA AS5600 ổn định, đối chiếu encoder vs vị trí mong đợi, trim nếu lệch
+    WARMUP,               // Stage 1+2: hạ dòng + StealthChop, chạy +3° đo enc_dir_mult + hướng an toàn
+    WARMUP_SETTLE_WAIT,   // Stage 2b: chờ EMA AS5600 ổn định sau WARMUP (WARMUP_ENC_SETTLE_MS=200, non-blocking)
+    SCAN_MIN,             // Stage 3: quét FAST tới cữ đầu tiên (MIN hoặc MAX tùy lắp đặt)
+    SCAN_BACKOFF,         // Stage 4: lùi khỏi cữ vừa chạm trước khi tiếp cận lại chậm
+    BACKOFF_SETTLE_WAIT,  // Stage 4b: settle 30ms sau khi dừng đột ngột từ pha quét (HOMING_BACKOFF_SETTLE_MS, non-blocking)
+    SCAN_SLOW,            // Stage 5: tiếp cận lại cữ ở tốc độ chậm -> mốc chính xác
+    SCAN_MAX,             // Stage 6: quét FAST tới cữ đối diện
+    CENTERING,            // Stage 7: chạy về tâm cơ khí / MIN+offset (J3) bằng bước tương đối
+    VERIFY,               // Stage 8: chờ EMA AS5600 ổn định, đối chiếu encoder vs vị trí mong đợi, trim nếu lệch
+    VERIFY_SETTLE_WAIT,   // Stage 8b: chờ ENC_SETTLE_MS=350 sau CENTERING trước khi VERIFY (non-blocking)
     DONE
 };
 
@@ -126,6 +129,9 @@ private:
     EndstopWhich firstSide_{EndstopWhich::MIN};     // cữ chạm ĐẦU TIÊN
     EndstopWhich approachSide_{EndstopWhich::MIN};  // cữ đang dò (backoff/slow)
     uint32_t settleStartMs_{0};
+    // Pending backoff move during BACKOFF_SETTLE_WAIT (non-blocking)
+    int64_t pendingBackoffSteps_{0};
+    bool pendingBackoffCw_{false};
 
     // Verify state
     float targetEncRaw_{0.0f};  // raw encoder mong đợi tại home

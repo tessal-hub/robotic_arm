@@ -196,6 +196,7 @@ constexpr int32_t  HOMING_STALL_WINDOW_MIN_STEPS = 120;   // Sàn cửa sổ (12
 constexpr float    HOMING_MIN_ENC_SPAN_DEG[NUM_MOTORS] = { 30.0f, 30.0f, 30.0f, 15.0f, 10.0f, 10.0f };
 constexpr float    HOMING_TRIM_MAX_TRAVEL_DEG  = 5.0f;    // Giới hạn hành trình mỗi lần trim VERIFY (chống trim chạy loạn đâm endstop)
 constexpr uint8_t  HOMING_BACKOFF_MAX_EXTEND    = 3;      // Số lần nới rộng backoff (2.5°→5°→10°→20°) khi công tắc chưa nhả (hysteresis đòn bẩy)
+constexpr uint32_t HOMING_BACKOFF_SETTLE_MS    = 30;     // Settle cơ khí & tiếp điểm sau khi dừng đột ngột từ pha quét (non-blocking)
 
 // Speed & Acceleration Timing (microseconds per step pulse)
 constexpr uint32_t DEFAULT_STEP_INTERVAL_US     = 1200;   // Target step interval -> ~833 steps/sec
