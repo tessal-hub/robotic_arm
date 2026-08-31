@@ -116,9 +116,10 @@ private:
     bool warmupCW_{false};
     bool warmupProbed_{false}; // đã thử chiều ngược khi công tắc vẫn nhấn sau bước warmup
     uint32_t warmupSteps_{0};  // số bước warmup (probe chiều ngược chạy lại đúng khoảng này)
-    // FIX #1: settle flag — chờ EMA encoder ổn định SAU KHI motor dừng, trước khi lấy mẫu
-    bool warmupSettling_{false};      // đang trong giai đoạn settle sau khi motor warmup dừng
-    uint32_t warmupSettleStartMs_{0}; // mốc thời gian bắt đầu settle
+    // deprecated: warmupSettling_/warmupSettleStartMs_ kept for compat — logic now via
+    // HomePhase::WARMUP_SETTLE_WAIT + settleStartMs_; do not use directly
+    bool warmupSettling_{false};
+    uint32_t warmupSettleStartMs_{0};
     // FIX #6: ghi nhớ trạng thái endstop lúc bắt đầu WARMUP — dùng để chọn hướng probe
     bool warmupFromMinP_{false};      // MIN endstop đang nhấn khi bắt đầu enterWarmup()
     bool warmupFromMaxP_{false};      // MAX endstop đang nhấn khi bắt đầu enterWarmup()

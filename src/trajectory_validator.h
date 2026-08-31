@@ -10,7 +10,7 @@ class WorkPlane;
  * ValidationResult — kết quả pre-flight IK lightweight B.
  * - ok: true nếu toàn bộ quỹ đạo trong tầm với
  * - failIndex: chỉ số điểm fail (0=POINT/target, LINE:0=start/1=mid/2=end, CIRCLE:0=cur/1..4=quadrants), -1 nếu ok
- * - reason: "OK" hoặc "OUT_OF_REACH" / "OUT_OF_REACH mid" / "BAD_RADIUS"
+ * - reason: "OK" hoặc "OUT_OF_REACH" (exact, detail via failIndex) / "BAD_RADIUS"
  */
 struct ValidationResult {
     bool ok{true};

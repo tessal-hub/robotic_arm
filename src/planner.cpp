@@ -128,6 +128,9 @@ bool Planner::startMoveTo(float x, float y, float z, float feedMmS) {
     float ry = y;
     float rz = z;
     if (workPlane != nullptr && workPlane->isEnabled()) {
+        // UCS transform: (x,y) are U,V on plane, wLift = z - job_.z is height above paper
+        // job_.z = paper plane Z in UCS. Lift: job_.z + PEN_LIFT, so wLift = lift.
+        // toRobotXYZ(u,v,wLift) = origin + u*uAxis + v*vAxis + wLift*normal
         const Point3D robotP = workPlane->toRobotXYZ(x, y, z - job_.z);
         rx = robotP.x;
         ry = robotP.y;

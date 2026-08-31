@@ -759,6 +759,11 @@ void HomingController::tick() {
 }
 
 void HomingController::finishJoint(bool ok) {
+    // Clear pending backoff state so stale steps don't survive retry/cancel
+    pendingBackoffSteps_ = 0;
+    pendingBackoffCw_ = false;
+    warmupSettling_ = false;
+    warmupSettleStartMs_ = 0;
     restoreDriverDefaults(curAxis_);
     if (ok && jm != nullptr) {
         jm->setHomeHere(curAxis_);
@@ -822,6 +827,12 @@ void HomingController::cancel() {
         es->clearLatch(curAxis_, EndstopWhich::MIN);
         es->clearLatch(curAxis_, EndstopWhich::MAX);
     }
+    // Clear pending backoff state to avoid stale on next start
+    pendingBackoffSteps_ = 0;
+    pendingBackoffCw_ = false;
+    settleStartMs_ = 0;
+    warmupSettling_ = false;
+    warmupSettleStartMs_ = 0;
     active_ = false;
     if (safety_) safety_->assertHoming(false);
     lastOk_ = false;

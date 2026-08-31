@@ -229,7 +229,7 @@ void ArmController::taskLoop() {
             }
         }
 
-        // 3) Drift watchdog ~ mỗi 500ms (chỉ chạy khi KHÔNG homing)
+        // 3) Drift watchdog ~ mỗi 500ms (chỉ chạy khi KHÔNG homing) — maps to SafetyManager FAULT
         if (++driftTickCounter >= (500 / MOTION_TASK_PERIOD_MS)) {
             driftTickCounter = 0;
             if (jm != nullptr && (hc == nullptr || !hc->isActive()) && mode_ != ArmMode::FAULT) {
@@ -239,10 +239,20 @@ void ArmController::taskLoop() {
                     for (uint8_t j = 0; j < NUM_MOTORS; ++j) {
                         if (motors[j] != nullptr) motors[j]->stop();
                     }
+                    if (safety_) safety_->notifyFault("drift");
                     mode_ = ArmMode::FAULT;
                     Serial.println("[ARM] FAULT: step/encoder drift exceeded threshold");
                 }
             }
+        }
+        // SafetyManager drift→FAULT promotion (in case drift latched between checks, poll handles it;
+        // also sync mode to safety state if safety already FAULT)
+        if (safety_ && safety_->isFault() && mode_ != ArmMode::FAULT) {
+            if (pl != nullptr) pl->stop();
+            for (uint8_t j = 0; j < NUM_MOTORS; ++j) {
+                if (motors[j] != nullptr) motors[j]->stop();
+            }
+            mode_ = ArmMode::FAULT;
         }
 
         // 4) Mode runtime (tính lại mỗi tick, tránh kẹt trạng thái)

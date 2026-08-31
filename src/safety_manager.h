@@ -12,6 +12,10 @@
 enum class EndstopWhich : uint8_t { MIN = 0, MAX = 1 };
 #endif
 
+// SafetyState single owner (Spec §3.3): NORMAL=idle/jog/cart, HOMING=homing active,
+// E_STOP=endstop latch (ISR debounce, 50ms+poll), FAULT=drift/power failure.
+// Both E_STOP and FAULT block motion (isMotionAllowed() false). CLEAR_FAULT clears both.
+// isEStop() is true only for E_STOP (fast ISR stop); FAULT is via isFault()/drift.
 enum class SafetyState { NORMAL = 0, E_STOP = 1, FAULT = 2, HOMING = 3 };
 
 class Endstops;
@@ -56,13 +60,15 @@ public:
 #endif
 
   void isrNotify(uint8_t axis, EndstopWhich which, int64_t isrTimeUs);
-  void pollEndstops(uint64_t nowUs); // test-injectable
+  void pollEndstops(uint64_t nowUs); // test-injectable, also checks drift→FAULT
   void pollEndstops(); // on Arduino calls esp_timer_get_time()
   void assertHoming(bool active);
   void assertEStop(const char* reason);
+  void notifyFault(const char* reason); // sets FAULT (drift/power) if not already FAULT/E_STOP
   bool tryClearFault();
   bool isMotionAllowed() const;
-  bool isEStop() const;
+  bool isEStop() const; // true only for E_STOP, not FAULT
+  bool isFault() const; // true for FAULT (drift)
   SafetyState state() const;
   bool anyLatched() const;
   bool isLatched(uint8_t axis, EndstopWhich which) const;

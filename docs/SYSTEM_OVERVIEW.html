@@ -694,9 +694,9 @@ tr:hover td{background:#243247}
           <code>e5=−q23</code> (bút thẳng đứng), <code>e4=e6=0</code> (giữ mặt phẳng tay)</li>
       <li>Lọc nhánh: chấp nhận e2∈[−90;90], e3∈[0;90], e5∈[−120;120]; chọn nghiệm |J3| nhỏ nhất</li>
     </ol>
-    <div class="ok-box">Kiểm chứng: roundtrip IK→FK 3280/3280 pose random sai số ≤ 0.5 mm (test host
+    <div class="ok-box">Kiểm chứng: roundtrip IK→FK 2230/2230 pose random sai số ≤ 0.5 mm (test host
     <code>test/kinematics/test_kinematics.cpp</code>, runner <code>tools/run_kin_tests.sh</code>).
-    FK home tái tạo đúng wrist (126, 0, 365) và TCP (146, 0, 365). Từ chối đúng các điểm ngoài vùng với.</div>
+    FK home tái tạo đúng wrist (126, 0, 365) và TCP (177, 0, 365). Từ chối đúng các điểm ngoài vùng với. <span class="muted">(2230 = reachable trong sweep toàn vùng; 3280 cũ là tổng số pose trước khi lọc unreachable)</span></div>
     <div class="warn-box"><b>Cảnh báo mô hình:</b> roundtrip chỉ chứng minh closed-form ≡ bảng DH — KHÔNG chứng minh
     bảng DH ≡ cơ khí thật nếu offset 16 mm không thẳng hàng với 110 mm. Biến thể "gắt L" sai tới ~155 mm.
     Thí nghiệm phân biệt 1 phép đo: home → jog J3 +30° → so displacement ngang bút thực vs "pose" firmware.
@@ -754,18 +754,18 @@ tr:hover td{background:#243247}
     <ul>
       <li><b>1.</b> Web handler không đụng hardware — chỉ enqueue <code>ArmCommand</code>.</li>
       <li><b>2.</b> STOP_ALL luôn được chấp nhận ngay cả khi queue gần đầy (timeout 50 ms).</li>
-      <li><b>3.</b> FAULT là latch: endstop pressed + motor running ngoài homing ⇒ dừng tất cả; endstop pressed at boot = OK. CLEAR_FAULT mở khoá.</li>
+      <li><b>3.</b> FAULT/E_STOP là latch: endstop pressed + motor running ngoài homing ⇒ <code>E_STOP</code> (SafetyManager), drift vượt 25° ⇒ <code>FAULT</code>; endstop pressed at boot = OK. <code>CLEAR_FAULT</code> mở khoá chỉ khi <code>!anyPressed() && !hasAnyDriftFault()</code>.</li>
       <li><b>4.</b> Cartesian (move/draw) bắt buộc <code>allPositioningHomed()</code> (J1–J4).</li>
       <li><b>5.</b> Jog clamp theo soft limit khi đã home; bỏ lệnh nếu trục đang chạy.</li>
       <li><b>6.</b> Homing quét 2 cữ 2 tốc độ (non-blocking): pha FAST dòng theo khớp (J1=800, J2=1000, J3=1000, J4=450 mA), pha SLOW tiếp cận lại ở 3000µs/step để lấy mốc chính xác; settle non-blocking <code>BACKOFF_SETTLE_WAIT 30ms / WARMUP_SETTLE_WAIT 200ms / VERIFY_SETTLE_WAIT 350ms</code> bằng <code>millis()</code> — không <code>delay()</code>; VERIFY đối chiếu encoder độc lập, fail → retry (tối đa 2 lần) rồi mới hủy chuỗi; khôi phục dòng khi xong/thất bại/hủy.</li>
       <li><b>7.</b> Drift watchdog 25° (step-count vs encoder) khi idle — báo fault từng khớp (nới cho backlash planetary).</li>
       <li><b>8.</b> Restore NVS từ chối delta &gt; hành trình + 15° (nam châm dịch chuyển).</li>
-      <li><b>9.</b> Debounce endstop 50 ms do <code>SafetyManager::pollEndstops()</code> @100Hz; ISR &lt;3µs chỉ ghi <code>pending+timestamp</code> — không <code>delay</code>/không <code>gpio_get_level</code>; clear latches at boot + sau homing; motion fault chỉ khi <code>!homing && E_STOP</code>.</li>
+      <li><b>9.</b> Debounce endstop 50 ms do <code>SafetyManager::pollEndstops()</code> @100Hz; ISR &lt;3µs chỉ ghi <code>pending+timestamp</code> — không <code>delay</code>/không <code>gpio_get_level</code>; <b>tradeoff</b>: dừng sau debounce ≤60 ms (50 ms + 10 ms poll), không tức thì trong ISR — bù bằng backup <code>isPressed()+movingAway</code> trong <code>arm_motion</code> và <code>safety_->isEStop()</code> trong Step ISR (≤20 µs) khi đã latch; clear latches at boot + sau homing; motion fault chỉ khi <code>!homing && E_STOP</code>.</li>
       <li><b>10.</b> Mọi giao dịch UART TMC qua mutex với timeout ngắn — fail thì skip, không treo.</li>
       <li><b>11.</b> Driver luôn enabled — không có EN pin; <code>toff=4</code> bình thường, 0 khi disable.</li>
       <li><b>12.</b> Planner gate: điểm ngoài vùng với ⇒ stop toàn job (kể cả giữa chừng).</li>
       <li><b>13.</b> <b>Flash Write Isolation Guard:</b> Cấm ghi/xoá NVS/LittleFS khi motor đang chạy (<code>arm->busy()</code>) để tránh <code>spi_flash_op_lock()</code> làm stall CPU và gây glitch phát xung STEP thời gian thực.</li>
-      <li><b>14.</b> <b>Fail-fast E-Stop via SafetyManager &amp; 2-Pipeline Safety:</b> Step ISR kiểm tra <code>safety_->isEStop()</code> ($\le 20\,\mu\text{s}$), ISR endstop chỉ pending+timestamp (&lt;3µs) và <code>pollEndstops()</code> quyết định E_STOP. Pipeline A bù vi sai realtime 200Hz ($|\Delta\theta| \le 3.0^\circ$), Pipeline B phân loại lỗi sâu sau $t_{\text{settle}} = 150\,\text{ms}$ kết hợp tỉ số truyền 20:1 ($\Delta\theta_{\text{raw}} > 90^\circ$ tại trục encoder).</li>
+      <li><b>14.</b> <b>Fail-fast E-Stop via SafetyManager &amp; 2-Pipeline Safety:</b> Step ISR kiểm tra <code>safety_->isEStop()</code> ($\le 20\,\mu\text{s}$), ISR endstop chỉ pending+timestamp (&lt;3µs) và <code>pollEndstops()</code> quyết định E_STOP sau debounce ≤60 ms (50 ms + 10 ms poll) — hồi quy so với &lt;1 ms <code>stopFromISR()</code> cũ, đánh đổi để tránh miss tick 50 kHz; bù bằng backup <code>movingAway</code>. Pipeline A bù vi sai realtime 200Hz ($|\Delta\theta| \le 3.0^\circ$), Pipeline B phân loại lỗi sâu sau $t_{\text{settle}} = 150\,\text{ms}$ kết hợp tỉ số truyền 20:1 ($\Delta\theta_{\text{raw}} > 90^\circ$ tại trục encoder).</li>
       <li><b>15.</b> <b>SafetyManager single owner:</b> Chỉ <code>SafetyManager</code> sở hữu <code>SafetyState</code> và latch — xóa <code>g_emergencyStop/g_homingActive</code>. <code>tryClearFault()</code> chỉ true khi <code>!anyPressed() && !hasAnyDriftFault()</code>.</li>
       <li><b>16.</b> <b>TrajectoryValidator pre-flight:</b> <code>Planner::submit()</code> gọi <code>validator.validate()</code> trước khi chạy — fail → HTTP 400 <code>OUT_OF_REACH</code> với failIndex, không dừng giữa quỹ đạo.</li>
     </ul>

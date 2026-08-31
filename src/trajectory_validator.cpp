@@ -35,15 +35,15 @@ ValidationResult TrajectoryValidator::validate(const Job& job, const kin::Pose& 
         kin::Pose tgt{job.x2, job.y2, job.z};
         // mid between cur and target (use cur.z for mid to stay on same plane as job.z? spec uses cur.z, we use job.z)
         kin::Pose mid{(cur.x + tgt.x) * 0.5f, (cur.y + tgt.y) * 0.5f, job.z};
-        // cur check (index 0)
+        // cur check (index 0) — reason always exact "OUT_OF_REACH", detail via failIndex
         if (!checkPose(cur)) {
-            return {false, 0, "OUT_OF_REACH start"};
+            return {false, 0, "OUT_OF_REACH"};
         }
         if (!checkPose(mid)) {
-            return {false, 1, "OUT_OF_REACH mid"};
+            return {false, 1, "OUT_OF_REACH"};
         }
         if (!checkPose(tgt)) {
-            return {false, 2, "OUT_OF_REACH end"};
+            return {false, 2, "OUT_OF_REACH"};
         }
         return {true, -1, "OK"};
     }
@@ -57,9 +57,9 @@ ValidationResult TrajectoryValidator::validate(const Job& job, const kin::Pose& 
         if (r <= 0.0f) {
             return {false, 0, "BAD_RADIUS"};
         }
-        // index 0: cur
+        // index 0: cur — reason always exact "OUT_OF_REACH"
         if (!checkPose(cur)) {
-            return {false, 0, "OUT_OF_REACH cur"};
+            return {false, 0, "OUT_OF_REACH"};
         }
         // 4 quadrants: (cx+r,cy), (cx,cy+r), (cx-r,cy), (cx,cy-r) at height z
         kin::Pose q1{cx + r, cy, z};

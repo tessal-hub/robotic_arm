@@ -82,6 +82,16 @@ void SafetyManager::pollEndstops(uint64_t nowUs) {
       pending_[a][wi].store(false, std::memory_order_relaxed);
     }
   }
+  // Drift -> FAULT mapping (Spec §3.3 single owner): if drift latched and we are
+  // in NORMAL/HOMING, promote to FAULT. Both E_STOP and FAULT block motion
+  // (isMotionAllowed false). isEStop() stays false for FAULT; use isFault().
+  // FAULT covers drift/power, E_STOP covers endstop latch.
+  if (hasDrift_ && hasDrift_()) {
+    SafetyState cur = state_.load(std::memory_order_acquire);
+    if (cur == SafetyState::NORMAL || cur == SafetyState::HOMING) {
+      state_.store(SafetyState::FAULT, std::memory_order_release);
+    }
+  }
 }
 
 void SafetyManager::assertHoming(bool active) {
@@ -102,6 +112,17 @@ void SafetyManager::assertHoming(bool active) {
 void SafetyManager::assertEStop(const char* reason) {
   (void)reason;
   state_.store(SafetyState::E_STOP, std::memory_order_release);
+}
+
+void SafetyManager::notifyFault(const char* reason) {
+  (void)reason;
+  SafetyState cur = state_.load(std::memory_order_acquire);
+  if (cur != SafetyState::FAULT && cur != SafetyState::E_STOP) {
+    state_.store(SafetyState::FAULT, std::memory_order_release);
+  } else if (cur == SafetyState::E_STOP) {
+    // Keep E_STOP if already latched; drift will be visible via hasDrift_ but motion already blocked.
+    // Optionally promote to FAULT if needed; keep E_STOP precedence per spec.
+  }
 }
 
 bool SafetyManager::tryClearFault() {
@@ -128,6 +149,10 @@ bool SafetyManager::isMotionAllowed() const {
 
 bool SafetyManager::isEStop() const {
   return state_.load(std::memory_order_acquire) == SafetyState::E_STOP;
+}
+
+bool SafetyManager::isFault() const {
+  return state_.load(std::memory_order_acquire) == SafetyState::FAULT;
 }
 
 SafetyState SafetyManager::state() const {

@@ -1413,7 +1413,7 @@ void handleMove() {
     const bool ok = armPtr->submit(c, 20);
     if (ok) { srv->send(200, "text/plain", "OK"); return; }
     String err = armPtr->lastPlannerError();
-    if (err.indexOf("OUT_OF_REACH") >= 0 || err.indexOf("BAD_RADIUS") >= 0) {
+    if (err == "OUT_OF_REACH" || err == "BAD_RADIUS") {
         char buf[96];
         snprintf(buf, sizeof(buf), "{\"error\":\"%s\",\"segment\":%d}", err.c_str(),
                  armPtr->lastPlannerFailIndex());
@@ -1461,7 +1461,7 @@ void handleDraw() {
     const bool ok = armPtr->submit(c, 20);
     if (ok) { srv->send(200, "text/plain", "OK"); return; }
     String err = armPtr->lastPlannerError();
-    if (err.indexOf("OUT_OF_REACH") >= 0 || err.indexOf("BAD_RADIUS") >= 0) {
+    if (err == "OUT_OF_REACH" || err == "BAD_RADIUS") {
         char buf[96];
         snprintf(buf, sizeof(buf), "{\"error\":\"%s\",\"segment\":%d}", err.c_str(),
                  armPtr->lastPlannerFailIndex());

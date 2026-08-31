@@ -81,6 +81,8 @@ void IRAM_ATTR Endstops::isrHandler(void* arg) {
     auto* c = static_cast<IsrCtx*>(arg);
     if (c == nullptr) return;
     // Minimal ISR: only pending + timestamp (<3µs). No delay, no gpio_get_level, no debounce.
+    // Intentional double-store: IsrCtx pending/isrTime + SafetyManager pending for fallback
+    // when safety_ is null (e.g., early boot before injection). SafetyManager is primary.
     c->pending.store(true, std::memory_order_relaxed);
 #ifdef ARDUINO
     int64_t now = esp_timer_get_time();
