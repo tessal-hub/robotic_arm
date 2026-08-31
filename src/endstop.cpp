@@ -123,25 +123,36 @@ bool Endstops::isLatched(uint8_t axis, EndstopWhich w) const noexcept {
 
 bool Endstops::consumeLatch(uint8_t axis, EndstopWhich w) noexcept {
     if (!hasPin(axis, w)) return false;
+    uint8_t wi = static_cast<uint8_t>(w);
 #ifdef ARDUINO
     if (safety_ != nullptr) {
-        return safety_->consumeLatched(axis, w);
+        bool was = safety_->consumeLatched(axis, w);
+        // Ensure local IsrCtx and mirror latched are also cleared — avoids delegation leak
+        safety_->clearPending(axis, w);
+        ctx[axis][wi].pending.store(false, std::memory_order_relaxed);
+        ctx[axis][wi].isrTime.store(0, std::memory_order_relaxed);
+        ch(axis, w).latched.store(false, std::memory_order_release);
+        return was;
     }
 #endif
+    ctx[axis][wi].pending.store(false, std::memory_order_relaxed);
+    ctx[axis][wi].isrTime.store(0, std::memory_order_relaxed);
     Channel& c = ch(axis, w);
     return c.latched.exchange(false, std::memory_order_acq_rel);
 }
 
 void Endstops::clearLatch(uint8_t axis, EndstopWhich w) noexcept {
     if (!hasPin(axis, w)) return;
+    uint8_t wi = static_cast<uint8_t>(w);
 #ifdef ARDUINO
     if (safety_ != nullptr) {
         safety_->clearLatched(axis, w);
+        safety_->clearPending(axis, w);
     }
 #endif
     ch(axis, w).latched.store(false, std::memory_order_release);
-    // also clear pending for this channel
-    ctx[axis][static_cast<uint8_t>(w)].pending.store(false, std::memory_order_relaxed);
+    ctx[axis][wi].pending.store(false, std::memory_order_relaxed);
+    ctx[axis][wi].isrTime.store(0, std::memory_order_relaxed);
 }
 
 void Endstops::clearAllLatches() noexcept {

@@ -68,6 +68,7 @@ public:
   bool isLatched(uint8_t axis, EndstopWhich which) const;
   void clearLatched(uint8_t axis, EndstopWhich which) noexcept;
   bool consumeLatched(uint8_t axis, EndstopWhich which) noexcept;
+  void clearPending(uint8_t axis, EndstopWhich which) noexcept;
   void forceClear() noexcept;
 
 private:
