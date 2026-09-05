@@ -56,6 +56,12 @@ private:
     std::array<std::atomic<bool>, NUM_SENSORS> sensor_error{};
     std::array<uint32_t, NUM_SENSORS> read_fail_counts{};
 
+    // Lock-free fallback snapshots for readers that cannot obtain dataMutex
+    // within their bounded timeout. uint32_t atomics are lock-free on ESP32-S3.
+    std::array<std::atomic<uint32_t>, NUM_SENSORS> published_angles{};
+    std::array<std::atomic<uint32_t>, NUM_SENSORS> published_accumulated{};
+    std::array<std::atomic<int32_t>, NUM_SENSORS> published_turn_counts{};
+
     SemaphoreHandle_t dataMutex{nullptr};        // Bảo vệ mảng góc khi task ghi / main đọc
     SemaphoreHandle_t i2cMutex{nullptr};         // Bảo vệ I2C bus khi đọc chẩn đoán từ task khác
     TaskHandle_t taskHandle{nullptr};
@@ -66,6 +72,9 @@ private:
     void disableAllPCAChannels();
     uint16_t readRaw();
     float filter(uint8_t ch, uint16_t raw);
+    void publishSample(uint8_t ch);
+    [[nodiscard]] static uint32_t floatToBits(float value);
+    [[nodiscard]] static float bitsToFloat(uint32_t bits);
     void scanOnce();                    // Quét toàn bộ NUM_SENSORS 1 lần
     void configureAS5600();             // Ghi CONF register
     void recoverI2CBus();               // Khôi phục I2C bus khi bị treo

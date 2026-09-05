@@ -104,7 +104,7 @@ public:
     [[nodiscard]] bool startPreparedRun();
     void stop();
     void stopFromISR();
-    void enable(bool en = true);
+    bool enable(bool en = true);
 
     void setSpeed(uint32_t intervalUs);
     void setCurrent(uint16_t mA);

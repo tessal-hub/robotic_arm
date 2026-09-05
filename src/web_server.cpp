@@ -1,11 +1,16 @@
 #include "web_server.h"
+#include "web_validation.h"
 #include <math.h>
 #include "arm.h"
 #include "config.h"
+#include "drawing_workspace.h"
 #include "joint_model.h"
 #include "nvs_store.h"
 #include "wifi_manager.h"
 #include "work_plane.h"
+
+void handleDrawProfiles();
+void handleDrawPreset();
 
 const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
@@ -20,27 +25,37 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   --surface: #111827;
   --surface-sub: #162032;
   --surface-elevated: #1f293d;
+  --canvas-bg: #070a10;
+  --overlay: #111827;
   --border: #1f2a3d;
   --border-strong: #334155;
   --text-main: #f8fafc;
   --text-muted: #94a3b8;
-  --text-dim: #64748b;
+  --text-dim: #a7b7cc;
   --primary: #38bdf8;
   --primary-hover: #0ea5e9;
   --success: #10b981;
+  --success-ink: #032b20;
   --success-bg: rgba(16,185,129,0.12);
   --success-text: #6ee7b7;
-  --danger: #ef4444;
+  --danger: #dc2626;
+  --danger-ink: #ffffff;
   --danger-bg: rgba(239,68,68,0.14);
   --danger-text: #fca5a5;
   --warning: #f59e0b;
+  --warning-ink: #261601;
   --warning-bg: rgba(245,158,11,0.14);
   --warning-text: #fcd34d;
+  --toast-ok-bg: #0c1a17;
+  --toast-warn-bg: #1c1917;
+  --toast-err-bg: #7f1d1d;
   --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
   --radius-pill: 9999px;
+  --z-toast: 20;
+  --z-estop: 30;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -116,10 +131,10 @@ body {
 
 /* ---- 3D Viewport Box ---- */
 .viewport-box {
-  position: relative; background: #070a10; border: 1px solid var(--border);
+  position: relative; background: var(--canvas-bg); border: 1px solid var(--border);
   border-radius: var(--radius-md); overflow: hidden; margin-bottom: 10px;
 }
-.viewport-canvas { display: block; width: 100%; height: 380px; cursor: grab; }
+.viewport-canvas { display: block; width: 100%; height: clamp(240px, 48vw, 380px); cursor: grab; touch-action: none; }
 .viewport-canvas:active { cursor: grabbing; }
 .viewport-toolbar {
   position: absolute; top: 8px; left: 8px; right: 8px;
@@ -127,7 +142,7 @@ body {
   pointer-events: none; gap: 6px; flex-wrap: wrap; z-index: 2;
 }
 .toolbar-group {
-  display: flex; gap: 4px; background: rgba(17,24,39,0.88); backdrop-filter: blur(8px);
+  display: flex; gap: 4px; background: var(--overlay);
   padding: 3px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
   pointer-events: auto;
 }
@@ -136,7 +151,7 @@ body {
   padding: 4px 10px; border-radius: var(--radius-xs); font-size: 0.74rem;
   font-weight: 600; cursor: pointer; min-height: 28px;
   display: inline-flex; align-items: center; justify-content: center;
-  transition: all 120ms ease;
+  transition: background 120ms ease, color 120ms ease, transform 80ms ease;
 }
 .tool-btn:hover { background: var(--surface-elevated); color: var(--text-main); }
 .tool-btn.active { background: var(--primary); color: var(--bg); font-weight: 700; }
@@ -199,9 +214,9 @@ body {
 .btn:disabled { opacity: 0.38; cursor: not-allowed; }
 .btn-primary { background: var(--primary); color: var(--bg); }
 .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
-.btn-success { background: var(--success); color: #041f18; font-weight: 700; }
-.btn-danger { background: var(--danger); color: #fff; }
-.btn-warning { background: var(--warning); color: #261601; font-weight: 700; }
+.btn-success { background: var(--success); color: var(--success-ink); font-weight: 700; }
+.btn-danger { background: var(--danger); color: var(--danger-ink); }
+.btn-warning { background: var(--warning); color: var(--warning-ink); font-weight: 700; }
 .btn-ghost { background: var(--surface-elevated); color: var(--text-main); border: 1px solid var(--border-strong); }
 .btn-ghost:hover:not(:disabled) { background: var(--border-strong); }
 .btn-block { width: 100%; }
@@ -231,20 +246,21 @@ body {
 .jcard-flags { display: flex; gap: 6px; font-size: 0.68rem; font-weight: 600; flex-wrap: wrap; }
 .flag-homed { color: var(--success-text); }
 .flag-unhomed { color: var(--text-dim); }
-.flag-drift { color: var(--danger-text); background: var(--danger-bg); padding: 1px 4px; border-radius: 3px; }
-.flag-encerr { color: var(--warning-text); background: var(--warning-bg); padding: 1px 4px; border-radius: 3px; }
+.flag-drift { color: var(--danger-text); background: var(--danger-bg); padding: 1px 4px; border-radius: var(--radius-xs); }
+.flag-encerr { color: var(--warning-text); background: var(--warning-bg); padding: 1px 4px; border-radius: var(--radius-xs); }
 
 .jog-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 4px; }
 .jog-btn {
   min-height: 42px; font-size: 1.1rem; font-weight: 700; border-radius: var(--radius-sm);
   background: var(--surface-elevated); border: 1px solid var(--border-strong); color: var(--text-main);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
-  transition: all 100ms ease;
+  transition: border-color 100ms ease, color 100ms ease, transform 80ms ease;
 }
 .jog-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
 .jog-btn:active:not(:disabled) { transform: scale(0.96); }
 .jog-calib-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 2px; }
 .jog-calib-row .btn { min-height: 30px; font-size: 0.72rem; padding: 4px 8px; }
+.jcard-calib { min-height: 1.1em; color: var(--text-muted); font-family: var(--font-mono); font-size: 0.68rem; }
 
 /* ---- Cartesian & Draw Studio ---- */
 .mode-toggle-bar {
@@ -281,29 +297,40 @@ body {
   background: var(--surface-elevated); border: 1px solid var(--border); color: var(--text-muted);
   padding: 5px 10px; border-radius: var(--radius-pill); font-size: 0.74rem; font-weight: 600; cursor: pointer;
 }
-.preset-pill:hover { color: var(--text-main); border-color: var(--border-strong); }
+.preset-pill:hover, .preset-pill[aria-pressed="true"] { color: var(--text-main); border-color: var(--primary); }
+.preset-pill[aria-pressed="true"] { background: var(--primary); color: var(--bg); font-weight: 700; }
+
+/* ---- Guided quick drawing ---- */
+.draw-guided { background: var(--surface-sub); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; margin-bottom: 12px; }
+.draw-guided p { color: var(--text-muted); font-size: 0.8rem; line-height: 1.5; margin-bottom: 10px; }
+.draw-profile-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 7px 0 10px; }
+.draw-profile { min-width: 118px; text-align: left; font-family: var(--font-mono); }
+.draw-profile small { display: block; margin-top: 2px; font-family: var(--font-sans); font-size: 0.68rem; opacity: 0.85; }
+.draw-guided .input-field { max-width: 260px; }
 
 /* ---- Floating E-STOP & Toast ---- */
 #estop {
-  position: fixed; bottom: 18px; right: 18px; z-index: 99;
+  position: fixed; bottom: 18px; right: 18px; z-index: var(--z-estop);
   padding: 14px 24px; font-size: 1.05rem; font-weight: 800; border-radius: var(--radius-pill);
   box-shadow: 0 4px 20px rgba(239,68,68,0.5); letter-spacing: 0.04em;
 }
 #toast {
-  position: fixed; bottom: 18px; left: 18px; z-index: 98;
+  position: fixed; bottom: 18px; left: 18px; z-index: var(--z-toast);
   background: var(--surface-elevated); border: 1px solid var(--border-strong);
   border-radius: var(--radius-md); padding: 10px 18px; font-size: 0.84rem;
   color: var(--text-main); display: none; max-width: 80vw;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
 }
-#toast.t-ok { border-color: var(--success); background: #0c1a17; color: var(--success-text); }
-#toast.t-warn { border-color: var(--warning); background: #1c1917; color: var(--warning-text); }
-#toast.t-err { border-color: var(--danger); background: #7f1d1d; color: var(--danger-text); }
+#toast.t-ok { border-color: var(--success); background: var(--toast-ok-bg); color: var(--success-text); }
+#toast.t-warn { border-color: var(--warning); background: var(--toast-warn-bg); color: var(--warning-text); }
+#toast.t-err { border-color: var(--danger); background: var(--toast-err-bg); color: var(--danger-text); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 @media (pointer: coarse) {
   .nav-tab { min-height: 44px; padding: 10px 18px; font-size: 0.9rem; }
-  .btn { min-height: 44px; }
+  .btn, .tool-btn, .step-btn, .preset-pill, .mode-toggle-btn { min-height: 44px; }
   .jog-btn { min-height: 48px; }
+  .jog-calib-row .btn { min-height: 44px; font-size: 0.78rem; padding: 8px; }
+  .viewport-canvas { height: clamp(240px, 70vw, 340px); }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
@@ -326,16 +353,16 @@ body {
 
   <!-- 4 Core Navigation Tabs -->
   <nav class="nav-tabs" role="tablist" aria-label="Menu điều khiển cánh tay robot">
-    <button id="tab-dash" class="nav-tab active" data-t="pane-dash" role="tab" aria-selected="true" aria-controls="pane-dash">📊 Dashboard</button>
-    <button id="tab-jog" class="nav-tab" data-t="pane-jog" role="tab" aria-selected="false" aria-controls="pane-jog">🕹️ Jog &amp; Calib</button>
-    <button id="tab-motion" class="nav-tab" data-t="pane-motion" role="tab" aria-selected="false" aria-controls="pane-motion">🎯 Cartesian &amp; Draw Studio</button>
-    <button id="tab-settings" class="nav-tab" data-t="pane-settings" role="tab" aria-selected="false" aria-controls="pane-settings">⚙️ Settings &amp; WiFi</button>
+    <button id="tab-dash" class="nav-tab active" data-t="pane-dash" role="tab" aria-selected="true" aria-controls="pane-dash" tabindex="0">📊 Dashboard</button>
+    <button id="tab-jog" class="nav-tab" data-t="pane-jog" role="tab" aria-selected="false" aria-controls="pane-jog" tabindex="-1">🕹️ Jog &amp; Calib</button>
+    <button id="tab-motion" class="nav-tab" data-t="pane-motion" role="tab" aria-selected="false" aria-controls="pane-motion" tabindex="-1">🎯 Cartesian &amp; Draw Studio</button>
+    <button id="tab-settings" class="nav-tab" data-t="pane-settings" role="tab" aria-selected="false" aria-controls="pane-settings" tabindex="-1">⚙️ Settings &amp; WiFi</button>
   </nav>
 
   <!-- =========================================================================
        TAB 1: DASHBOARD (Live Twin & System Health)
   ========================================================================== -->
-  <div id="pane-dash" class="tab-pane active" role="tabpanel" aria-labelledby="tab-dash">
+  <div id="pane-dash" class="tab-pane active" role="tabpanel" aria-labelledby="tab-dash" tabindex="0">
     <div class="grid-2col">
       <!-- Left Column: 3D Digital Twin -->
       <section class="card" aria-labelledby="headDashTwin">
@@ -346,15 +373,16 @@ body {
         <div class="viewport-box">
           <div class="viewport-toolbar">
             <div class="toolbar-group">
-              <button class="tool-btn active" onclick="setDashView('3d', this)">3D Orbit</button>
-              <button class="tool-btn" onclick="setDashView('side', this)">Side (X-Z)</button>
-              <button class="tool-btn" onclick="setDashView('top', this)">Top (X-Y)</button>
+              <button class="tool-btn active" onclick="setDashView('3d', this)" aria-pressed="true">3D Orbit</button>
+              <button class="tool-btn" onclick="setDashView('side', this)" aria-pressed="false">Side (X-Z)</button>
+              <button class="tool-btn" onclick="setDashView('top', this)" aria-pressed="false">Top (X-Y)</button>
             </div>
             <div class="toolbar-group">
               <button class="tool-btn" onclick="resetDashCam()">Reset View</button>
             </div>
           </div>
-          <canvas id="dashCanvas" class="viewport-canvas" width="640" height="380" role="img" aria-label="Mô hình 3D cánh tay robot"></canvas>
+          <canvas id="dashCanvas" class="viewport-canvas" width="640" height="380" role="application" tabindex="0" aria-label="Mô hình 3D cánh tay robot" aria-describedby="dashCanvasHelp" aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Plus Minus 0"></canvas>
+          <p id="dashCanvasHelp" class="sr-only">Kéo để xoay hoặc pan camera. Dùng các phím mũi tên để đổi góc nhìn, cộng trừ để zoom và phím 0 để reset.</p>
         </div>
         <div class="hud-pill-bar">
           <div class="hud-item"><span class="lbl">TCP Target (X, Y, Z)</span><span class="val accent" id="hudDashTcp">-- mm</span></div>
@@ -413,7 +441,7 @@ body {
   <!-- =========================================================================
        TAB 2: JOG & CALIBRATION (Unified Joints & Homing)
   ========================================================================== -->
-  <div id="pane-jog" class="tab-pane" role="tabpanel" aria-labelledby="tab-jog">
+  <div id="pane-jog" class="tab-pane" role="tabpanel" aria-labelledby="tab-jog" tabindex="0">
     <div class="jog-header-bar">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span style="font-size:0.82rem;font-weight:600;color:var(--text-muted)">Bước Jog:</span>
@@ -424,10 +452,11 @@ body {
         <button class="btn btn-ghost need-idle" onclick="api('/api/home/axis?axis=1')">Home J2</button>
         <button class="btn btn-ghost need-idle" onclick="api('/api/home/axis?axis=2')">Home J3</button>
         <button class="btn btn-ghost need-idle" onclick="api('/api/home/axis?axis=3')">Home J4</button>
-        <button class="btn btn-ghost need-idle" onclick="api('/api/sethome?axis=4')">Set Home J5</button>
-        <button class="btn btn-ghost need-idle" onclick="api('/api/sethome?axis=5')">Set Home J6</button>
-        <button class="btn btn-ghost need-idle" onclick="api('/api/sethome?axis=255')">Set Home J5+J6</button>
+        <button class="btn btn-ghost need-idle" onclick="confirmSetHome(4)">Set Home J5</button>
+        <button class="btn btn-ghost need-idle" onclick="confirmSetHome(5)">Set Home J6</button>
+        <button class="btn btn-ghost need-idle" onclick="confirmSetHome(255)">Set Home J5+J6</button>
         <button class="btn btn-primary need-idle" onclick="api('/api/home/all')">🚀 HOME ALL (J1-J4)</button>
+        <button class="btn btn-warning need-idle" onclick="confirmReleaseJ1J4()">🤲 Release J1-J4</button>
         <button class="btn btn-warning" onclick="clearFault()">🛡️ CLEAR FAULT</button>
         <button class="btn btn-danger" onclick="api('/api/stop')">⏹ STOP ALL</button>
       </div>
@@ -439,7 +468,7 @@ body {
   <!-- =========================================================================
        TAB 3: CARTESIAN & DRAW STUDIO (Unified Motion & Trajectory Studio)
   ========================================================================== -->
-  <div id="pane-motion" class="tab-pane" role="tabpanel" aria-labelledby="tab-motion">
+  <div id="pane-motion" class="tab-pane" role="tabpanel" aria-labelledby="tab-motion" tabindex="0">
     <div class="grid-2col">
       <!-- Left Column: Interactive Simulation Twin -->
       <section class="card" aria-labelledby="headSimTwin">
@@ -450,17 +479,18 @@ body {
         <div class="viewport-box">
           <div class="viewport-toolbar">
             <div class="toolbar-group">
-              <button class="tool-btn active" onclick="setSimView('3d', this)">3D Orbit</button>
-              <button class="tool-btn" onclick="setSimView('side', this)">Side (X-Z)</button>
-              <button class="tool-btn" onclick="setSimView('top', this)">Top (X-Y)</button>
+              <button class="tool-btn active" onclick="setSimView('3d', this)" aria-pressed="true">3D Orbit</button>
+              <button class="tool-btn" onclick="setSimView('side', this)" aria-pressed="false">Side (X-Z)</button>
+              <button class="tool-btn" onclick="setSimView('top', this)" aria-pressed="false">Top (X-Y)</button>
             </div>
             <div class="toolbar-group">
-              <button class="tool-btn live-badge" id="btnSimLive" onclick="setSimSource('live')">🔴 Live Robot</button>
-              <button class="tool-btn sim-badge active" id="btnSimSim" onclick="setSimSource('sim')">🟢 Interactive Sim</button>
+              <button class="tool-btn live-badge" id="btnSimLive" onclick="setSimSource('live')" aria-pressed="false">🔴 Live Robot</button>
+              <button class="tool-btn sim-badge active" id="btnSimSim" onclick="setSimSource('sim')" aria-pressed="true">🟢 Interactive Sim</button>
               <button class="tool-btn" onclick="resetSimCam()">Reset Cam</button>
             </div>
           </div>
-          <canvas id="simCanvas" class="viewport-canvas" width="680" height="380" role="img" aria-label="Mô phỏng quỹ đạo 3D"></canvas>
+          <canvas id="simCanvas" class="viewport-canvas" width="680" height="380" role="application" tabindex="0" aria-label="Mô phỏng quỹ đạo 3D" aria-describedby="simCanvasHelp" aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Plus Minus 0"></canvas>
+          <p id="simCanvasHelp" class="sr-only">Kéo để xoay hoặc pan camera. Dùng các phím mũi tên để đổi góc nhìn, cộng trừ để zoom và phím 0 để reset.</p>
         </div>
 
         <div class="hud-pill-bar">
@@ -489,12 +519,12 @@ body {
             <h2 id="headCartMove">📍 Di chuyển Cartesian TCP</h2>
             <span class="meta">Bút vuông góc mặt bàn</span>
           </div>
-          <div class="preset-pills">
-            <span class="preset-pill" onclick="applySimPreset('home')">Home (0°)</span>
-            <span class="preset-pill" onclick="applySimPreset('draw')">Ready Draw</span>
-            <span class="preset-pill" onclick="applySimPreset('reach_fwd')">Reach +X</span>
-            <span class="preset-pill" onclick="applySimPreset('reach_back')">Reach -X</span>
-            <span class="preset-pill" onclick="applySimPreset('fold')">Folded</span>
+          <div class="preset-pills" role="group" aria-label="Preset mô phỏng Cartesian">
+            <button type="button" class="preset-pill" onclick="applySimPreset('home', this)" aria-pressed="false">Home (0°)</button>
+            <button type="button" class="preset-pill" onclick="applySimPreset('draw', this)" aria-pressed="false">Ready Draw</button>
+            <button type="button" class="preset-pill" onclick="applySimPreset('reach_fwd', this)" aria-pressed="false">Reach +X</button>
+            <button type="button" class="preset-pill" onclick="applySimPreset('reach_back', this)" aria-pressed="false">Reach -X</button>
+            <button type="button" class="preset-pill" onclick="applySimPreset('fold', this)" aria-pressed="false">Folded</button>
           </div>
 
           <div class="slider-row">
@@ -526,29 +556,32 @@ body {
         <section class="card" id="panelCartDraw" style="display:none" aria-labelledby="headCartDraw">
           <div class="card-head">
             <h2 id="headCartDraw">✏️ Vẽ hình trên mặt giấy</h2>
-            <span class="meta">Line / Circle Planner</span>
+            <span class="meta">Line Planner</span>
           </div>
-          <div class="input-field" style="margin-bottom:10px">
-            <label for="dwShape">Chọn hình vẽ</label>
-            <select id="dwShape" onchange="onDrawShapeChange()">
-              <option value="line">Line (Đoạn thẳng)</option>
-              <option value="circle">Circle (Đường tròn)</option>
-            </select>
-          </div>
-
-          <div class="input-grid">
-            <div class="input-field"><label id="dwA1Lbl" for="dwA1">X1 (mm)</label><input type="number" id="dwA1" value="100"></div>
-            <div class="input-field"><label id="dwA2Lbl" for="dwA2">Y1 (mm)</label><input type="number" id="dwA2" value="-70"></div>
-            <div class="input-field"><label id="dwA3Lbl" for="dwA3">X2 (mm)</label><input type="number" id="dwA3" value="180"></div>
-            <div class="input-field" id="dwA4Group"><label id="dwA4Lbl" for="dwA4">Y2 (mm)</label><input type="number" id="dwA4" value="70"></div>
-            <div class="input-field"><label for="dwZ">Z Giấy (mm)</label><input type="number" id="dwZ" value="10"></div>
-            <div class="input-field"><label for="dwFeed">Feed (mm/s)</label><input type="number" id="dwFeed" value="20"></div>
-          </div>
-
-          <div class="btn-row">
-            <button class="btn btn-success need-idle" onclick="startDraw()" style="flex:1">✏️ BẮT ĐẦU VẼ (START DRAW)</button>
-            <button class="btn btn-ghost" onclick="syncDrawToSim()">Xem trước 3D</button>
-            <button class="btn btn-danger" onclick="api('/api/stop')">DỪNG (ABORT)</button>
+          <div class="draw-guided" aria-labelledby="drawGuidedTitle">
+            <p id="drawGuidedTitle"><b>Quick draw:</b> choose a recommended base-Z plane and a shape, then start. The proposed size is inset inside the reachable workspace and checked again at every 1 mm segment.</p>
+            <div class="draw-profile-list" id="drawZProfiles" role="radiogroup" aria-label="Recommended drawing heights">
+              <span class="meta">Calculating reachable planes...</span>
+            </div>
+            <div class="input-field">
+              <label for="dwQuickShape">Shape</label>
+              <select id="dwQuickShape" onchange="onQuickShapeChange()">
+                <option value="square">Square</option>
+                <option value="circle">Circle</option>
+                <option value="line">Line</option>
+              </select>
+            </div>
+            <div class="input-grid">
+              <div class="input-field" id="quickLineStartX"><label for="dwQuickStartX">Start X (mm)</label><input type="number" id="dwQuickStartX" value="100" oninput="previewQuickDraw()"></div>
+              <div class="input-field" id="quickLineStartY"><label for="dwQuickStartY">Start Y (mm)</label><input type="number" id="dwQuickStartY" value="-15" oninput="previewQuickDraw()"></div>
+              <div class="input-field" id="quickLineLength"><label for="dwQuickLength">Line length (mm)</label><input type="number" id="dwQuickLength" value="120" min="40" step="5" oninput="previewQuickDraw()"></div>
+            </div>
+            <p id="drawQuickMeta">HOME J1-J4 before starting. Place the paper at the selected base-Z height.</p>
+            <div class="btn-row">
+              <button class="btn btn-success need-idle" id="btnQuickDraw" onclick="startQuickDraw()" style="flex:1">START QUICK DRAW</button>
+              <button class="btn btn-ghost" onclick="previewQuickDraw()">Preview 3D</button>
+              <button class="btn btn-danger" onclick="api('/api/stop')">ABORT</button>
+            </div>
           </div>
         </section>
 
@@ -566,7 +599,7 @@ body {
   <!-- =========================================================================
        TAB 4: SETTINGS & WIFI
   ========================================================================== -->
-  <div id="pane-settings" class="tab-pane" role="tabpanel" aria-labelledby="tab-settings">
+  <div id="pane-settings" class="tab-pane" role="tabpanel" aria-labelledby="tab-settings" tabindex="0">
     <div class="grid-2col">
       <section class="card" aria-labelledby="headWifiCfg">
         <div class="card-head">
@@ -586,7 +619,7 @@ body {
             <label for="wfPass">Mật khẩu WiFi mới</label>
             <input type="password" id="wfPass" placeholder="Nhập mật khẩu..." autocomplete="current-password">
           </div>
-          <button class="btn btn-success btn-block" onclick="saveWifi()">💾 LƯU VÀO NVS &amp; KHỞI ĐỘNG LẠI</button>
+          <button class="btn btn-success btn-block need-idle" onclick="saveWifi()">💾 LƯU VÀO NVS &amp; KHỞI ĐỘNG LẠI</button>
         </div>
       </section>
 
@@ -756,11 +789,12 @@ class Canvas3DRenderer {
 
   initEvents() {
     const cv = this.canvas;
-    cv.addEventListener('mousedown', e => {
+    cv.addEventListener('pointerdown', e => {
       this.isDragging = true;
       this.lastX = e.clientX; this.lastY = e.clientY;
+      cv.setPointerCapture(e.pointerId);
     });
-    window.addEventListener('mousemove', e => {
+    cv.addEventListener('pointermove', e => {
       if(!this.isDragging) return;
       const dx = e.clientX - this.lastX, dy = e.clientY - this.lastY;
       this.lastX = e.clientX; this.lastY = e.clientY;
@@ -772,13 +806,31 @@ class Canvas3DRenderer {
       }
       this.renderCurrent();
     });
-    window.addEventListener('mouseup', () => { this.isDragging = false; });
+    const endDrag = e => {
+      this.isDragging = false;
+      if(cv.hasPointerCapture(e.pointerId)) cv.releasePointerCapture(e.pointerId);
+    };
+    cv.addEventListener('pointerup', endDrag);
+    cv.addEventListener('pointercancel', endDrag);
     cv.addEventListener('wheel', e => {
       e.preventDefault();
       const factor = e.deltaY < 0 ? 1.08 : 0.92;
       this.cam.zoom = Math.max(0.4, Math.min(3.5, this.cam.zoom * factor));
       this.renderCurrent();
     }, { passive: false });
+    cv.addEventListener('keydown', e => {
+      const step = e.shiftKey ? 24 : 8;
+      let handled = true;
+      if(e.key === 'ArrowLeft') this.viewMode === '3d' ? this.cam.yaw -= step : this.cam.panX -= step;
+      else if(e.key === 'ArrowRight') this.viewMode === '3d' ? this.cam.yaw += step : this.cam.panX += step;
+      else if(e.key === 'ArrowUp') this.viewMode === '3d' ? this.cam.pitch = Math.min(85, this.cam.pitch + step) : this.cam.panY -= step;
+      else if(e.key === 'ArrowDown') this.viewMode === '3d' ? this.cam.pitch = Math.max(-85, this.cam.pitch - step) : this.cam.panY += step;
+      else if(e.key === '+' || e.key === '=') this.cam.zoom = Math.min(3.5, this.cam.zoom * 1.08);
+      else if(e.key === '-' || e.key === '_') this.cam.zoom = Math.max(0.4, this.cam.zoom * 0.92);
+      else if(e.key === '0') this.cam = { yaw: -45, pitch: 25, zoom: 1.15, panX: 0, panY: 0 };
+      else handled = false;
+      if(handled) { e.preventDefault(); this.renderCurrent(); }
+    });
   }
 
   project(p) {
@@ -887,6 +939,23 @@ let simPlayAnimId = null;
 let simLastAnimTime = 0;
 let simScrubIdx = 0;
 let stepSize = 1.0, pollTimer = null, failN = 0, toastTimer = null;
+let latestStatus = null, pendingCommands = 0;
+let drawProfiles = [], selectedDrawProfile = 0;
+
+function isPaneActive(id){
+  const pane = document.getElementById(id);
+  return !!pane && pane.classList.contains('active');
+}
+
+function syncCommandState(){
+  const busy = !!latestStatus && (latestStatus.busy || latestStatus.mode === 'fault');
+  document.querySelectorAll('.need-idle').forEach(b => { b.disabled = busy || pendingCommands > 0; });
+}
+
+function pendingTrigger(){
+  const el = document.activeElement;
+  return el instanceof HTMLButtonElement ? el : null;
+}
 
 function initStudio() {
   dashRenderer = new Canvas3DRenderer('dashCanvas');
@@ -909,13 +978,114 @@ function initStudio() {
 
   generateSimPath();
   updateSimFromAngles(simAngles);
+  loadQuickDrawProfiles();
+}
+
+async function loadQuickDrawProfiles(){
+  const container = document.getElementById('drawZProfiles');
+  if(!container) return;
+  try {
+    const response = await fetch('/api/draw/presets');
+    const data = await response.json();
+    if(!response.ok || !data.profiles || !data.profiles.length) throw new Error(data.error || 'No reachable plane');
+    drawProfiles = data.profiles;
+    selectedDrawProfile = 0;
+    selectQuickDrawProfile(0);
+  } catch (err) {
+    container.innerHTML = '<span class="meta">No quick-draw profile: calibrate/disable WorkPlane or check joint limits.</span>';
+    const start = document.getElementById('btnQuickDraw');
+    if(start) start.disabled = true;
+  }
+}
+
+function renderQuickDrawProfiles(){
+  const container = document.getElementById('drawZProfiles');
+  if(!container) return;
+  container.innerHTML = drawProfiles.map((profile, index) => {
+    const selected = index === selectedDrawProfile;
+    return `<button type="button" class="preset-pill draw-profile" role="radio" aria-checked="${selected}" aria-pressed="${selected}" onclick="selectQuickDrawProfile(${index})">Z ${profile.z.toFixed(0)} mm<small>safe square ${profile.maxSquareSide.toFixed(0)} mm</small></button>`;
+  }).join('');
+}
+
+function selectQuickDrawProfile(index){
+  if(!drawProfiles[index]) return;
+  selectedDrawProfile = index;
+  renderQuickDrawProfiles();
+  const profile = drawProfiles[index];
+  const size = Number(profile.size) || Math.floor(profile.maxSquareSide * 0.60 / 5) * 5;
+  const shapeEl = document.getElementById('dwQuickShape');
+  const shape = shapeEl ? shapeEl.value : 'line';
+  const startX = document.getElementById('dwQuickStartX');
+  const startY = document.getElementById('dwQuickStartY');
+  const length = document.getElementById('dwQuickLength');
+  if(startX) startX.value = (shape === 'circle' ? profile.x + size * 0.5 : profile.x - size * 0.5).toFixed(0);
+  if(startY) startY.value = (shape === 'square' ? profile.y - size * 0.5 : profile.y).toFixed(0);
+  if(length) length.value = size.toFixed(0);
+  onQuickShapeChange();
+}
+
+function onQuickShapeChange(){
+  previewQuickDraw();
+}
+
+function previewQuickDraw(){
+  const profile = drawProfiles[selectedDrawProfile];
+  if(!profile) return;
+  const shapeEl = document.getElementById('dwQuickShape');
+  const shape = shapeEl ? shapeEl.value : 'line';
+  const value = id => { const el = document.getElementById(id); return el ? parseFloat(el.value) : NaN; };
+  const size = Number(profile.size) || Math.floor(profile.maxSquareSide * 0.60 / 5) * 5;
+  const startX = Number.isFinite(value('dwQuickStartX')) ? value('dwQuickStartX') : profile.x - size * 0.5;
+  const startY = Number.isFinite(value('dwQuickStartY')) ? value('dwQuickStartY') : profile.y;
+  const length = Number.isFinite(value('dwQuickLength')) ? value('dwQuickLength') : size;
+  simWaypoints = [];
+  if(shape === 'circle'){
+    const half = size * 0.5;
+    const centerX = startX - half;
+    for(let a = 0; a <= Math.PI * 2 + 0.001; a += 0.08){
+      simWaypoints.push({ x: centerX + half * Math.cos(a), y: startY + half * Math.sin(a), z: profile.z, drawing: true });
+    }
+  } else if(shape === 'square') {
+    const half = size * 0.5;
+    const centerX = startX + half;
+    const centerY = startY + half;
+    [[-half,-half],[half,-half],[half,half],[-half,half],[-half,-half]].forEach(p => {
+      simWaypoints.push({ x: centerX + p[0], y: centerY + p[1], z: profile.z, drawing: true });
+    });
+  } else {
+    simWaypoints = [{ x: startX, y: startY, z: profile.z, drawing: true },
+                    { x: startX + length, y: startY, z: profile.z, drawing: true }];
+  }
+  const meta = document.getElementById('drawQuickMeta');
+  if(meta) meta.textContent = shape === 'line'
+    ? `Z plan ${profile.z.toFixed(0)} mm · start X=${startX.toFixed(0)}, Y=${startY.toFixed(0)} · line ${length.toFixed(0)} mm`
+    : `Z plan ${profile.z.toFixed(0)} mm · start X=${startX.toFixed(0)}, Y=${startY.toFixed(0)} · ${shape} ${size.toFixed(0)} mm`;
+  const scrub = document.getElementById('simScrub');
+  if(scrub) scrub.max = Math.max(1, simWaypoints.length - 1);
+  setSimSource('sim');
+  onSimScrubChange(0);
+}
+
+function startQuickDraw(){
+  if(!drawProfiles[selectedDrawProfile]) return;
+  const shapeEl = document.getElementById('dwQuickShape');
+  const shape = shapeEl ? shapeEl.value : 'line';
+  const value = id => { const el = document.getElementById(id); return el ? parseFloat(el.value) : NaN; };
+  const sx = value('dwQuickStartX'), sy = value('dwQuickStartY'), length = value('dwQuickLength');
+  if(!Number.isFinite(sx) || !Number.isFinite(sy) || (shape === 'line' && !Number.isFinite(length))){
+    toast(shape === 'line' ? 'Nhập Start X, Start Y và độ dài hợp lệ' : 'Nhập Start X và Start Y hợp lệ', 'err');
+    return;
+  }
+  const lineLength = shape === 'line' ? `&length=${length}` : '';
+  post('/api/draw/preset', `shape=${shape}&profile=${selectedDrawProfile}&sx=${sx}&sy=${sy}${lineLength}`);
 }
 
 function setDashView(v, btn){
   dashRenderer.viewMode = v;
   if(btn){
-    btn.parentElement.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+    btn.parentElement.querySelectorAll('.tool-btn').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
     btn.classList.add('active');
+    btn.setAttribute('aria-pressed', 'true');
   }
   dashRenderer.renderCurrent();
 }
@@ -927,8 +1097,9 @@ function resetDashCam(){
 function setSimView(v, btn){
   simRenderer.viewMode = v;
   if(btn){
-    btn.parentElement.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+    btn.parentElement.querySelectorAll('.tool-btn').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
     btn.classList.add('active');
+    btn.setAttribute('aria-pressed', 'true');
   }
   simRenderer.renderCurrent();
 }
@@ -942,6 +1113,8 @@ function setSimSource(src){
   const bLive = document.getElementById('btnSimLive'), bSim = document.getElementById('btnSimSim');
   if(bLive) bLive.classList.toggle('active', src === 'live');
   if(bSim) bSim.classList.toggle('active', src === 'sim');
+  if(bLive) bLive.setAttribute('aria-pressed', String(src === 'live'));
+  if(bSim) bSim.setAttribute('aria-pressed', String(src === 'sim'));
   if(src === 'live' && window.lastRobotAngles){
     updateSimFromAngles(window.lastRobotAngles);
   }
@@ -967,7 +1140,9 @@ function updateSimFromAngles(angles){
   if(elYV) elYV.textContent = lm.tcp[1].toFixed(1) + ' mm';
   if(elZV) elZV.textContent = lm.tcp[2].toFixed(1) + ' mm';
 
-  simRenderer.render(lm, simWaypoints);
+  simRenderer.lastLm = lm;
+  simRenderer.lastPath = simWaypoints;
+  if(isPaneActive('pane-motion')) simRenderer.renderCurrent();
 
   const hudSimTcp = document.getElementById('hudSimTcp');
   if(hudSimTcp) hudSimTcp.textContent = `X=${lm.tcp[0].toFixed(1)} Y=${lm.tcp[1].toFixed(1)} Z=${lm.tcp[2].toFixed(1)}`;
@@ -1000,8 +1175,12 @@ function onSimCartChange(){
   }
 }
 
-function applySimPreset(type){
+function applySimPreset(type, btn){
   setSimSource('sim');
+  if(btn){
+    document.querySelectorAll('.preset-pill').forEach(b => b.setAttribute('aria-pressed', 'false'));
+    btn.setAttribute('aria-pressed', 'true');
+  }
   if(type === 'home') updateSimFromAngles([0, 0, 0, 0, 0, 0]);
   else if(type === 'draw'){ const ik = ikPenDown(160, 0, 10); if(ik.ok) updateSimFromAngles(ik.angles); }
   else if(type === 'reach_fwd') updateSimFromAngles([0, 90, 0, 0, -DELTA_WRIST, 0]);
@@ -1084,54 +1263,6 @@ function switchMotionMode(mode){
   }
 }
 
-function onDrawShapeChange(){
-  const sh = document.getElementById('dwShape').value;
-  const a1Lbl = document.getElementById('dwA1Lbl'), a2Lbl = document.getElementById('dwA2Lbl'), a3Lbl = document.getElementById('dwA3Lbl');
-  const a4Group = document.getElementById('dwA4Group');
-  if(sh === 'circle'){
-    if(a1Lbl) a1Lbl.textContent = 'Tâm CX';
-    if(a2Lbl) a2Lbl.textContent = 'Tâm CY';
-    if(a3Lbl) a3Lbl.textContent = 'Bán kính R';
-    if(a4Group) a4Group.style.display = 'none';
-  } else {
-    if(a1Lbl) a1Lbl.textContent = 'X1 (mm)';
-    if(a2Lbl) a2Lbl.textContent = 'Y1 (mm)';
-    if(a3Lbl) a3Lbl.textContent = 'X2 (mm)';
-    if(a4Group) a4Group.style.display = 'flex';
-  }
-  syncDrawToSim();
-}
-
-function syncDrawToSim(){
-  const sh = document.getElementById('dwShape').value;
-  simPathType = sh;
-  simWaypoints = [];
-  const v = id => parseFloat(document.getElementById(id).value) || 0;
-  const z = v('dwZ');
-  if(sh === 'circle'){
-    const cx = v('dwA1'), cy = v('dwA2'), r = v('dwA3');
-    for(let a=0; a<=Math.PI*2; a+=0.15){
-      simWaypoints.push({ x: cx + r*Math.cos(a), y: cy + r*Math.sin(a), z: z, drawing: true });
-    }
-  } else {
-    const x1 = v('dwA1'), y1 = v('dwA2'), x2 = v('dwA3'), y2 = v('dwA4');
-    for(let s=0; s<=1.0; s+=0.04){
-      simWaypoints.push({ x: x1 + s*(x2-x1), y: y1 + s*(y2-y1), z: z, drawing: true });
-    }
-  }
-  const scrubEl = document.getElementById('simScrub');
-  if(scrubEl) scrubEl.max = Math.max(1, simWaypoints.length - 1);
-  onSimScrubChange(0);
-}
-
-function startDraw(){
-  const sh = document.getElementById('dwShape').value;
-  const v = id => parseFloat(document.getElementById(id).value) || 0;
-  let b = sh === 'line' ? `shape=line&x1=${v('dwA1')}&y1=${v('dwA2')}&x2=${v('dwA3')}&y2=${v('dwA4')}` : `shape=circle&cx=${v('dwA1')}&cy=${v('dwA2')}&r=${v('dwA3')}`;
-  b += `&z=${v('dwZ')}&feed=${document.getElementById('dwFeed').value || 20}`;
-  post('/api/draw', b);
-}
-
 /* =============================================================================
    6. REST API & UI BINDINGS
 ============================================================================= */
@@ -1144,20 +1275,60 @@ function toast(msg, cls){
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.style.display = 'none'; }, 2600);
 }
-function api(url){
-  return fetch(url).then(r => r.text()).then(t => {
-    toast((t === 'OK' ? '✓ ' : '') + t, t === 'OK' ? 'ok' : 'warn');
-    return t;
-  }).catch(() => toast('Lỗi mạng / Mất kết nối robot', 'err'));
+async function requestCommand(url, options, trigger){
+  const control = trigger || pendingTrigger();
+  if(control) { control.disabled = true; control.setAttribute('aria-busy', 'true'); }
+  pendingCommands++;
+  syncCommandState();
+  try {
+    const response = await fetch(url, options);
+    const text = await response.text();
+    if(!response.ok){
+      toast(text || `Lệnh thất bại (${response.status})`, 'err');
+      return null;
+    }
+    toast((text === 'OK' ? '✓ ' : '') + (text || 'Đã nhận lệnh'), 'ok');
+    return text;
+  } catch (_) {
+    toast('Lỗi mạng / Mất kết nối robot', 'err');
+    return null;
+  } finally {
+    pendingCommands = Math.max(0, pendingCommands - 1);
+    if(control) control.removeAttribute('aria-busy');
+    if(control && !control.classList.contains('need-idle')) control.disabled = false;
+    syncCommandState();
+  }
 }
-function post(url, body){
-  return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })
-    .then(r => r.text())
-    .then(t => toast((t === 'OK' ? '✓ ' : '') + t, t === 'OK' ? 'ok' : 'warn'))
-    .catch(() => toast('Lỗi mạng / Mất kết nối robot', 'err'));
+function api(url, trigger){
+  return requestCommand(url, {method:'POST'}, trigger);
+}
+function post(url, body, trigger){
+  return requestCommand(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body }, trigger);
 }
 function clearFault(){ post('/api/jog', 'fault_clear=1'); }
 function jog(axis, dir){ post('/api/jog', `axis=${axis}&deg=${dir * stepSize}`); }
+function confirmSetHome(axis){
+  const axes = axis === 255 ? [4, 5] : [axis];
+  const labels = axes.map(a => `J${a + 1}`).join(' + ');
+  const existing = latestStatus && latestStatus.joints
+    ? axes.some(a => latestStatus.joints[a] && latestStatus.joints[a].homed) : false;
+  const message = existing
+    ? `Ghi đè mốc home hiện có của ${labels}? Zero mới sẽ được lưu vào NVS khi robot đang IDLE.`
+    : `Lưu vị trí hiện tại làm mốc home cho ${labels} vào NVS? Robot phải đang IDLE.`;
+  if(confirm(message)){
+    api(`/api/sethome?axis=${axis}`).then(t => {
+      if(t === 'OK') {
+        toast(`Đã gửi Set Home ${labels}; trạng thái HOMED sẽ cập nhật sau khi lệnh hoàn tất.`, 'ok');
+        pollOnce();
+      }
+    });
+  }
+}
+function confirmReleaseJ1J4(){
+  if(confirm('Release torque J1-J4 for hand adjustment? Home marks and NVS are kept. The next Home, Jog, Cartesian, or Draw command re-enables and re-syncs these joints from their encoders.')){
+    api('/api/release/j1-j4');
+  }
+}
 function confirmClearCalib(axisIdx){
   if(confirm(`Xóa cân chỉnh vị trí J${axisIdx + 1}? Giá trị zero đã lưu trong NVS sẽ bị xóa.`)){
     api(`/api/clearcalib?axis=${axisIdx}`);
@@ -1167,20 +1338,38 @@ function saveWifi(){
   const s = document.getElementById('wfSsid').value.trim(), p = document.getElementById('wfPass').value;
   if(!s){ toast('Vui lòng nhập tên WiFi (SSID)', 'warn'); return; }
   post('/api/wifi', `ssid=${encodeURIComponent(s)}&pass=${encodeURIComponent(p)}`)
-    .then(() => toast('Đã lưu WiFi! Robot đang khởi động lại...', 'ok'));
+    .then(t => { if(t) toast('Đã lưu WiFi! Robot đang khởi động lại...', 'ok'); });
 }
 
 // Navigation Tabs
-document.querySelectorAll('.nav-tab[data-t]').forEach(b => {
-  b.onclick = () => {
-    document.querySelectorAll('.nav-tab').forEach(x => { x.classList.remove('active'); x.setAttribute('aria-selected', 'false'); });
-    document.querySelectorAll('.tab-pane').forEach(x => x.classList.remove('active'));
-    b.classList.add('active'); b.setAttribute('aria-selected', 'true');
-    const target = document.getElementById(b.dataset.t);
-    if(target) target.classList.add('active');
-    if(b.dataset.t === 'pane-dash' && dashRenderer) dashRenderer.renderCurrent();
-    if(b.dataset.t === 'pane-motion' && simRenderer) simRenderer.renderCurrent();
-  };
+const navTabs = Array.from(document.querySelectorAll('.nav-tab[data-t]'));
+function activateTab(tab, moveFocus = false){
+  navTabs.forEach(x => {
+    const active = x === tab;
+    x.classList.toggle('active', active);
+    x.setAttribute('aria-selected', String(active));
+    x.tabIndex = active ? 0 : -1;
+  });
+  document.querySelectorAll('.tab-pane').forEach(x => x.classList.toggle('active', x.id === tab.dataset.t));
+  if(moveFocus) tab.focus();
+  if(tab.dataset.t === 'pane-dash' && dashRenderer) dashRenderer.renderCurrent();
+  if(tab.dataset.t === 'pane-motion' && simRenderer) {
+    if(simSource === 'live' && window.lastRobotAngles) updateSimFromAngles(window.lastRobotAngles);
+    else simRenderer.renderCurrent();
+  }
+}
+navTabs.forEach((tab, index) => {
+  tab.addEventListener('click', () => activateTab(tab));
+  tab.addEventListener('keydown', e => {
+    let next = index;
+    if(e.key === 'ArrowRight') next = (index + 1) % navTabs.length;
+    else if(e.key === 'ArrowLeft') next = (index - 1 + navTabs.length) % navTabs.length;
+    else if(e.key === 'Home') next = 0;
+    else if(e.key === 'End') next = navTabs.length - 1;
+    else return;
+    e.preventDefault();
+    activateTab(navTabs[next], true);
+  });
 });
 
 // Step selector
@@ -1214,13 +1403,14 @@ function buildJointCards(){
           </div>
           <div class="jcard-enc" id="je${i}">Encoder: --</div>
           <div class="jcard-flags" id="jf${i}"></div>
+          <div class="jcard-calib" id="jc${i}">NVS: --</div>
           <div class="jog-controls">
             <button class="jog-btn" onclick="jog(${i},-1)" aria-label="Jog ${AXES[i]} âm">↺ &minus;</button>
             <button class="jog-btn" onclick="jog(${i},1)" aria-label="Jog ${AXES[i]} dương">+ ↻</button>
           </div>
           <div class="jog-calib-row">
-            <button class="btn btn-ghost need-idle" onclick="api('/api/sethome?axis=${i}')">Set Home</button>
-            <button class="btn btn-ghost" onclick="confirmClearCalib(${i})">Clear NVS</button>
+            <button class="btn btn-ghost need-idle" onclick="confirmSetHome(${i})">Set Home</button>
+            <button class="btn btn-ghost need-idle" onclick="confirmClearCalib(${i})">Clear NVS</button>
           </div>
         </div>
       `);
@@ -1241,10 +1431,11 @@ buildJointCards();
    7. STATUS POLLER & TELEMETRY UPDATER
 ============================================================================= */
 function updateUI(d){
+  latestStatus = d;
   const m = d.mode || 'idle';
   const modeText = document.getElementById('dashModeText');
   const modeBadge = document.getElementById('dashModeBadge');
-  const map = { idle: 'b-idle', homing: 'b-run', jog: 'b-run', cart: 'b-run', draw: 'b-run', fault: 'b-fault' };
+  const map = { idle: 'b-idle', release: 'b-run', homing: 'b-run', jog: 'b-run', cart: 'b-run', draw: 'b-run', fault: 'b-fault' };
   if(modeText) { modeText.textContent = m.toUpperCase(); modeText.className = 'mode-text ' + (m === 'fault' ? 'fault' : (m !== 'idle' ? 'run' : '')); }
   if(modeBadge) { modeBadge.textContent = m; modeBadge.className = 'badge ' + (map[m] || 'b-idle'); }
 
@@ -1267,14 +1458,18 @@ function updateUI(d){
   const wfRssiText = document.getElementById('wfRssiText');
   if(wfRssiText) wfRssiText.textContent = `${d.wifi.rssi || 0} dBm`;
 
-  document.querySelectorAll('.need-idle').forEach(b => { b.disabled = (d.busy || m === 'fault'); });
+  syncCommandState();
 
   const robotAngles = d.joints.map(j => j.deg);
   window.lastRobotAngles = robotAngles;
 
-  // Render Dashboard Live 3D Twin
+  // Lưu scene mới, chỉ vẽ canvas tab đang xem để polling không tốn CPU vô ích.
   const lmLive = forwardKinematics(robotAngles);
-  if(dashRenderer) dashRenderer.render(lmLive, null);
+  if(dashRenderer) {
+    dashRenderer.lastLm = lmLive;
+    dashRenderer.lastPath = null;
+    if(isPaneActive('pane-dash')) dashRenderer.renderCurrent();
+  }
 
   const dashPoseLabel = document.getElementById('dashPoseLabel');
   if(dashPoseLabel) dashPoseLabel.textContent = `TCP: (${lmLive.tcp[0].toFixed(1)}, ${lmLive.tcp[1].toFixed(1)}, ${lmLive.tcp[2].toFixed(1)})`;
@@ -1283,7 +1478,7 @@ function updateUI(d){
   const hudDashWrist = document.getElementById('hudDashWrist');
   if(hudDashWrist) hudDashWrist.textContent = `(${lmLive.wrist[0].toFixed(1)}, ${lmLive.wrist[1].toFixed(1)}, ${lmLive.wrist[2].toFixed(1)})`;
 
-  if(simSource === 'live'){
+  if(simSource === 'live' && isPaneActive('pane-motion')){
     updateSimFromAngles(robotAngles);
   }
 
@@ -1299,6 +1494,13 @@ function updateUI(d){
       if(j.drift) flags.push('<span class="flag-drift">DRIFT</span>');
       if(!j.encOK) flags.push('<span class="flag-encerr">ENC ERR</span>');
       jf.innerHTML = flags.join(' · ');
+    }
+    const jc = document.getElementById('jc' + i);
+    if(jc){
+      if(!j.homed) jc.textContent = 'NVS: chưa có mốc home';
+      else if(j.restored) jc.textContent = 'NVS: đã khôi phục sau khởi động';
+      else if(j.encOK) jc.textContent = 'NVS: mốc home đang hoạt động';
+      else jc.textContent = 'NVS: không thể lưu mốc mới — encoder lỗi';
     }
   });
 
@@ -1319,7 +1521,10 @@ function setOnline(on){
 }
 
 function pollOnce(){
-  fetch('/api/status').then(r => r.json())
+  fetch('/api/status').then(r => {
+    if(!r.ok) throw new Error(`status ${r.status}`);
+    return r.json();
+  })
     .then(d => { failN = 0; setOnline(true); updateUI(d); })
     .catch(() => { if(++failN >= 3) setOnline(false); });
 }
@@ -1364,10 +1569,12 @@ void handleJog() {
         srv->send(400, "text/plain", "missing axis or deg");
         return;
     }
-    const int axis = srv->arg("axis").toInt();
-    const float deg = srv->arg("deg").toFloat();
-    if (axis < 0 || axis >= NUM_MOTORS) { srv->send(400, "text/plain", "bad axis"); return; }
-    if (!std::isfinite(deg) || fabsf(deg) < 0.01f || fabsf(deg) > 180.0f) {
+    int axis = 0;
+    float deg = 0.0f;
+    if (!webval::parseInt(srv->arg("axis").c_str(), axis) || axis < 0 || axis >= NUM_MOTORS) {
+        srv->send(400, "text/plain", "bad axis"); return;
+    }
+    if (!webval::parseFiniteFloat(srv->arg("deg").c_str(), deg) || fabsf(deg) < 0.01f || fabsf(deg) > 180.0f) {
         srv->send(400, "text/plain", "bad deg");
         return;
     }
@@ -1394,10 +1601,10 @@ void handleMove() {
         srv->send(400, "text/plain", "missing x, y, or z");
         return;
     }
-    const float x = srv->arg("x").toFloat();
-    const float y = srv->arg("y").toFloat();
-    const float z = srv->arg("z").toFloat();
-    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+    float x = 0.0f, y = 0.0f, z = 0.0f;
+    if (!webval::parseFiniteFloat(srv->arg("x").c_str(), x) ||
+        !webval::parseFiniteFloat(srv->arg("y").c_str(), y) ||
+        !webval::parseFiniteFloat(srv->arg("z").c_str(), z)) {
         srv->send(400, "text/plain", "non-finite coordinates");
         return;
     }
@@ -1408,7 +1615,11 @@ void handleMove() {
     ArmCommand c;
     c.type = ArmCommand::MOVE_CART;
     c.p[0] = x; c.p[1] = y; c.p[2] = z;
-    c.p[5] = srv->hasArg("feed") ? srv->arg("feed").toFloat() : 30.0f;
+    c.p[5] = 30.0f;
+    if (srv->hasArg("feed") &&
+        (!webval::parseFiniteFloat(srv->arg("feed").c_str(), c.p[5]) || !webval::validFeed(c.p[5]))) {
+        srv->send(400, "text/plain", "bad feed"); return;
+    }
     if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
     const bool ok = armPtr->submit(c, 20);
     if (ok) { srv->send(200, "text/plain", "OK"); return; }
@@ -1429,34 +1640,43 @@ void handleDraw() {
     ArmCommand c;
     if (shape == "line") {
         c.type = ArmCommand::DRAW_LINE;
-        c.p[0] = srv->arg("x1").toFloat();
-        c.p[1] = srv->arg("y1").toFloat();
-        c.p[2] = srv->arg("x2").toFloat();
-        c.p[3] = srv->arg("y2").toFloat();
-        c.p[4] = srv->arg("z").toFloat();
+        if (!webval::parseFiniteFloat(srv->arg("x1").c_str(), c.p[0]) ||
+            !webval::parseFiniteFloat(srv->arg("y1").c_str(), c.p[1]) ||
+            !webval::parseFiniteFloat(srv->arg("x2").c_str(), c.p[2]) ||
+            !webval::parseFiniteFloat(srv->arg("y2").c_str(), c.p[3]) ||
+            !webval::parseFiniteFloat(srv->arg("z").c_str(), c.p[4])) {
+            srv->send(400, "text/plain", "bad line coordinates"); return;
+        }
         if (c.p[4] < -15.0f || c.p[4] > 435.0f) {
             srv->send(400, "text/plain", "z out of range");
             return;
         }
-    } else if (shape == "circle") {
-        c.type = ArmCommand::DRAW_CIRCLE;
-        c.p[0] = srv->arg("cx").toFloat();
-        c.p[1] = srv->arg("cy").toFloat();
-        c.p[2] = srv->arg("z").toFloat();
-        c.p[3] = srv->arg("r").toFloat();
+    } else if (shape == "circle" || shape == "square") {
+        const bool square = shape == "square";
+        c.type = square ? ArmCommand::DRAW_SQUARE : ArmCommand::DRAW_CIRCLE;
+        if (!webval::parseFiniteFloat(srv->arg("cx").c_str(), c.p[0]) ||
+            !webval::parseFiniteFloat(srv->arg("cy").c_str(), c.p[1]) ||
+            !webval::parseFiniteFloat(srv->arg("z").c_str(), c.p[2]) ||
+            !webval::parseFiniteFloat(srv->arg("r").c_str(), c.p[3])) {
+            srv->send(400, "text/plain", square ? "bad square coordinates" : "bad circle coordinates"); return;
+        }
         if (c.p[2] < -15.0f || c.p[2] > 435.0f) {
             srv->send(400, "text/plain", "z out of range");
             return;
         }
         if (c.p[3] < 5.0f || c.p[3] > 250.0f) {
-            srv->send(400, "text/plain", "r out of range");
+            srv->send(400, "text/plain", square ? "side out of range" : "r out of range");
             return;
         }
     } else {
-        srv->send(400, "text/plain", "shape: line|circle");
+        srv->send(400, "text/plain", "shape: line|circle|square");
         return;
     }
-    c.p[5] = srv->hasArg("feed") ? srv->arg("feed").toFloat() : DRAW_FEED_MM_S;
+    c.p[5] = DRAW_FEED_MM_S;
+    if (srv->hasArg("feed") &&
+        (!webval::parseFiniteFloat(srv->arg("feed").c_str(), c.p[5]) || !webval::validFeed(c.p[5]))) {
+        srv->send(400, "text/plain", "bad feed"); return;
+    }
     if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
     const bool ok = armPtr->submit(c, 20);
     if (ok) { srv->send(200, "text/plain", "OK"); return; }
@@ -1483,8 +1703,10 @@ void handleHomeAll() {
 void handleHomeAxis() {
     if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
     if (!srv->hasArg("axis")) { srv->send(400, "text/plain", "missing axis"); return; }
-    const int axis = srv->arg("axis").toInt();
-    if (axis < 0 || axis >= 4) { srv->send(400, "text/plain", "axis 0..3 only"); return; }
+    int axis = 0;
+    if (!webval::parseInt(srv->arg("axis").c_str(), axis) || axis < 0 || axis >= 4) {
+        srv->send(400, "text/plain", "axis 0..3 only"); return;
+    }
     if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
     ArmCommand c;
     c.type = ArmCommand::HOME_AXIS;
@@ -1496,12 +1718,22 @@ void handleHomeAxis() {
 void handleSetHome() {
     if (jointsPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
     if (!srv->hasArg("axis")) { srv->send(400, "text/plain", "missing axis"); return; }
-    const int axis = srv->arg("axis").toInt();
-    if (axis < 0 || (axis >= NUM_MOTORS && axis != 255)) { srv->send(400, "text/plain", "bad axis"); return; }
+    int axis = 0;
+    if (!webval::parseInt(srv->arg("axis").c_str(), axis) ||
+        axis < 0 || (axis >= NUM_MOTORS && axis != 255)) { srv->send(400, "text/plain", "bad axis"); return; }
     if (armPtr != nullptr && armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
     ArmCommand c;
     c.type = ArmCommand::SET_HOME;
     c.axis = static_cast<uint8_t>(axis);
+    const bool ok = armPtr->submit(c, 20);
+    srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
+}
+
+void handleReleaseJ1J4() {
+    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
+    ArmCommand c;
+    c.type = ArmCommand::RELEASE_J1_J4;
     const bool ok = armPtr->submit(c, 20);
     srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
 }
@@ -1514,8 +1746,10 @@ void handleClearCalib() {
         return;
     }
     if (!srv->hasArg("axis")) { srv->send(400, "text/plain", "missing axis"); return; }
-    const int axis = srv->arg("axis").toInt();
-    if (axis < 0 || axis >= NUM_MOTORS) { srv->send(400, "text/plain", "bad axis"); return; }
+    int axis = 0;
+    if (!webval::parseInt(srv->arg("axis").c_str(), axis) || axis < 0 || axis >= NUM_MOTORS) {
+        srv->send(400, "text/plain", "bad axis"); return;
+    }
     jointsPtr->forgetHome(static_cast<uint8_t>(axis));
     srv->send(200, "text/plain", "OK");
 }
@@ -1547,13 +1781,17 @@ void handleWifiSave() {
 void handleWorkPlaneCalib() {
     if (workPlanePtr == nullptr) { srv->send(500, "text/plain", "WorkPlane not initialized"); return; }
     if (armPtr != nullptr && armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
-    const Point3D p1{srv->arg("p1x").toFloat(), srv->arg("p1y").toFloat(), srv->arg("p1z").toFloat()};
-    const Point3D p2{srv->arg("p2x").toFloat(), srv->arg("p2y").toFloat(), srv->arg("p2z").toFloat()};
-    const Point3D p3{srv->arg("p3x").toFloat(), srv->arg("p3y").toFloat(), srv->arg("p3z").toFloat()};
-    if (!std::isfinite(p1.x) || !std::isfinite(p1.y) || !std::isfinite(p1.z) ||
-        !std::isfinite(p2.x) || !std::isfinite(p2.y) || !std::isfinite(p2.z) ||
-        !std::isfinite(p3.x) || !std::isfinite(p3.y) || !std::isfinite(p3.z)) {
-        srv->send(400, "application/json", "{\"calibrated\":false,\"error\":\"Non-finite coordinates\"}");
+    Point3D p1, p2, p3;
+    if (!webval::parseFiniteFloat(srv->arg("p1x").c_str(), p1.x) ||
+        !webval::parseFiniteFloat(srv->arg("p1y").c_str(), p1.y) ||
+        !webval::parseFiniteFloat(srv->arg("p1z").c_str(), p1.z) ||
+        !webval::parseFiniteFloat(srv->arg("p2x").c_str(), p2.x) ||
+        !webval::parseFiniteFloat(srv->arg("p2y").c_str(), p2.y) ||
+        !webval::parseFiniteFloat(srv->arg("p2z").c_str(), p2.z) ||
+        !webval::parseFiniteFloat(srv->arg("p3x").c_str(), p3.x) ||
+        !webval::parseFiniteFloat(srv->arg("p3y").c_str(), p3.y) ||
+        !webval::parseFiniteFloat(srv->arg("p3z").c_str(), p3.z)) {
+        srv->send(400, "application/json", "{\"calibrated\":false,\"error\":\"Bad coordinates\"}");
         return;
     }
     if (workPlanePtr->setThreePointCalibration(p1, p2, p3)) {
@@ -1567,7 +1805,14 @@ void handleWorkPlaneCalib() {
 void handleWorkPlaneToggle() {
     if (workPlanePtr == nullptr) { srv->send(500, "text/plain", "WorkPlane not initialized"); return; }
     if (armPtr != nullptr && armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
-    const bool en = (srv->arg("en").toInt() != 0);
+    bool en = false;
+    if (!webval::parseBool01(srv->arg("en").c_str(), en)) {
+        srv->send(400, "application/json", "{\"error\":\"en must be 0 or 1\"}"); return;
+    }
+    if (en && !workPlanePtr->isCalibrated()) {
+        srv->send(409, "application/json", "{\"error\":\"NOT_CALIBRATED\"}");
+        return;
+    }
     workPlanePtr->setEnabled(en);
     srv->send(200, "application/json", workPlanePtr->isEnabled() ? "{\"enabled\":true}" : "{\"enabled\":false}");
 }
@@ -1599,13 +1844,16 @@ void webBegin(WebServer& server, ArmController* arm, WifiManager* wifi,
     server.on("/", HTTP_GET, handleRoot);
     server.on("/api/status", HTTP_GET, handleStatus);
     server.on("/api/jog", HTTP_POST, handleJog);
-    server.on("/api/stop", HTTP_GET, handleStop);
+    server.on("/api/stop", HTTP_POST, handleStop);
     server.on("/api/move", HTTP_POST, handleMove);
     server.on("/api/draw", HTTP_POST, handleDraw);
-    server.on("/api/home/all", HTTP_GET, handleHomeAll);
-    server.on("/api/home/axis", HTTP_GET, handleHomeAxis);
-    server.on("/api/sethome", HTTP_GET, handleSetHome);
-    server.on("/api/clearcalib", HTTP_GET, handleClearCalib);
+    server.on("/api/draw/presets", HTTP_GET, handleDrawProfiles);
+    server.on("/api/draw/preset", HTTP_POST, handleDrawPreset);
+    server.on("/api/home/all", HTTP_POST, handleHomeAll);
+    server.on("/api/home/axis", HTTP_POST, handleHomeAxis);
+    server.on("/api/sethome", HTTP_POST, handleSetHome);
+    server.on("/api/release/j1-j4", HTTP_POST, handleReleaseJ1J4);
+    server.on("/api/clearcalib", HTTP_POST, handleClearCalib);
     server.on("/api/wifi", HTTP_POST, handleWifiSave);
     server.on("/api/workplane/calib", HTTP_POST, handleWorkPlaneCalib);
     server.on("/api/workplane/toggle", HTTP_POST, handleWorkPlaneToggle);
@@ -1613,4 +1861,104 @@ void webBegin(WebServer& server, ArmController* arm, WifiManager* wifi,
 
     server.begin();
     Serial.printf("[WEB] HTTP server on port %u\n", WEB_SERVER_PORT);
+}
+
+void handleDrawProfiles() {
+    if (workPlanePtr != nullptr && workPlanePtr->isEnabled()) {
+        sendJson(409, "{\"error\":\"WORKPLANE_ENABLED\"}");
+        return;
+    }
+    const auto& profiles = DrawingWorkspace::recommendations();
+    String json = "{\"profiles\":[";
+    bool first = true;
+    for (uint8_t i = 0; i < profiles.size(); ++i) {
+        if (!profiles[i].valid) continue;
+        DrawingWorkspace::SuggestedJob job;
+        if (!DrawingWorkspace::makeSuggestedJob(i, DrawingWorkspace::Shape::SQUARE, job)) continue;
+        if (!first) json += ',';
+        first = false;
+        char item[176];
+        snprintf(item, sizeof(item),
+                 "{\"z\":%.1f,\"x\":%.1f,\"y\":%.1f,\"maxSquareSide\":%.1f,\"size\":%.1f}",
+                 profiles[i].z, profiles[i].centerX, profiles[i].centerY,
+                 profiles[i].maxSquareSide, job.size);
+        json += item;
+    }
+    json += "]}";
+    sendJson(first ? 503 : 200, json);
+}
+
+void handleDrawPreset() {
+    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    if (workPlanePtr != nullptr && workPlanePtr->isEnabled()) {
+        sendJson(409, "{\"error\":\"WORKPLANE_ENABLED\"}");
+        return;
+    }
+    int profile = 0;
+    if (!webval::parseInt(srv->arg("profile").c_str(), profile) ||
+        profile < 0 || profile >= DrawingWorkspace::kRecommendationCount) {
+        srv->send(400, "text/plain", "profile 0..2 required"); return;
+    }
+    const String shapeText = srv->arg("shape");
+    DrawingWorkspace::Shape shape;
+    if (shapeText == "line") shape = DrawingWorkspace::Shape::LINE;
+    else if (shapeText == "circle") shape = DrawingWorkspace::Shape::CIRCLE;
+    else if (shapeText == "square") shape = DrawingWorkspace::Shape::SQUARE;
+    else { srv->send(400, "text/plain", "shape: line|circle|square"); return; }
+
+    DrawingWorkspace::SuggestedJob job;
+    const bool hasCustomStart = srv->hasArg("sx") || srv->hasArg("sy") || srv->hasArg("length");
+    if (hasCustomStart) {
+        float startX = 0.0f;
+        float startY = 0.0f;
+        float size = 0.0f;
+        if (!srv->hasArg("sx") || !srv->hasArg("sy") ||
+            !webval::parseFiniteFloat(srv->arg("sx").c_str(), startX) ||
+            !webval::parseFiniteFloat(srv->arg("sy").c_str(), startY)) {
+            srv->send(400, "text/plain", "sx and sy are required"); return;
+        }
+        if (!DrawingWorkspace::makeSuggestedJob(static_cast<uint8_t>(profile), shape, job)) {
+            srv->send(400, "text/plain", "selected profile is not safe"); return;
+        }
+        size = job.size;
+        if (shape == DrawingWorkspace::Shape::LINE &&
+            (!srv->hasArg("length") ||
+             !webval::parseFiniteFloat(srv->arg("length").c_str(), size))) {
+            srv->send(400, "text/plain", "length is required for line"); return;
+        }
+        if (!DrawingWorkspace::makeSuggestedShape(static_cast<uint8_t>(profile), shape,
+                                                  startX, startY, size, job)) {
+            srv->send(400, "text/plain", "custom shape is not safe"); return;
+        }
+    } else if (!DrawingWorkspace::makeSuggestedJob(static_cast<uint8_t>(profile), shape, job)) {
+        srv->send(400, "text/plain", "selected profile is not safe"); return;
+    }
+    ArmCommand command;
+    command.type = shape == DrawingWorkspace::Shape::LINE ? ArmCommand::DRAW_LINE
+                 : shape == DrawingWorkspace::Shape::CIRCLE ? ArmCommand::DRAW_CIRCLE
+                                                            : ArmCommand::DRAW_SQUARE;
+    command.p[0] = job.x;
+    command.p[1] = job.y;
+    command.p[2] = job.z;
+    command.p[3] = shape == DrawingWorkspace::Shape::CIRCLE ? job.size * 0.5f : job.size;
+    if (shape == DrawingWorkspace::Shape::LINE) {
+        command.p[0] = job.x - job.size * 0.5f;
+        command.p[1] = job.y;
+        command.p[2] = job.x + job.size * 0.5f;
+        command.p[3] = job.y;
+        command.p[4] = job.z;
+    }
+    command.p[5] = DRAW_FEED_MM_S;
+    if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
+    const bool ok = armPtr->submit(command, 20);
+    if (ok) { srv->send(200, "text/plain", "OK"); return; }
+    const String err = armPtr->lastPlannerError();
+    if (err == "OUT_OF_REACH" || err == "BAD_RADIUS") {
+        char body[96];
+        snprintf(body, sizeof(body), "{\"error\":\"%s\",\"segment\":%d}", err.c_str(),
+                 armPtr->lastPlannerFailIndex());
+        sendJson(400, body);
+    } else {
+        srv->send(503, "text/plain", "busy");
+    }
 }

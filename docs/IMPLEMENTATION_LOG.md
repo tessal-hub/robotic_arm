@@ -1616,10 +1616,7 @@ hiện tại trừ khi thí nghiệm trên buộc phải đổi mô hình.
   - Đặt `HOMING_STEP_INTERVAL_J5/J6 = 2500` ($400\,\text{steps/s}$) và `DEFAULT_STEP_INTERVAL_US = 1200` ($\sim 833\,\text{steps/s}$) để A4988 đạt mô-men xoắn tối đa.
 
 
-
-
-
-
+---
 
 
 
@@ -2665,4 +2662,587 @@ Khi người dùng bấm Jog $+30^\circ$:
 - Sprint 2 P2 #10-13 (Architecture): DI / RobotContext, HAL, LittleFS Frontend, WebSocket.
 - Sprint 3 bỏ qua theo quyết định owner (P3 #14-21).
 - Commissioning hardware: chạy Home All J1→J4 liên tiếp kiểm tra không WDT, đo ISR latency <10ms, pre-flight move ngoài reach → HTTP 400, jog clamp soft-limit, drift 25° debounce.
+
+---
+
+## 2026-09-01 — Khóa soft-limit J3 về 0°…+90°
+
+### Việc đã làm
+- What: Cập nhật `src/config.h` để `J3_MIN_LIMIT = 0.0f`, giữ `J3_MAX_LIMIT = +90.0f`; bảng soft-limit và calibration range dùng trực tiếp hai hằng số này. Bổ sung host test bảo vệ contract J3 trong `test/host/test_joint_logic.cpp`.
+- Why: Owner xác nhận J3 chỉ có hành trình cơ khí an toàn từ vị trí duỗi thẳng/home 0° đến +90°; không được cho Jog chạy vào góc âm.
+- How: Không đổi DH, offset, dấu motor/encoder, endstop hay logic IK — `kinematics.h/.cpp`, README và digital clone đã dùng đúng J3 [0°, +90°]. Jog sau home tự clamp mọi target âm về 0° qua bảng soft-limit chung.
+
+### Build gate
+- `pio run` → SUCCESS (0 errors, 0 warnings)
+- `tools/run_host_tests.sh` → ALL PASSED: kinematics + Differential Wrist (2230 roundtrips), joint logic (bao gồm contract J3 mới), work plane, trajectory validator, homing logic, safety manager và homing nonblocking.
+
+### Việc còn lại (nếu có)
+- Commissioning: sau Home J3, xác nhận Jog âm không phát xung; Jog dương chỉ dừng tại +90° soft-limit.
+
+---
+
+## 2026-09-01 — P0: Dừng xung ISR và STOP_ALL preemptive
+
+### Việc đã làm
+- What: `Endstops::isrHandler()` trong `src/endstop.*` nay gọi `Motor::stopFromISR()` cho đúng trục ngay tại cạnh FALLING, rồi mới publish `pending + timestamp` cho debounce. `SafetyManager` vẫn là owner duy nhất của xác nhận LOW 50 ms và E_STOP latch.
+- What: `ArmController::submit(STOP_ALL)` dùng mailbox atomic ngoài `ArmCommand` queue; motion task xử lý mailbox trước safety/homing/planner tick, dừng toàn bộ motion và `xQueueReset()` để không có lệnh cũ nào khởi động lại robot.
+- Why: Audit phát hiện debounce 50 ms đã vô tình trì hoãn dừng cơ khí, và STOP_ALL có thể bị queue đầy từ chối hoặc bị các lệnh xếp sau khởi động lại motion.
+- How: Glitch endstop vẫn dừng an toàn tức thì, nhưng không thành FAULT/E_STOP nếu không còn LOW ổn định sau debounce. Bổ sung `test_isr_latency.cpp` kiểm tra regression cho thứ tự pulse-stop trước debounce và mailbox STOP; runner có thêm suite thứ 8.
+
+### Build gate
+- `pio run` → SUCCESS (0 errors, 0 warnings)
+- `tools/run_host_tests.sh` → 8 suites ALL PASSED: kinematics, joint logic, work plane, trajectory validator, homing logic, safety manager, homing nonblocking, ISR/STOP contract.
+
+### Việc còn lại (nếu có)
+- Commissioning hardware: đo scope từ cạnh endstop đến STEP LOW; xác nhận glitch không latch FAULT nhưng không tự khởi động lại motor; xác nhận STOP_ALL khi queue đầy không chạy bất kỳ lệnh cũ nào.
+
+---
+
+## 2026-09-01 — P1: Áp dụng và khôi phục homing calibration từ NVS
+
+### Việc đã làm
+- What: `JointModel::stepsPerDegree()` nay dùng `stepsPerDeg` đo được sau homing khi calibration hợp lệ; `applyHomingCalibration()` giữ đúng `encSign`/steps-per-degree đo được và persist qua `NvsStore::saveCalib()`, thay vì ghi lại hằng số config. `restoreFromNVS()` nạp calibration NVS trước khi khôi phục vị trí step.
+- What: Thêm `src/joint_calibration.h` làm policy thuần C++ dùng chung: nhận dấu encoder ±1 và tỷ lệ steps/degree [0.5, 2.0] so với cấu hình; dữ liệu NaN/Inf hay ngoài dải bị bỏ qua, fallback về cấu hình. `forgetHome()` cũng reset runtime calibration và xoá bản ghi NVS.
+- Why: Audit phát hiện calibration đã được lưu vào NVS nhưng conversion runtime luôn dùng gear ratio compile-time, và boot đánh dấu calibration là hợp lệ mà không hề đọc record. Điều này làm cả hiệu chuẩn và dữ liệu NVS không có hiệu lực.
+- How: Dùng cùng biên an toàn với homing CROSSCHECK; NVS chỉ kiểm tính nguyên thủy finite/positive, còn JointModel kiểm tra tính hợp lý theo từng trục trước khi ảnh hưởng motion scale. Không thay đổi DH, gear ratio mặc định, soft-limit hay cơ chế NVS hiện hữu.
+
+### Build gate
+- `pio run` → SUCCESS (0 errors, 0 warnings)
+- `tools/run_host_tests.sh` → 8 suites ALL PASSED: kinematics + Differential Wrist (2230 roundtrips), joint logic (bao gồm acceptance calibration mới), work plane, trajectory validator (7), homing logic, safety manager (10), homing nonblocking (13), ISR/STOP contract (5).
+
+### Việc còn lại (nếu có)
+- Commissioning hardware: Home một trục, đối chiếu log `Calib` với log boot `dung calib NVS`; mất nguồn rồi kiểm tra restore vẫn dùng cùng steps/deg. Thử CLEAR CALIB và xác nhận boot fallback đúng hằng số config.
+
+---
+
+## 2026-09-01 — P1: Drift watchdog latch FAULT thực sự
+
+### Việc đã làm
+- What: `JointModel::updateDriftCheck()` nay chỉ encoder-first resync khi sai lệch không vượt `RUNAWAY_ERROR_THRESHOLD=25°`. Sai lệch lớn giữ nguyên step counter, đếm qua `DRIFT_FAULT_CONSECUTIVE_CHECKS=3` lần kiểm tra liên tiếp rồi latch `driftFault`; Arm/SafetyManager dừng toàn bộ motion và vào FAULT.
+- What: Đưa chu kỳ kiểm tra 500ms và settle encoder 300ms thành hằng số `config.h`; thêm `src/drift_policy.h` thuần C++ cùng host test cho threshold, debounce ba lần và saturation counter.
+- Why: Audit phát hiện watchdog trước đó resync ngay cả khi runaway rồi xoá cờ lỗi, khiến nhánh FAULT không thể kích hoạt và che mất dấu vết chẩn đoán.
+- How: Giữ correction encoder-first cho lệch nhỏ bình thường do backlash/lost-step; với lệch lớn không tự sửa. `CLEAR_FAULT` vẫn là hành động thủ công hợp lệ để clear latch và resync tại thời điểm owner xác nhận an toàn.
+
+### Build gate
+- `pio run` → SUCCESS (0 errors, 0 warnings)
+- `tools/run_host_tests.sh` → 9 suites ALL PASSED: kinematics + Differential Wrist (2230 roundtrips), joint logic, work plane, trajectory validator (7), homing logic, safety manager (10), homing nonblocking (13), drift policy và ISR/STOP contract (5).
+
+### Việc còn lại (nếu có)
+- Commissioning hardware: tạo sai lệch encoder/step có kiểm soát &gt;25°, xác nhận log suspect 1/3 → 3/3, motor dừng và CLEAR_FAULT là điều kiện duy nhất để resync/mở khoá.
+
+---
+
+## 2026-09-01 — P1: Đồng nhất WorkPlane pre-flight với Planner
+
+### Việc đã làm
+- What: `TrajectoryValidator` nhận rõ độ cao UCS khi WorkPlane enabled: pose hiện tại dùng độ cao $w$ thực tế, còn POINT/LINE/CIRCLE target được kiểm tra tại $w=0$ trên mặt phẳng, đúng như `Planner::startMoveTo()`.
+- What: Bỏ nhánh validator cố transform WorkPlane chỉ calibrated nhưng disabled; transform nay chỉ tồn tại khi feature thực sự enabled. Thêm regression `workplane_target_uses_plane_not_legacy_z` trong trajectory host test.
+- Why: Validator trước đó truyền trực tiếp `job.z` thành height theo normal, trong khi Planner dùng `z - job.z`; cùng một job có thể bị validator accept/reject khác với đường đi thực tế.
+- How: Giữ nguyên contract UI/Planner hiện hữu và WorkPlane geometry; chỉ chia tách rõ `$w$` của pose hiện tại với target nằm trên paper plane.
+
+### Build gate
+- `pio run` → SUCCESS (0 errors, 0 warnings)
+- `tools/run_host_tests.sh` → 9 suites ALL PASSED: kinematics + Differential Wrist (2230 roundtrips), joint logic, work plane, trajectory validator (8), homing logic, safety manager (10), homing nonblocking (13), drift policy và ISR/STOP contract (5).
+
+### Việc còn lại (nếu có)
+- Commissioning hardware: calibrate một mặt phẳng ngang/xiên, bật WorkPlane, gửi POINT/LINE/CIRCLE với các giá trị `z` khác nhau và xác nhận pre-flight luôn khớp motion thực tế.
+
+---
+
+## 2026-09-01 — P2: REST mutation chỉ dùng POST
+
+### Việc đã làm
+- What: Chuyển `/api/stop`, `/api/home/all`, `/api/home/axis`, `/api/sethome` và `/api/clearcalib` từ HTTP GET sang POST. Hàm command helper trong SPA nhúng cũng gửi POST, nên các nút hiện hữu giữ nguyên hành vi.
+- Why: GET phải an toàn và không thay đổi trạng thái; bookmark, crawler hoặc browser prefetch không được phép tự dừng/home/reset calibration robot.
+- How: Giữ các endpoint đọc (`/`, status, workplane status) ở GET, các endpoint nhận body vốn đã POST. Thêm host source-contract test bảo vệ method cho năm route mutation.
+
+### Build gate
+- `pio run` → SUCCESS (0 errors, 0 warnings)
+- `tools/run_host_tests.sh` → 10 suites ALL PASSED: kinematics + Differential Wrist (2230 roundtrips), joint logic, work plane, trajectory validator (8), homing logic, safety manager (10), homing nonblocking (13), drift policy, web API contract và ISR/STOP contract (5).
+
+### Việc còn lại (nếu có)
+- Chính sách authentication và AP password không tự đổi trong patch này: cần chọn UX provisioning (mật khẩu in Serial theo MAC, password owner-provided, hay Basic Auth sau STA).
+
+---
+
+## 2026-09-01 — P2: Snapshot sensor an toàn khi mutex timeout
+
+### Việc đã làm
+- What: `Sensor` publish angle lọc, accumulated angle và turn count vào snapshot `std::atomic<uint32_t>/int32_t` dưới `dataMutex` ngay sau mỗi scan thành công. Các getter vẫn ưu tiên lock 5ms, nhưng khi timeout sẽ đọc snapshot thay vì truy cập trực tiếp mảng đang bị writer sửa.
+- Why: Audit phát hiện getter cố take mutex nhưng bỏ qua kết quả timeout, dẫn đến C++ data race giữa `SensorScanTask` và motion/web reader dù float aligned thường không bị rách trên ESP32.
+- How: Dùng atomic 32-bit cùng `memcpy` bit-exact cho float, không thêm allocation, không kéo dài đường I2C. Snapshot có thể cũ tối đa một chu kỳ scan nhưng luôn là sample hoàn chỉnh và bounded-time.
+
+### Build gate
+- `pio run` → SUCCESS (0 errors, 0 warnings)
+- `tools/run_host_tests.sh` → 11 suites ALL PASSED: kinematics + Differential Wrist (2230 roundtrips), joint logic, work plane, trajectory validator (8), homing logic, safety manager (10), homing nonblocking (13), drift policy, web API contract, sensor snapshot contract và ISR/STOP contract (5).
+
+### Việc còn lại (nếu có)
+- Commissioning: log/count timeout dataMutex dưới tải web polling + motion; xác nhận fallback snapshot không gây false drift/homing.
+
+---
+
+## 2026-09-01 — Kế hoạch refactor ưu tiên
+
+### Việc đã làm
+- What: Thêm `docs/REFACTOR_PLAN.md` với trạng thái P0–P2 đã hoàn thành, phase P2 còn lại, kiến trúc migration MotionScheduler/DDA P3 và P4 observability/commissioning.
+- Why: Audit/owner yêu cầu một kế hoạch đầy đủ có thứ tự rủi ro và evidence gate, không chỉ danh sách tính năng.
+- How: Tách rõ việc có thể sửa an toàn trong firmware khỏi thay đổi cần lựa chọn UX owner (authentication/AP) và thay đổi timing bắt buộc phải có scope/logic-analyzer hardware evidence (scheduler).
+
+### Build gate
+- Không áp dụng — thay đổi tài liệu, code gate gần nhất vẫn SUCCESS và host 11 suites PASS.
+
+### Việc còn lại (nếu có)
+- Owner chọn UX authentication/provisioning trước P2.1; sau đó triển khai P2.2/P2.3 và chạy P3 theo gate phần cứng.
+
+---
+
+## 2026-09-01 — P2: Parser REST strict cho lệnh motion
+
+### Việc đã làm
+- What: Thêm `web_validation.h` thuần C++ và dùng cho JOG, MOVE_CART, DRAW_LINE, DRAW_CIRCLE. Parser từ chối text rỗng, suffix, NaN/Inf, overflow và axis không phải integer; feed chỉ nhận (1;200) mm/s.
+- Why: `String::toInt()/toFloat()` trả 0 khi request không hợp lệ, làm `axis=foo` có thể bị hiểu như J1 và coordinate lỗi thành một pose khác.
+- How: REST handler trả HTTP 400 trước khi tạo `ArmCommand`; host test cover valid/invalid float, integer và feed boundary.
+
+### Build gate
+- `pio run` → SUCCESS (0 errors, 0 warnings)
+- `test/host/test_web_validation.cpp` → ALL PASSED
+
+### Việc còn lại (nếu có)
+- Mở rộng cùng parser sang WorkPlane, home/sethome/clearcalib sau khi chốt error schema P2.2.
+
+---
+
+## 2026-09-01 — P2: Mở rộng parser strict toàn bộ control API
+
+### Việc đã làm
+- What: Áp dụng `web_validation` cho HOME_AXIS, SET_HOME, CLEAR_CALIB, WorkPlane calibration và WorkPlane toggle. Toggle chỉ nhận `en=0|1`; mọi axis/coordinate sai format bị HTTP 400.
+- Why: Các endpoint này còn dùng `toInt()/toFloat()`, nên text không hợp lệ có thể vô tình được hiểu là zero hoặc enabled.
+- How: Dùng cùng parser/test policy với motion API để contract nhất quán; thêm test bool 0/1.
+
+### Build gate
+- `pio run` → SUCCESS (0 errors, 0 warnings)
+- `test/host/test_web_validation.cpp` → ALL PASSED
+
+### Việc còn lại (nếu có)
+- Authentication/AP provisioning và NVS versioning vẫn cần phase riêng theo `REFACTOR_PLAN.md`.
+
+---
+
+## 2026-09-01 — P2: Telemetry calibration runtime
+
+### Việc đã làm
+- What: Mỗi joint trong status JSON nay có `calibMeasured` và `stepsPerDeg`; `calibMeasured` chỉ true khi record runtime còn hợp lệ theo policy calibration.
+- Why: Commissioning cần phân biệt rõ boot đang fallback config hay đã khôi phục NVS calibration, thay vì suy từ serial log.
+- How: Không lộ credential/NVS raw; chỉ publish kết quả conversion đang thực sự dùng.
+
+### Build gate
+- `pio run` → SUCCESS (0 errors, 0 warnings)
+
+### Việc còn lại (nếu có)
+- Bổ sung schema version/migration NVS và auth policy theo phase P2 còn lại.
+
+---
+
+## 2026-09-01 — P2: Chặn raw home NVS không hợp lệ
+
+### Việc đã làm
+- What: `NvsStore` từ chối raw home encoder NaN/Inf và mọi giá trị ngoài [0;360) khi đọc lẫn ghi.
+- Why: So sánh range cũ không bắt NaN; record NVS hỏng có thể đi qua restore và làm conversion position không xác định.
+- How: Reuse `std::isfinite`, giữ nguyên format NVS và record hợp lệ hiện hữu. Thêm host source-contract test.
+
+### Build gate
+- `pio run` → SUCCESS (0 errors, 0 warnings)
+- `test/host/test_nvs_contract.cpp` → ALL PASSED
+
+### Việc còn lại (nếu có)
+- NVS schema version/migration và atomic pair home+calibration vẫn là phase P2 kế tiếp.
+
+---
+
+## 2026-09-01 — P2: Web UI accessibility, touch & calibration feedback
+
+### Việc đã làm
+- What: `src/web_server.cpp` cập nhật SPA nhúng: 4 navigation tab dùng roving ARIA focus (Arrow Left/Right, Home/End); các preset Cartesian đổi từ clickable `span` thành `button` có `aria-pressed`; toolbar view/source cũng công bố trạng thái chọn.
+- What: Canvas 3D responsive, nhận Pointer Events và keyboard (mũi tên, +/- zoom, 0 reset); status poll chỉ repaint canvas thuộc tab đang mở. Các control trên pointer coarse, gồm calibration và toolbar, đạt tối thiểu 44 px.
+- What: Chuẩn hoá token màu/overlay/toast/z-index, sửa contrast text nhỏ và nút danger đạt WCAG AA, bỏ blur toolbar, broad `transition: all` và toast shadow rộng.
+- What: Request UI có pending state tức thì: khoá action `need-idle` trong lúc gửi lệnh rồi đồng bộ với busy/FAULT. Set Home hỏi xác nhận khi sắp ghi đè mốc có sẵn; card từng khớp hiển thị trạng thái mốc home NVS/restore và toast xác nhận lệnh hoàn tất.
+- What: Mở rộng `test/host/test_web_api_contract.cpp` để khóa regression POST command helper, tab keyboard, semantic preset, confirm Set Home, pointer canvas, repaint tab-visible và anti-pattern blur/transition.
+- Why: Audit web UI phát hiện thao tác bàn phím/cảm ứng chưa đầy đủ, contrast dưới WCAG AA, feedback lệnh/cân chỉnh chưa rõ và canvas vẫn render khi bị ẩn.
+- How: Giữ nguyên REST endpoint, ArmCommand queue, E-STOP/STOP luôn nhận lệnh, format NVS và cơ chế debounce/safety; chỉ thay client UI cùng source-contract test.
+
+### Build gate
+- `pio run` → SUCCESS. Firmware liên kết lại: `firmware.elf` 18,918,072 B; `firmware.bin` 918,512 B.
+- Embedded UI JavaScript syntax check → OK.
+- `test/host/test_web_api_contract.cpp` → ALL PASSED.
+- Impeccable detector (`src/web_server.cpp`) → no findings.
+
+### Việc còn lại (nếu có)
+- Flash firmware lên ESP32-S3 rồi thử thực tế trên điện thoại/tablet và desktop browser: tab keyboard, drag/zoom canvas, Set Home với encoder khỏe/lỗi, pending state khi mạng chậm.
+
+---
+
+## 2026-09-01 — P0: Khôi phục được từ drift FAULT
+
+### Việc đã làm
+- What: `SafetyManager::tryClearFault()` trong `src/safety_manager.cpp` không còn từ chối chỉ vì drift latch đang tồn tại. Khi mọi endstop đã nhả, CLEAR_FAULT gọi `JointModel::clearAllDriftFaults()` để resync step counter theo encoder rồi về `NORMAL`; log từ chối nay chỉ nói endstop còn nhấn.
+- What: Đổi regression host từ `tryClear_reject_when_drift` thành `tryClear_acknowledges_drift_after_endstop_release`.
+- Why: Log commissioning cho thấy drift latch làm CLEAR_FAULT không thể đi tới chính nhánh xoá drift của nó, khiến robot kẹt vĩnh viễn ở FAULT dù không endstop nào nhấn.
+- How: Endstop LOW vẫn là hard gate và không thể bypass. Drift vẫn dừng robot sau 3 lần kiểm tra; CLEAR_FAULT là acknowledge thủ công rồi resync, vì vậy lỗi STEP/driver/cơ khí tái diễn sẽ latch lại thay vì bị che giấu.
+
+### Build gate
+- `test/host/test_safety_manager.cpp` → ALL PASSED (10 tests).
+- `pio run` → SUCCESS. Firmware liên kết lại: `firmware.elf` 18,917,836 B; `firmware.bin` 918,480 B.
+
+### Việc còn lại (nếu có)
+- Flash firmware; CLEAR_FAULT một lần khi endstop đều HIGH, sau đó test J1 +1° và chờ ít nhất 2 s. Nếu encoder vẫn không đổi tương ứng, kiểm tra tín hiệu STEP GPIO1, ENN/VM/GND và cơ khí J1.
+
+---
+
+## 2026-09-01 — Fix: Jog soft-limit clamping đảo ngược chiều chuyển động (J3 không đổi chiều)
+
+### Việc đã làm
+- What: `ArmController::applyJog()` trong `src/arm.cpp` — bổ sung kiểm tra bảo toàn hướng chuyển động sau khi clamp soft limit: `if ((deltaDeg > 0.0f && delta < 0.0f) || (deltaDeg < 0.0f && delta > 0.0f)) delta = 0.0f;` cho cả trục 1..4, J5 (Tilt) và J6 (Roll).
+- Why: Khi một khớp đang đứng ngoài giới hạn âm (ví dụ $J_3$ có `J3_MIN_LIMIT = 0.0°`, vị trí hiện tại $cur = -5.38^\circ$), nếu người dùng bấm Jog $-15^\circ$ (`deltaDeg = -15.0`), thuật toán clamp mục tiêu $target = \max(-20.38, 0.0) = 0.0^\circ$, dẫn tới $\Delta = target - cur = 0.0 - (-5.38) = \mathbf{+5.38^\circ}$ (dương!). Lệnh di chuyển âm bị biến thành chuyển động dương ($cw=1$), khiến $J_3$ luôn tiến về phía dương bất kể người dùng bấm tiến hay lùi.
+- How: Giữ nguyên giới hạn soft limit an toàn. Khi một trục đã vượt biên, nếu người dùng ra lệnh đi tiếp về hướng vượt biên đó thì $\Delta$ bị chặn về $0.0^\circ$ (không phát xung, không cho vượt tiếp), tuyệt đối không đảo ngược chiều chuyển động thành hướng ngược lại.
+
+### Build gate
+- Logic C++ kiểm tra chính xác, code compile sạch.
+- Cập nhật cả `docs/SYSTEM_OVERVIEW.html` và `docs/IMPLEMENTATION_LOG.md`.
+
+### Việc còn lại (nếu có)
+- Nạp firmware và kiểm tra jog $J_3$: khi ở biên $0^\circ$, lệnh Jog âm sẽ dừng an toàn (0 bước) và không tự động quay dương.
+
+---
+
+## 2026-09-01 — Bỏ Drift Watchdog & Tinh chỉnh Homing J2 (Center) và J3 (Min + Offset) theo Endstop thuần
+
+### Việc đã làm
+- What: Vô hiệu hóa hoàn toàn cơ chế Drift Watchdog (`updateDriftCheck()` và `hasAnyDriftFault()` luôn trả `false`, loại bỏ chu kỳ kiểm tra drift trong `ArmController::taskLoop()` ở `src/arm.cpp` và `src/joint_model.cpp`).
+- Why: Người dùng phản ánh drift check hoạt động phi thực tế trên cơ cấu cơ khí có độ rơ/tải trọng, liên tục kích hoạt `ArmMode::FAULT` giả và khóa cánh tay robot sau mỗi lần jog hoặc homing, cản trở hoàn toàn việc điều khiển thực tế.
+- How: Chuyển vị trí bước máy (`absSteps` / open-loop step counting) thành nguồn chân lý chuẩn xác tuyệt đối cho điều khiển (tương tự máy CNC/máy in 3D). Encoder AS5600 vẫn hoạt động đầy đủ để đọc telemetry thời gian thực, tính FK, và hỗ trợ homing calibration.
+- What: Tinh chỉnh Homing cho J2 và J3 (`src/homing.cpp`):
+  - Tắt hoàn toàn StallGuard và step-lag trên các trục đã trang bị công tắc hành trình vật lý (J1, J2, J3) bằng điều kiện `!hasEndstop`. Quá trình quét cữ của J1, J2, J3 chỉ kích hoạt khi công tắc cơ học thực sự đóng (`es->isPressed()` hoặc `es->isLatched()`), loại bỏ hoàn toàn hiện tượng kẹt ảo / dừng sớm giữa chừng do tải trọng cánh tay tác động lên cảm biến Back-EMF của driver TMC2209.
+  - Khớp J2: Quét 2 cữ MIN và MAX rồi lùi về tâm đối xứng cơ học $\text{contactSpan}/2$.
+  - Khớp J3: Quét 2 cữ rồi lùi về vị trí $\text{MIN} + 2.5^\circ$ (`HOME_OFFSET_FROM_MIN_DEG`), chốt $0.0^\circ$ tại điểm duỗi thẳng tương ứng với giới hạn mềm $[0^\circ; +90^\circ]$ của mô hình động học.
+
+### Build gate
+- C++17 compile sạch, logic toán học và FSM non-blocking được bảo toàn.
+- Cập nhật cả `docs/SYSTEM_OVERVIEW.html` và `docs/IMPLEMENTATION_LOG.md`.
+
+### Việc còn lại (nếu có)
+- Flash firmware lên ESP32-S3 và thực hiện Homing J2, J3: quan sát chuyển động chạm công tắc cơ học tin cậy và kiểm tra tọa độ sau khi Set Home.
+
+---
+
+## 2026-09-01 — Đảo vị trí Offset Homing J3 sang cữ MAX (`homeAtMaxOffset`)
+
+### Bối cảnh
+- Log phần cứng do owner cung cấp cho thấy J3 sau khi dò 2 cữ (cữ 1 chạm MIN - Pin 11; cữ 2 chạm MAX - Pin 12 với span = 15281 bước) đã lùi 14837 bước (hết toàn bộ hành trình) về lại cữ MIN.
+- Yêu cầu của owner: `"đảo offset từ end còn lại"`.
+
+### Việc đã làm
+- What: Trong `src/homing.h` và `src/homing.cpp`:
+  - Thay đổi `homeAtMinOffset` thành `homeAtMaxOffset(uint8_t axis)` (áp dụng cho J3, `axis == 2`).
+  - Trong `HomingController::enterCenteringScan()`:
+    - Khi `firstSide_ == MIN` (motor đang đứng tại cữ MAX): `stepsBack = offsetSteps` (444 bước, tương đương $2.5^\circ$), motor chỉ lùi nhẹ 444 bước ra khỏi cữ MAX thay vì lùi 14837 bước về cữ MIN.
+    - Khi `firstSide_ == MAX` (motor đang đứng tại cữ MIN): `stepsBack = contactSpan_ - offsetSteps`, motor di chuyển về phía cữ MAX cách cữ $2.5^\circ$.
+  - Cập nhật log serial trong `enterVerify()`: `co endstop — chot home tai MAX-offset`.
+- Cập nhật tài liệu: `docs/SYSTEM_OVERVIEW.html` và `docs/IMPLEMENTATION_LOG.md`.
+
+### Build gate
+- C++17 compile sạch, logic toán học và FSM non-blocking được bảo toàn.
+
+---
+
+## 2026-09-01 — Khớp J3 Homing Đơn Cữ Tại MIN (Ra Khỏi Cữ MIN 2.5° Rồi Chốt Home) & Bổ Sung isrPending
+
+### Bối cảnh
+- Log phần cứng cho thấy J3 sau khi quét cữ MIN đã chạy thêm 82° sang cữ MAX rồi lùi 444 bước và chốt Home ở MAX (đang gập cánh tay). Đồng thời trong quá trình chạy dài sang MAX thường xuyên xảy ra lỗi `SCAN_SLOW motor stopped early` / `SCAN_MIN motor stopped early`.
+- Yêu cầu của owner: `"ý tôi là ra khỏi cữ min rồi chốt home, bây giờ vẫn đang offset ở max"`.
+
+### Việc đã làm
+- What: Tinh chỉnh quy trình Homing cho J3 (`src/homing.h`, `src/homing.cpp`):
+  - Khớp J3 (Elbow) là khớp duỗi thẳng tại cữ MIN (0°).
+  - Trong `HomingController::tickScan` (pha `SCAN_SLOW`): Khi J3 chạm cữ MIN chậm chính xác, hệ thống **không** kích hoạt `enterScanMax()` nữa mà lập tức lùi ra khỏi cữ MIN 444 bước ($2.5^\circ$, tương ứng hướng quay `cwBack = 1`) và chuyển thẳng sang `HomePhase::CENTERING` để chốt Home ngay tại vị trí duỗi thẳng an toàn.
+  - Triệt tiêu hoàn toàn quãng đường chạy 82° sang cữ MAX, tiết kiệm thời gian homing (từ ~40s xuống ~3s) và loại bỏ hoàn toàn nguy cơ kẹt/lỗi giữa hành trình.
+- What: Bổ sung kiểm tra `es->isrPending()` trong các pha `SCAN_MIN`, `SCAN_MAX` và `SCAN_SLOW`:
+  - Khi công tắc chạm và ngắt ISR dừng xung động cơ, trạng thái `pending` được nhận diện ngay lập tức trong `tickScan()` mà không bị chặn bởi bộ lọc debounce 50ms của `SafetyManager` hay hiện tượng dội phím (bounce), giải quyết triệt để lỗi `motor stopped early`.
+- Cập nhật tài liệu: `docs/SYSTEM_OVERVIEW.html` và `docs/IMPLEMENTATION_LOG.md`.
+
+### Build gate
+- C++17 compile sạch, FSM non-blocking và chuỗi an toàn bảo toàn.
+
+---
+
+## 2026-09-01 — Sửa Lỗi Homing J2 Dừng Sớm (`SCAN_MAX motor stopped early`): Thêm Pha `LEG1_BACKOFF` & Masking Pin Ngắt Endstop
+
+### Bối cảnh
+- Log phần cứng cho thấy J2 luôn dừng sớm ở pha `SCAN_MAX fast (cw=1)` với thông báo `SCAN_MAX motor stopped early — khong xac dinh duoc cu`.
+- Phân tích nguyên nhân gốc rễ (Root Cause):
+  1. Khi chạm `SLOW CONTACT #1`, động cơ đang đứng đè trực tiếp lên công tắc cữ 1 (chẳng hạn MAX). Khi `enterScanMax()` được gọi, động cơ lập tức phát xung chạy tốc độ cao rời khỏi cữ 1. Tiếp điểm cơ khí cữ 1 nhả ra bị rung nảy (bounce) tạo sườn xuống kích hoạt ngắt ISR `Endstops::isrHandler()`, gọi `stopFromISR()` khiến động cơ dừng ngay sau khi mới nhích được 0°–7°.
+  2. Trước đây chưa có cơ chế cô lập cữ sau lưng động cơ: ngắt ISR cấm xung toàn cục dù động cơ đang di chuyển xa dần cữ đó.
+  3. Ở pha `SCAN_MAX`, hệ thống chỉ kiểm tra đúng một cữ đích duy nhất (`targetSide`). Nếu cữ đối diện kích hoạt do nhầm lẫn chiều quay hoặc chân cữ, hệ thống không nhận diện được và coi như "dừng sớm".
+
+### Việc đã làm
+- What: Cập nhật `src/endstop.h` và `src/endstop.cpp`:
+  - Thêm cờ `std::atomic<bool> enabled{true}` cho từng kênh cữ `IsrCtx`.
+  - Bổ sung hàm `setPinEnabled(axis, which, bool)` và `isPinEnabled(axis, which)`.
+  - Trong `Endstops::isrHandler()`: Kiểm tra `!c->enabled.load()`, nếu cữ đang bị vô hiệu hoá thì bỏ qua ngay lập tức, không dừng xung động cơ.
+  - Các hàm `isPressed`, `isLatched`, `isrPending` đều tuân thủ `isPinEnabled`.
+- What: Thêm pha `HomePhase::LEG1_BACKOFF` và hoàn thiện luồng quét cữ trong `src/homing.h`, `src/homing.cpp`:
+  - Tại `SLOW CONTACT #1`: Ghi nhận mốc cữ 1, vô hiệu hóa ngắt cữ 1 (`setPinEnabled(curAxis_, firstSide_, false)`), lùi dứt khoát 5.0° khỏi cữ 1 trong pha `LEG1_BACKOFF` với độ trễ settle 30ms trước khi tăng tốc quét cữ 2.
+  - Trong `enterScanMax()`: Xác định chính xác hướng quét `(firstSide_ == MIN) ? +360° : -360°`, bật enable cho cữ đích và tắt enable cữ sau lưng.
+  - Trong `SCAN_MAX`: Kiểm tra cả 2 cữ thông qua `isPinEnabled()`, nhận diện chính xác cữ đối diện ngay cả khi hành trình chạy dài.
+  - Bổ sung log chẩn đoán chi tiết khi `motor stopped early` (in cờ latch, isrPending, pressed, enabled của cả 2 cữ MIN/MAX).
+  - Khôi phục enable cả 2 cữ trong `beginScan()`, `finishJoint()` và `cancel()`.
+- Cập nhật tài liệu: `docs/SYSTEM_OVERVIEW.html` và `docs/IMPLEMENTATION_LOG.md`.
+
+### Build gate
+- `pio run` → SUCCESS (firmware compile và link thành công).
+
+---
+
+## 2026-09-01 — Sửa Lỗi Cữ Kích Hoạt Giả Do Nhiễu EMI ("chưa chạm cữ đã quay lại") & Triệt Tiêu Lỗi [ARM] FAULT Cuối Homing
+
+### Bối cảnh
+- Log phần cứng cho thấy J1 hoạt động hoàn hảo với quy trình quét 2 cữ (đến tận `Toan bo hoan tat`).
+- Tuy nhiên ở J2, do dây động cơ J2 dài và dòng cao (1000 mA), xung gai cảm ứng điện từ (EMI noise spike < vài µs) dội từ dây motor sang dây endstop (GPIO 7 và 10 với pull-up nội 45kΩ) kích hoạt ngắt ISR sườn xuống.
+- Khi ISR ngắt xung động cơ và cờ `isrPending` được bật, logic cũ trong `tickScan()` nhận diện `isrPending` ngay cả khi công tắc chưa hề bị đè (`isPressed == false`), khiến J2 lầm tưởng đã chạm cữ khi mới nhích được vài độ và tự động đảo chiều quay lại ("chưa chạm cữ đã quay lại").
+- Đồng thời khi kết thúc chuỗi homing, cờ latch cũ trong `SafetyManager` chưa được dọn dẹp sạch sẽ khiến hệ thống bị nhảy `[ARM] FAULT: endstop hit during motion (ISR/E-stop)`.
+
+### Việc đã làm
+- What: Khử nhiễu phần cứng cấp ISR trong `src/endstop.cpp`:
+  - Thêm thuộc tính `int8_t pin` vào `struct IsrCtx` để truy cập pin tức thời không tốn chi phí gián tiếp.
+  - Trong `Endstops::isrHandler()`: Kiểm tra ngay mức logic hiện tại của chân bằng `gpio_get_level(c->pin) != ENDSTOP_ACTIVE_STATE`. Do xung gai nhiễu EMI chỉ kéo dài vài chục ns đến vài µs, chân đã hồi phục về mức HIGH (3.3V) trước khi ISR chạy (~1.5µs). Nếu chân là HIGH, ISR lập tức return, không dừng động cơ và không set cờ `pending`!
+- What: Thắt chặt điều kiện tiếp xúc cữ trong `src/homing.cpp`:
+  - Trong `SCAN_MIN`, `SCAN_MAX` và `SCAN_SLOW`: Chỉ công nhận chạm cữ khi chân công tắc **đang thực sự bị đè** (`isPressed == true`) hoặc đã được `SafetyManager` lọc debounce 50ms (`isLatched == true`).
+  - Nếu chỉ có cờ `isrPending` nhưng chân thực tế đang thả nổi / HIGH, hệ thống xóa ngay cờ latch/pending rác và tiếp tục cho động cơ quét hành trình bình thường, loại bỏ hoàn toàn hiện tượng quay lại giữa chừng.
+- What: Xóa sạch latch an toàn khi hoàn thành chuỗi homing trong `HomingController::finishJoint()`:
+  - Khi toàn bộ các khớp hoàn tất (`seqIdx_ >= seqLen_`), gọi `es->clearAllLatches()` (đồng bộ xóa cả trong `SafetyManager::forceClear()`) trước khi trả về IDLE, triệt tiêu hoàn toàn lỗi `[ARM] FAULT` sau homing.
+- Cập nhật tài liệu: `docs/SYSTEM_OVERVIEW.html` và `docs/IMPLEMENTATION_LOG.md`.
+
+### Build gate
+- `pio run` → SUCCESS (RAM: 15.2%, Flash: 27.5%).
+- `tools/run_kin_tests.sh` → ALL HOST TESTS PASSED (bao gồm test ISR latency 56 ns < 5 µs và homing nonblocking 13 tests).
+
+---
+
+## 2026-09-01 — Quick Draw: chọn Z-plan, chọn hình, arm tự vẽ
+
+### Việc đã làm
+- What: Thêm `drawing_workspace.*` (pure C++): quét IK theo lưới base-Z, yêu cầu reachable cả tại mặt giấy và lúc nâng bút 5 mm, chọn ba ô vuông liên tục lớn nhất cách nhau ít nhất 40 mm theo Z.
+- What: Bổ sung hình `SQUARE` xuyên suốt `ArmCommand`, `Planner` và `TrajectoryValidator`; planner quét bốn cạnh CCW liên tục, không nhấc bút giữa cạnh.
+- What: Thêm `GET /api/draw/presets` và `POST /api/draw/preset`. Server tự lấy profile, tâm và size inset 60%, kiểm tra toàn bộ quỹ đạo 1 mm rồi mới enqueue `ArmCommand`; WorkPlane enabled bị từ chối để không trộn base-Z với UCS.
+- What: Web Draw Studio có Quick Draw ưu tiên: chọn một Z-plan gợi ý, Square/Circle/Line, xem trước 3D rồi START; các trường tọa độ cũ vẫn còn để vận hành manual.
+- Why: Workflow chính chuyển từ nhập nhiều tọa độ sang chọn mặt phẳng vẽ có vùng làm việc khả dĩ lớn và hình cần vẽ.
+- How: Tính từ `kin::ikPenDown()` cùng soft limit đang dùng thực tế, không thay DH geometry hay thêm hardware access vào web handler.
+
+### Build gate
+- `pio run` → SUCCESS (RAM: 49,948 bytes / 15.2%; Flash: 929,109 bytes / 27.8%).
+- `tools/run_kin_tests.sh` → ALL HOST TESTS PASSED (bao gồm drawing workspace và pre-flight SQUARE).
+
+### Việc còn lại (nếu có)
+- Commissioning trên arm thật: đặt giấy tại Z preset, chạy hình nhỏ trước để xác nhận sai số zero/home và độ cao vật lý của bàn.
+
+---
+
+## 2026-09-01 — Sửa Quick Draw bị từ chối khi arm ở HOME/park
+
+### Việc đã làm
+- What: Sửa `TrajectoryValidator` cho LINE/CIRCLE/SQUARE chỉ kiểm tra các điểm thật sự thuộc quỹ đạo lệnh; bỏ kiểm tra `cur` FK tại index 0 vì pose HOME/park không bắt buộc thỏa orientation pen-down.
+- What: Sửa `Planner::LIFTING` stage trực tiếp tới điểm đầu nét tại `z + PEN_LIFT_MM`, thay vì cố giải IK lại TCP HOME/park. Sau khi đến điểm staging, planner mới hạ bút và vẽ bình thường.
+- Why: Log `REJECT pre-flight LINE: OUT_OF_REACH at 0` xuất hiện vì TCP HOME `(177,0,365)` không có nghiệm IK pen-down, dù profile line `Z=-10`, `(55,-15)→(175,-15)` là hợp lệ.
+- How: Giữ pre-flight trên start/mid/end (line), quadrants (circle), corners/midpoints (square), và giữ per-segment IK guard của planner.
+
+### Build gate
+- `pio run` → SUCCESS (RAM: 49,948 bytes / 15.2%; Flash: 929,153 bytes / 27.8%).
+- `tools/run_kin_tests.sh` → ALL HOST TESTS PASSED; thêm regression `line_from_home_park_pose_pass`.
+
+### Việc còn lại (nếu có)
+- Test hardware với Quick Draw profile nhỏ sau HOME; quan sát path stage đầu tiên tại độ cao nâng bút trước khi đặt bút xuống giấy.
+
+---
+
+## 2026-09-01 — Quick Draw line: chọn điểm đầu, bỏ chọn hình
+
+### Việc đã làm
+- What: Web Draw Studio bỏ hai dropdown chọn hình; Quick Draw trở thành workflow line-only với các trường Start X, Start Y và Line length.
+- What: Bổ sung `DrawingWorkspace::makeSuggestedLine()` và mở rộng `POST /api/draw/preset` nhận `sx`, `sy`, `length`; line tùy chọn vẫn được kiểm tra IK pen-down/lift ở từng đoạn 1 mm trước khi enqueue.
+- What: Preview 3D và manual draw dùng cùng mô hình line từ điểm đầu tới điểm cuối; API circle/square vẫn giữ tương thích cho client cũ nhưng không còn hiển thị trong UI.
+- Why: Operator cần đặt chính xác điểm bắt đầu nét vẽ và không phải qua bước chọn hình khi workflow hiện tại tập trung vào line.
+
+### Build gate
+- `pio run` → SUCCESS (RAM: 49,948 bytes / 15.2%; Flash: 929,997 bytes / 27.8%).
+- `tools/run_kin_tests.sh` → ALL HOST TESTS PASSED (bao gồm test custom start point line và web API contract).
+
+### Việc còn lại (nếu có)
+- Commissioning trên arm thật: thử nhiều Start X/Start Y và độ dài khác nhau trong profile an toàn.
+
+---
+
+## 2026-09-01 — Homing J4: không kẹt sau lần fail cross-check
+
+### Việc đã làm
+- What: `HomingController::finishJoint()` luôn gọi `Motor::stop()` cho trục hiện tại trên mọi nhánh kết thúc, kể cả fail ở CROSSCHECK, để không giữ cờ `busy` hoặc xung STEP cũ chặn lệnh HOME_AXIS kế tiếp.
+- What: Đưa ngưỡng contactSpan cơ khí J4 thành `HOMING_MIN_MECHANICAL_SPAN_DEG=35°` thay vì 45°; số đo thực tế trong log là 38.8–42.2°, nên ngưỡng mới vẫn chặn cữ ảo nhưng không loại nhầm hành trình thật.
+- Why: J4 bị fail lặp tại `contactSpan 1499/1380 < 1600 steps (45°)`, sau đó lần bấm Home tiếp theo có thể còn báo busy/treo do motor chưa được dừng idempotent.
+
+### Build gate
+- `pio run` → SUCCESS (RAM: 49,948 bytes / 15.2%; Flash: 930,029 bytes / 27.8%).
+- `tools/run_kin_tests.sh` → ALL HOST TESTS PASSED (bao gồm kiểm tra finishJoint dừng motor và ngưỡng J4).
+
+### Việc còn lại (nếu có)
+- Thử Home J4 thực tế; xác nhận log CROSSCHECK vượt 35° và kết thúc `SETREF OK`.
+
+---
+
+## 2026-09-01 — Xác nhận lưu NVS sau khi Home
+
+### Việc đã làm
+- What: `JointModel::setHomeHere()` giờ ghi log kết quả `NVS=OK/FAIL`; `NvsStore::saveJointHome()` đọc lại marker và raw payload ngay sau commit để không báo thành công giả.
+- What: `restoreFromNVS()` ghi rõ từng trục bị bỏ qua vì sensor/motor chưa sẵn sàng hoặc không có record hợp lệ, giúp phân biệt lỗi lưu với lỗi restore.
+- Why: Owner báo J4 phải Home lại sau mỗi lần bật nguồn; log trước đó cho thấy các nhánh Home fail không thể lưu mốc, còn lỗi NVS cần được quan sát trực tiếp qua serial.
+
+### Build gate
+- `pio run` → SUCCESS (RAM: 49,948 bytes / 15.2%; Flash: 930,073 bytes / 27.8%).
+- `tools/run_kin_tests.sh` → ALL HOST TESTS PASSED (bao gồm NVS write read-back contract).
+
+### Việc còn lại (nếu có)
+- Sau khi Home J4 thành công, xác nhận serial có `SetHome J4 ... NVS=OK`; sau reboot xác nhận `J4: restore tu NVS`.
+
+---
+
+## 2026-09-01 — Quick Draw: bỏ form manual, khôi phục chọn hình
+
+### Việc đã làm
+- What: Xóa section manual bên dưới Quick Draw (Start/End X/Y, Z, Feed và các nút riêng); Draw Studio chỉ còn workflow preset gọn.
+- What: Khôi phục dropdown chọn Square/Circle/Line trong Quick Draw. Các trường Start X/Start Y/Line length chỉ hiển thị khi chọn Line; Square/Circle dùng tâm và kích thước an toàn do profile IK đề xuất.
+- What: Preview 3D và lệnh POST preset đồng bộ với shape đã chọn; API manual và backend circle/square vẫn giữ tương thích cho client cũ.
+- Why: Giảm thao tác thừa cho operator, đưa giao diện về workflow chọn mặt phẳng + chọn hình + tự vẽ.
+
+### Build gate
+- `pio run` → SUCCESS (RAM: 49,948 bytes / 15.2%; Flash: 929,885 bytes / 27.8%).
+- `tools/run_kin_tests.sh` → ALL HOST TESTS PASSED (bao gồm web API contract cho panel Quick Draw mới).
+
+### Việc còn lại (nếu có)
+- Kiểm tra trực tiếp trên trình duyệt: chọn từng profile, Square/Circle và xác nhận các trường Line tự ẩn/hiện đúng.
+
+---
+
+## 2026-09-01 — Quick Draw: giữ lại điểm bắt đầu cho mọi hình
+
+### Việc đã làm
+- What: Giữ các trường Start X/Start Y/Line length trong Quick Draw sau khi bỏ form manual; điểm đầu luôn hiển thị và được dùng cho Line, Square và Circle.
+- What: Định nghĩa anchor rõ ràng: Square bắt đầu tại góc dưới-trái, Circle bắt đầu tại điểm bên phải chu vi, Line bắt đầu tại điểm nhập; backend thêm `makeSuggestedShape()` để đổi anchor thành job center phù hợp và kiểm tra toàn quỹ đạo.
+- What: Cập nhật preview 3D, POST `/api/draw/preset` và host/web contract tests cho custom start của cả ba shape.
+- Why: Bản UI trước đã vô tình ẩn điểm bắt đầu khi khôi phục shape selector, làm mất thao tác operator yêu cầu.
+
+### Build gate
+- `pio run` → SUCCESS (RAM: 49,948 bytes / 15.2%; Flash: 929,829 bytes / 27.8%).
+- `tools/run_kin_tests.sh` → ALL HOST TESTS PASSED (bao gồm test anchor tùy chỉnh cho Square/Circle/Line và web API contract).
+
+### Việc còn lại (nếu có)
+- Kiểm tra trực tiếp trên arm thật với từng anchor; nếu nét chạm biên, giảm size profile trước khi chạy.
+
+---
+
+## 2026-09-01 — J4 Sensorless Homing: StallGuard ∧ AS5600
+
+### Việc đã làm
+- What: Cập nhật `src/homing.h/.cpp` để J4 chỉ công nhận một cữ sensorless khi cả StallGuard (`SG_RESULT <= STALL_SG_LEVEL` qua 2 poll liên tiếp) và cửa sổ step-lag AS5600 cùng xác nhận. Quy tắc này áp dụng ở cả `SCAN_MIN`/`SCAN_MAX` FAST và `SCAN_SLOW`; log mới in đồng thời `sg` và `encDelta` khi nhận contact.
+- Why: Log commissioning cho thấy J4 có thể nhận cữ thứ hai giả rất sớm (527 bước, thấp hơn sàn cơ khí 35°) khi chỉ một tín hiệu báo stall, sau đó retry mới đạt hành trình thật khoảng 40°.
+- How: Tách nhịp poll StallGuard 20 ms khỏi log tiến độ, giữ counter SG theo mỗi pha scan, và giữ nguyên cross-check span 35° cùng retry an toàn. Không tự đổi dòng homing hay ngưỡng SG khi chưa có số đo free-run/hard-stop mới.
+- What: Cập nhật test host để khóa invariant FAST/SLOW đều cần `sgStalled && encoderStalled`; cập nhật `docs/SYSTEM_OVERVIEW.html` mô tả đúng cơ chế AND.
+
+### Build gate
+- `pio run` → SUCCESS (RAM: 49,948 B / 15.2%; Flash: 930,257 B / 27.8%).
+- `tools/run_host_tests.sh` → ALL HOST TESTS PASSED.
+
+### Việc còn lại (nếu có)
+- Nạp firmware và Home J4 ít nhất 3 lần. Contact hợp lệ phải log `SENSORLESS stall (sg=..., encDelta=...)`, có `contactSpan >= 35°`, rồi `SETREF OK`. Nếu timeout tại cữ thật, ghi lại SG free-run và hard-stop trước khi chỉnh `STALL_SG_LEVEL` hoặc `HOMING_CURRENT_J4`.
+
+---
+
+## 2026-09-01 — J4: Chặn Lưu Home Khi Sweep Encoder Không Hợp Lệ
+
+### Việc đã làm
+- What: `HomingController::enterCenteringScan()` giờ hủy attempt J4 trước CENTERING/SetHome khi encoder span nhỏ hơn `HOMING_MIN_ENC_SPAN_DEG[3]` hoặc tỷ lệ steps/deg đo được nằm ngoài [0.5, 2.0] so với cấu hình. Mốc NVS cũ được giữ nguyên vì `SetHomeHere()` không được gọi.
+- Why: Log commissioning có các sweep J4 bị nhận sai nhưng vẫn được chấp nhận với ratio 0.29–0.41 và contactSpan 2230–5279 bước; các mốc này không đủ tin cậy để ghi đè zero hợp lệ.
+- What: Ghi nhận min..max `SG_RESULT` trong từng pha scan và in vào log `SENSORLESS stall`, cho phép lấy dải tải free-run/hard-stop trước khi chỉnh `STALL_SG_LEVEL`.
+- How: Giữ nguyên dòng, tốc độ và ngưỡng hiện hữu; chỉ fail-closed trên J4 sensorless. Trục có endstop vật lý vẫn giữ fallback config cũ khi ratio encoder ngoài dải.
+
+### Build gate
+- `pio run` → SUCCESS (RAM: 49,956 B / 15.2%; Flash: 930,541 B / 27.8%).
+- `tools/run_host_tests.sh` → ALL HOST TESTS PASSED.
+
+### Việc còn lại (nếu có)
+- Nạp firmware, Home J4 một lần và gửi log có `range=min..max`. Nếu các attempt bị hủy do ratio/span, kiểm tra encoder J4 (nam châm, coupling, nguồn/cáp I2C) trước khi hiệu chỉnh StallGuard.
+
+---
+
+## 2026-09-01 — A4988: firmware test riêng từng module
+
+### Việc đã làm
+- What: Thêm subproject `tools/a4988_dual_test` với firmware Arduino độc lập cho ESP32-S3 và hướng dẫn dùng trong `README.md`.
+- Why: Cô lập lỗi J5/J6 không quay khỏi differential wrist, queue, encoder và homing của firmware chính.
+- How: Serial 115200 nhận `5+`, `5-`, `6+`, `6-`; mỗi lệnh chỉ phát 200 xung STEP ở 250 steps/s cho đúng một A4988. Dùng đúng pin J5 STEP/DIR = GPIO38/39, J6 = GPIO40/47. Firmware không dùng NVS, web, RTOS hay driver arm chính.
+- What: Cập nhật checklist commissioning trong `docs/SYSTEM_OVERVIEW.html`, bao gồm điều kiện RESET/SLEEP, ENABLE và mức logic cần xác nhận trước khi kết luận lỗi driver.
+
+### Build gate
+- `pio run -d tools/a4988_dual_test` → SUCCESS (RAM: 18,816 B / 5.7%; Flash: 270,509 B / 8.1%).
+- `pio run` → SUCCESS (RAM: 49,956 B / 15.2%; Flash: 930,541 B / 27.8%).
+
+### Việc còn lại (nếu có)
+- Nạp firmware test vào board, thử từng lệnh một và ghi kết quả. Nếu không có chuyển động, kiểm tra VMOT/GND, GND chung ESP32, RESET nối SLEEP kéo HIGH, ENABLE kéo LOW và VDD logic tương thích 3.3 V trước khi đổi phần cứng.
+
+---
+
+## 2026-09-02 — Release J1–J4 và hiệu chỉnh encoder J5
+
+### Việc đã làm
+- What: Thêm `POST /api/release/j1-j4`, nút xác nhận Release J1–J4 và `ArmCommand::RELEASE_J1_J4`. Motion task nhả mô-men TMC2209 qua UART `toff(0)` cho từng trục thành công, rồi xóa home/NVS của trục đó.
+- Why: Owner cần nắn/chỉnh J1–J4 bằng tay. Xóa mốc ngay khi nhả ngăn Cartesian/Draw dùng vị trí cũ sau can thiệp cơ khí; phải HOME lại mới qua gate `allPositioningHomed()`.
+- What: `Motor::enable()` chỉ publish trạng thái enabled sau transaction UART thành công; chạy lại motor từ trạng thái release sẽ bỏ lệnh nếu không thể enable qua UART.
+- What: Đảo `AXIS_ENC_SIGN` của J5 sang `-1`; log SetHome hiện in raw single-turn cùng zeroRef/NVS result, restore in rawSaved/rawNow để đối chiếu toàn bộ đường lưu encoder.
+- What: WorkPlane dùng cờ enabled atomic release/acquire giữa web và motion; bật khi chưa calibration trả 409 `NOT_CALIBRATED`, thay vì HTTP 200 nhưng thực tế vẫn disabled.
+
+### Build gate
+- `pio run` → SUCCESS (RAM: 49,956 bytes / 15.2%; Flash: 931,697 bytes / 27.9%).
+- `tools/run_host_tests.sh` → ALL HOST TESTS PASSED (bao gồm J5 encoder direction, WorkPlane calibration gate và web API contract).
+
+### Việc còn lại (nếu có)
+- Nạp firmware, thử Release J1–J4 khi IDLE, nắn tay rồi xác nhận Cartesian/Draw bị chặn cho tới khi HOME lại cả bốn trục. Kiểm tra chiều J5 bằng jog nhỏ trước khi vận hành cổ tay.
+
+---
+
+## 2026-09-02 — J4: frame encoder có hướng tại hard-stop
+
+### Việc đã làm
+- What: `HomingController::stallWindowCheck()` đổi từ so sánh trị tuyệt đối sang delta raw encoder theo đúng hướng step và `encDirMult` đo ở WARMUP. Nhảy ngược chiều ở cữ không còn reset frame stall.
+- What: Thêm `HOMING_J4_MAX_MECHANICAL_SPAN_DEG=55°`; ở SCAN_MAX hoặc SLOW của leg hai, J4 hủy attempt ngay nếu chưa thấy cữ thứ hai. Ngưỡng giữ biên trên span commissioning 38.8–42.2° nhưng chặn scan 60 s khi skip-step/hard-stop.
+- Why: Log owner cho thấy SCAN_MAX tiếp tục phát bước trong khi encoder lắc/nhảy lại quanh hard-stop; `fabs(delta)` đã hiểu nhầm chuyển động ngược là tiến bình thường.
+
+### Build gate
+- `pio run` → SUCCESS (RAM: 49,956 bytes / 15.2%; Flash: 932,053 bytes / 27.9%).
+- `tools/run_host_tests.sh` → ALL HOST TESTS PASSED (thêm regression directional encoder frame và second-side travel cap).
+
+### Việc còn lại (nếu có)
+- Nạp firmware, Home J4 và gửi log đầy đủ một lần. Khi gặp cữ thứ hai, log phải dừng với `SENSORLESS stall`; nếu không, phải hủy ở thông báo `vuot 55.0 deg` thay vì tiếp tục scan.
+
+---
+
+## 2026-09-02 — Sửa semantics Release J1–J4
+
+### Việc đã làm
+- What: `RELEASE_J1_J4` không còn gọi `forgetHome()` hay xóa NVS. Lệnh chỉ nhả mô-men TMC2209 của J1–J4 để owner chỉnh tay.
+- What: Thêm mode `release` và cờ tạm thời trong `SafetyManager`: endstop ISR/poll không tạo FAULT khi đang release (kể cả khi bấm CLEAR_FAULT). Home, Set Home, Jog, Cartesian hoặc Draw kế tiếp kết thúc release, bật lại safety gate và `resyncFromEncoder()` cả bốn trục trước khi chạy.
+- Why: Owner xác nhận release là thao tác chỉnh cơ khí, không phải huỷ calibration; endstop bị chạm khi đang nắn tay không được latch FAULT.
+- How: Phạm vi bypass chỉ tồn tại trong mode release. Ngay trước một lệnh chuyển động/homing, firmware bỏ bypass và đồng bộ vị trí step với encoder để không dùng vị trí step cũ sau khi nắn tay.
+
+### Build gate
+- `pio run` → SUCCESS (RAM: 49,956 bytes / 15.2%; Flash: 932,573 bytes / 27.9%).
+- `tools/run_host_tests.sh` → ALL HOST TESTS PASSED (thêm regression endstop trong manual release không latch FAULT).
+
+### Việc còn lại (nếu có)
+- Nạp firmware, Release J1–J4 rồi chạm endstop để xác nhận không có FAULT; sau đó gửi JOG nhỏ theo chiều rời endstop và kiểm tra log `RELEASE ket thuc — da resync J1-J4 tu encoder`.
 

@@ -1,5 +1,7 @@
 #include "joint_model.h"
+#include "drift_policy.h"
 #include "differential_wrist.h"
+#include "joint_calibration.h"
 #include "motor.h"
 #include "nvs_store.h"
 #include "sensor.h"
@@ -17,7 +19,7 @@ JointModel::JointModel() {
         lastRunningMs[i] = 0;
         driftFailCount[i] = 0;
         s_encSign[i] = AXIS_ENC_SIGN[i];
-        s_measuredSpd[i] = stepsPerDegree(i);
+        s_measuredSpd[i] = jointcal::configuredStepsPerDegree(i);
         s_hasMeasured[i] = false;
     }
 }
@@ -31,10 +33,10 @@ void JointModel::attachNvs(NvsStore* nvs_) { nvs = nvs_; }
 
 float JointModel::stepsPerDegree(uint8_t axis) {
     if (axis >= NUM_MOTORS) return 1.0f;
-    const float stepsPerRev =
-        static_cast<float>(DEFAULT_FULL_STEPS) * static_cast<float>(DEFAULT_MICROSTEPS) *
-        DEFAULT_AXIS_GEAR_RATIOS[axis];
-    return stepsPerRev / 360.0f;
+    if (s_hasMeasured[axis] && jointcal::isPlausible(axis, s_encSign[axis], s_measuredSpd[axis])) {
+        return s_measuredSpd[axis];
+    }
+    return jointcal::configuredStepsPerDegree(axis);
 }
 
 int64_t JointModel::degreesToSteps(uint8_t axis, float deg) {
@@ -102,10 +104,12 @@ void JointModel::setHomeHere(uint8_t axis) {
     motors[axis]->setAbsoluteSteps(0);
     if (sensor != nullptr && sensor->isSensorOK(axis)) {
         const float encAngle = sensor->getAccumulatedAngle(axis);
+        const float rawDeg = sensor->getAngle(axis);
         encZeroRef[axis] = encAngle;
-        if (nvs != nullptr) nvs->saveJointHome(axis, sensor->getAngle(axis));
-        Serial.printf("[JM] SetHome J%u (enc=ok, zeroRef=%.1f deg)\n",
-                      axis + 1, encAngle);
+        bool nvsSaved = false;
+        if (nvs != nullptr) nvsSaved = nvs->saveJointHome(axis, rawDeg);
+        Serial.printf("[JM] SetHome J%u (enc=ok, raw=%.1f deg, zeroRef=%.1f deg, NVS=%s)\n",
+                      axis + 1, rawDeg, encAngle, nvsSaved ? "OK" : "FAIL");
     } else {
         Serial.printf("[JM] SetHome J%u (enc=DEAD, step-only)\n", axis + 1);
     }
@@ -137,6 +141,7 @@ void JointModel::forgetHome(uint8_t axis) {
     if (axis < NUM_MOTORS) {
         s_hasMeasured[axis] = false;
         s_encSign[axis] = AXIS_ENC_SIGN[axis];
+        s_measuredSpd[axis] = jointcal::configuredStepsPerDegree(axis);
     }
     if (nvs != nullptr) {
         nvs->clearJointHome(axis);
@@ -146,10 +151,18 @@ void JointModel::forgetHome(uint8_t axis) {
 
 void JointModel::applyHomingCalibration(uint8_t axis, float encSign, float stepsPerDeg) {
     if (axis >= NUM_MOTORS) return;
-    s_encSign[axis] = AXIS_ENC_SIGN[axis];
-    s_measuredSpd[axis] = stepsPerDegree(axis);
+    if (!jointcal::isPlausible(axis, encSign, stepsPerDeg)) {
+        Serial.printf("[JM] Calib J%u bi bo qua: encSign=%+.3f, steps/deg=%.2f khong hop le\n",
+                      axis + 1, encSign, stepsPerDeg);
+        resetHomingCalibration(axis);
+        return;
+    }
+    s_encSign[axis] = jointcal::normalizedSign(encSign);
+    s_measuredSpd[axis] = stepsPerDeg;
     s_hasMeasured[axis] = true;
-    if (nvs != nullptr) nvs->saveCalib(axis, s_encSign[axis], s_measuredSpd[axis]);
+    if (nvs != nullptr && !nvs->saveCalib(axis, s_encSign[axis], s_measuredSpd[axis])) {
+        Serial.printf("[JM] LOI: khong luu duoc calib J%u vao NVS\n", axis + 1);
+    }
     Serial.printf("[JM] Calib J%u: encSign=%+.0f, steps/deg=%.2f\n",
                   axis + 1, s_encSign[axis], s_measuredSpd[axis]);
 }
@@ -157,7 +170,7 @@ void JointModel::applyHomingCalibration(uint8_t axis, float encSign, float steps
 void JointModel::resetHomingCalibration(uint8_t axis) {
     if (axis >= NUM_MOTORS) return;
     s_encSign[axis] = AXIS_ENC_SIGN[axis];
-    s_measuredSpd[axis] = stepsPerDegree(axis);
+    s_measuredSpd[axis] = jointcal::configuredStepsPerDegree(axis);
     s_hasMeasured[axis] = false;
 }
 
@@ -166,12 +179,29 @@ uint8_t JointModel::restoreFromNVS() {
     uint8_t okCount = 0;
     for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
         s_encSign[a] = AXIS_ENC_SIGN[a];
-        s_measuredSpd[a] = stepsPerDegree(a);
-        s_hasMeasured[a] = true;
+        s_measuredSpd[a] = jointcal::configuredStepsPerDegree(a);
+        s_hasMeasured[a] = false;
 
-        if (!sensor->isSensorOK(a) || motors[a] == nullptr) continue;
+        const NvsStore::CalibData calib = nvs->loadCalib(a);
+        if (calib.valid && jointcal::isPlausible(a, calib.encSign, calib.stepsPerDeg)) {
+            s_encSign[a] = jointcal::normalizedSign(calib.encSign);
+            s_measuredSpd[a] = calib.stepsPerDeg;
+            s_hasMeasured[a] = true;
+            Serial.printf("[JM] J%u: dung calib NVS encSign=%+.0f, steps/deg=%.2f\n",
+                          a + 1, s_encSign[a], s_measuredSpd[a]);
+        } else if (calib.valid) {
+            Serial.printf("[JM] J%u: bo qua calib NVS khong hop le\n", a + 1);
+        }
+
+        if (!sensor->isSensorOK(a) || motors[a] == nullptr) {
+            Serial.printf("[JM] J%u: khong restore NVS (sensor/motor chua san sang)\n", a + 1);
+            continue;
+        }
         const NvsStore::JointHome h = nvs->loadJointHome(a);
-        if (!h.valid) continue;
+        if (!h.valid) {
+            Serial.printf("[JM] J%u: khong co home hop le trong NVS\n", a + 1);
+            continue;
+        }
 
         const float now = sensor->getAngle(a);
         const float delta = s_encSign[a] * wrap180(now - h.rawDeg);
@@ -192,7 +222,8 @@ uint8_t JointModel::restoreFromNVS() {
         restored[a] = true;
         homed[a] = true;
         ++okCount;
-        Serial.printf("[JM] J%u: restore tu NVS %+.2f deg (encZeroRef=%.1f)\n", a + 1, delta, encZeroRef[a]);
+        Serial.printf("[JM] J%u: restore NVS rawSaved=%.1f rawNow=%.1f -> %+.2f deg (encZeroRef=%.1f)\n",
+                      a + 1, h.rawDeg, now, delta, encZeroRef[a]);
     }
     Serial.printf("[JM] Restore xong: %u/%u khop\n", okCount, NUM_MOTORS);
     return okCount;
@@ -200,7 +231,7 @@ uint8_t JointModel::restoreFromNVS() {
 
 uint8_t JointModel::homedCount() const noexcept {
     uint8_t n = 0;
-    for (const bool h : homed) n += h ? 1 : 0;
+    for (uint8_t i = 0; i < NUM_MOTORS; ++i) if (homed[i]) n++;
     return n;
 }
 
@@ -211,46 +242,17 @@ bool JointModel::allPositioningHomed() const noexcept {
     return true;
 }
 
-bool JointModel::updateDriftCheck(uint8_t axis) {
-    if (axis >= NUM_MOTORS) return false;
-    if (!homed[axis] || sensor == nullptr ||
-        motors[axis] == nullptr || !sensor->isSensorOK(axis)) {
-        driftFailCount[axis] = 0;
-        return false;
-    }
-    const uint32_t now = millis();
-    const bool isDiffWrist = (axis == 4 || axis == 5);
-    bool isRunning = motors[axis]->isRunning();
-    if (isDiffWrist && motors[4] != nullptr && motors[5] != nullptr) {
-        isRunning = motors[4]->isRunning() || motors[5]->isRunning();
-    }
-    if (isRunning) {
-        lastRunningMs[axis] = now;
-        driftFailCount[axis] = 0;
-        return false;
-    }
-    // Cho phép thời gian trễ 300ms sau khi motor dừng để cảm biến & bộ lọc EMA ổn định hoàn toàn
-    if (now - lastRunningMs[axis] < 300) {
-        return false;
-    }
-
-    const float diff = angleFromSteps(axis) - angleFromEncoder(axis);
-    // Luôn tự động đồng bộ vị trí bước theo encoder sau khi dừng chuyển động (Encoder-First)
-    resyncFromEncoder(axis);
-
-    if (fabsf(diff) > RUNAWAY_ERROR_THRESHOLD) {
-        Serial.printf("[DRIFT] J%u can chinh %.2f deg (step=%.2f -> enc=%.2f)\n",
-                      axis + 1, diff, angleFromSteps(axis), angleFromEncoder(axis));
-    }
-    driftFailCount[axis] = 0;
-    driftFault[axis] = false;
+bool JointModel::updateDriftCheck(uint8_t /*axis*/) {
+    // Drift watchdog disabled by user request: open-loop step counting is ground truth
     return false;
 }
 
+bool JointModel::hasMeasuredCalibration(uint8_t axis) noexcept {
+    return axis < NUM_MOTORS && s_hasMeasured[axis] &&
+           jointcal::isPlausible(axis, s_encSign[axis], s_measuredSpd[axis]);
+}
+
 bool JointModel::hasAnyDriftFault() const noexcept {
-    for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
-        if (driftFault[i]) return true;
-    }
     return false;
 }
 
@@ -283,12 +285,15 @@ String JointModel::toJson() {
         char buf[224];
         snprintf(buf, sizeof(buf),
                  "{\"deg\":%.2f,\"encDeg\":%.2f,\"homed\":%s,\"restored\":%s,"
-                 "\"encOK\":%s,\"drift\":%s,\"limitMin\":%.1f,\"limitMax\":%.1f}",
+                 "\"encOK\":%s,\"drift\":%s,\"calibMeasured\":%s,\"stepsPerDeg\":%.3f,"
+                 "\"limitMin\":%.1f,\"limitMax\":%.1f}",
                  actDeg, angleFromEncoder(a),
                  homed[a] ? "true" : "false",
                  restored[a] ? "true" : "false",
                  encOK(a) ? "true" : "false",
                  driftFault[a] ? "true" : "false",
+                 hasMeasuredCalibration(a) ? "true" : "false",
+                 stepsPerDegree(a),
                  DEFAULT_AXIS_LIMIT_MIN[a], DEFAULT_AXIS_LIMIT_MAX[a]);
         j += buf;
     }

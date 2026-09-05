@@ -1,5 +1,5 @@
 #include "endstop.h"
-class Motor;
+#include "motor.h"
 #ifdef ARDUINO
 #include "safety_manager.h"
 #include <esp_timer.h>
@@ -19,8 +19,10 @@ Endstops::Endstops() {
             ctx[a][w].which = static_cast<EndstopWhich>(w);
             ctx[a][w].self = this;
             ctx[a][w].safety = nullptr;
+            ctx[a][w].motor = nullptr;
             ctx[a][w].pending.store(false, std::memory_order_relaxed);
             ctx[a][w].isrTime.store(0, std::memory_order_relaxed);
+            ctx[a][w].enabled.store(true, std::memory_order_relaxed);
         }
     }
 }
@@ -34,6 +36,9 @@ void Endstops::begin(Motor** motors) {
             IsrCtx& ic = ctx[a][static_cast<uint8_t>(w)];
             ic.pending.store(false, std::memory_order_relaxed);
             ic.isrTime.store(0, std::memory_order_relaxed);
+            ic.enabled.store(true, std::memory_order_relaxed);
+            ic.pin = c.pin;
+            ic.motor = owner[a];
             if (!hasPin(a, w)) continue;
 #ifdef ARDUINO
             pinMode(c.pin, INPUT_PULLUP);
@@ -80,9 +85,25 @@ void Endstops::installPin(uint8_t axis, EndstopWhich w) {
 void IRAM_ATTR Endstops::isrHandler(void* arg) {
     auto* c = static_cast<IsrCtx*>(arg);
     if (c == nullptr) return;
-    // Minimal ISR: only pending + timestamp (<3µs). No delay, no gpio_get_level, no debounce.
-    // Intentional double-store: IsrCtx pending/isrTime + SafetyManager pending for fallback
-    // when safety_ is null (e.g., early boot before injection). SafetyManager is primary.
+    if (!c->enabled.load(std::memory_order_relaxed)) return;
+
+#ifdef ARDUINO
+    // Khử nhiễu phần cứng (Hardware EMI Glitch Rejection):
+    // Xung nhiễu cảm ứng từ motor PWM chỉ tồn tại vài chục ns đến vài µs.
+    // Nếu là xung nhiễu thì chân đã trở lại mức HIGH khi ISR thực thi.
+    // Chỉ công tắc cơ khí thật bị đè thì chân mới giữ mức LOW (ENDSTOP_ACTIVE_STATE).
+    if (c->pin >= 0 && gpio_get_level(static_cast<gpio_num_t>(c->pin)) != ENDSTOP_ACTIVE_STATE) {
+        return;
+    }
+#endif
+
+    // Safety first: cut the affected axis pulse train at the physical contact edge.
+    // Debounce still decides whether this is a real E_STOP latch; a glitch merely
+    // causes a safe stop and can be commanded again after it is rejected by poll.
+    if (c->motor != nullptr) c->motor->stopFromISR();
+
+    // Minimal bookkeeping only after the pulse stop: pending + timestamp, no delay,
+    // no gpio_get_level and no debounce. SafetyManager owns the debounced latch.
     c->pending.store(true, std::memory_order_relaxed);
 #ifdef ARDUINO
     int64_t now = esp_timer_get_time();
@@ -99,13 +120,24 @@ void IRAM_ATTR Endstops::isrHandler(void* arg) {
 #endif
 }
 
+void Endstops::setPinEnabled(uint8_t axis, EndstopWhich w, bool en) noexcept {
+    if (axis < NUM_MOTORS) {
+        ctx[axis][static_cast<uint8_t>(w)].enabled.store(en, std::memory_order_relaxed);
+    }
+}
+
+bool Endstops::isPinEnabled(uint8_t axis, EndstopWhich w) const noexcept {
+    if (axis >= NUM_MOTORS) return false;
+    return ctx[axis][static_cast<uint8_t>(w)].enabled.load(std::memory_order_relaxed);
+}
+
 bool Endstops::hasPin(uint8_t axis, EndstopWhich w) const noexcept {
     if (axis >= NUM_MOTORS) return false;
     return ch(axis, w).pin >= 0;
 }
 
 bool Endstops::isPressed(uint8_t axis, EndstopWhich w) const noexcept {
-    if (!hasPin(axis, w)) return false;
+    if (!hasPin(axis, w) || !isPinEnabled(axis, w)) return false;
 #ifdef ARDUINO
     return digitalRead(ch(axis, w).pin) == ENDSTOP_ACTIVE_STATE;
 #else
@@ -114,7 +146,7 @@ bool Endstops::isPressed(uint8_t axis, EndstopWhich w) const noexcept {
 }
 
 bool Endstops::isLatched(uint8_t axis, EndstopWhich w) const noexcept {
-    if (!hasPin(axis, w)) return false;
+    if (!hasPin(axis, w) || !isPinEnabled(axis, w)) return false;
 #ifdef ARDUINO
     if (safety_ != nullptr) {
         return safety_->isLatched(axis, w);
@@ -186,7 +218,7 @@ bool Endstops::anyLatched() const noexcept {
 }
 
 bool Endstops::isrPending(uint8_t axis, EndstopWhich w) const noexcept {
-    if (axis >= NUM_MOTORS) return false;
+    if (axis >= NUM_MOTORS || !isPinEnabled(axis, w)) return false;
     return ctx[axis][static_cast<uint8_t>(w)].pending.load(std::memory_order_relaxed);
 }
 

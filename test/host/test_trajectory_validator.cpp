@@ -7,6 +7,7 @@
 #include "kinematics.h"
 #include <cstdio>
 #include <cmath>
+#include <cstring>
 
 static int g_fail = 0;
 static int g_pass = 0;
@@ -124,13 +125,64 @@ static void test_workplane_transform() {
     }
 }
 
+static void test_line_from_home_park_pose_pass() {
+    TrajectoryValidator v;
+    // HOME TCP is intentionally not a pen-down pose. It must not reject an
+    // otherwise reachable line; Planner stages to the line start at lift height.
+    TrajectoryValidator::Job job;
+    job.type = TrajectoryValidator::Job::LINE;
+    job.x1 = 55; job.y1 = -15; job.x2 = 175; job.y2 = -15; job.z = -10;
+    const auto r = v.validate(job, {177, 0, 365});
+    if (r.ok) PASS("line_from_home_park_pose_pass");
+    else { CHECK(false, "line_from_home_park_pose_pass should be ok"); }
+}
+
+static void test_square_reachable_pass() {
+    TrajectoryValidator v;
+    TrajectoryValidator::Job job;
+    job.type = TrajectoryValidator::Job::SQUARE;
+    job.x1 = 120; job.y1 = 0; job.z = 20; job.r = 30;
+    const auto r = v.validate(job, {100, 0, 20});
+    if (r.ok) PASS("square_reachable_pass");
+    else { CHECK(false, "square_reachable_pass should be ok"); }
+}
+
+static void test_square_bad_side_reject() {
+    TrajectoryValidator v;
+    TrajectoryValidator::Job job;
+    job.type = TrajectoryValidator::Job::SQUARE;
+    job.r = 0;
+    const auto r = v.validate(job, {100, 0, 20});
+    if (!r.ok && std::strcmp(r.reason.c_str(), "BAD_RADIUS") == 0) PASS("square_bad_side_reject");
+    else { CHECK(false, "square_bad_side_reject should fail"); }
+}
+
+static void test_workplane_target_uses_plane_not_legacy_z() {
+    // Planner treats job.z as its legacy paper reference. With UCS enabled,
+    // target draw points are w=0 on the calibrated plane, not w=job.z.
+    WorkPlane wp;
+    CHECK(wp.setThreePointCalibration({0, 0, 20}, {100, 0, 20}, {0, 100, 20}),
+          "horizontal workplane calibration");
+    TrajectoryValidator v(&wp);
+    TrajectoryValidator::Job job;
+    job.type = TrajectoryValidator::Job::POINT;
+    job.x1 = 120; job.y1 = 20; job.z = 435; // Base target must remain (120,20,20).
+    const auto r = v.validate(job, {120, 20, 0});
+    if (r.ok) PASS("workplane_target_uses_plane_not_legacy_z");
+    else { CHECK(false, "workplane target must validate at w=0, not w=job.z"); }
+}
+
 int main() {
     test_point_reachable_pass();
     test_point_out_of_reach_reject();
     test_line_mid_out_of_reach_reject();
     test_line_all_reachable_pass();
+    test_line_from_home_park_pose_pass();
     test_circle_outside();
+    test_square_reachable_pass();
+    test_square_bad_side_reject();
     test_workplane_transform();
+    test_workplane_target_uses_plane_not_legacy_z();
     if (g_fail==0) {
         std::printf("ALL PASSED (%d tests)\n", g_pass);
         return 0;

@@ -29,7 +29,7 @@ struct ValidationResult {
 class TrajectoryValidator {
 public:
     struct Job {
-        enum Type : uint8_t { NONE = 0, POINT, LINE, CIRCLE };
+        enum Type : uint8_t { NONE = 0, POINT, LINE, CIRCLE, SQUARE };
         Type type{Type::NONE};
         float x1{0}, y1{0};
         float x2{0}, y2{0};
@@ -47,7 +47,9 @@ public:
     ValidationResult validate(const Job& job, const kin::Pose& cur) const;
 
 private:
-    bool checkPose(const kin::Pose& p) const;
+    // With WorkPlane enabled, p.z is not always a base-Z value: target draw
+    // points use w=0 on the calibrated plane, while cur.z is its actual UCS lift.
+    bool checkPose(const kin::Pose& p, float workPlaneLift) const;
     WorkPlane* wp_{nullptr};
 };
 

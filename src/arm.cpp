@@ -62,9 +62,18 @@ void ArmController::begin(Motor** motors_, Sensor* sensor_, Endstops* endstops_,
 
 bool ArmController::submit(const ArmCommand& cmd, uint32_t timeoutMs) {
     if (queue == nullptr) return false;
+
+    // STOP is an out-of-band command mailbox rather than a normal queue item.
+    // It is therefore accepted even when the motion queue is full, and the motion
+    // task handles it before any planner/homing tick or queued command.
+    if (cmd.type == ArmCommand::STOP_ALL) {
+        stopRequested_.store(true, std::memory_order_release);
+        return true;
+    }
+
     // Synchronous pre-flight validation for Cartesian jobs (§3.4 lightweight B) — HTTP 400 before moving
     if ((cmd.type == ArmCommand::MOVE_CART || cmd.type == ArmCommand::DRAW_LINE ||
-         cmd.type == ArmCommand::DRAW_CIRCLE) &&
+         cmd.type == ArmCommand::DRAW_CIRCLE || cmd.type == ArmCommand::DRAW_SQUARE) &&
         pl != nullptr && jm != nullptr) {
         if (!busy()) {
             Planner::Job tjob;
@@ -82,8 +91,15 @@ bool ArmController::submit(const ArmCommand& cmd, uint32_t timeoutMs) {
                 tjob.y2 = cmd.p[3];
                 tjob.z = cmd.p[4];
                 if (cmd.p[5] > 1.0f && cmd.p[5] < 200.0f) tjob.feedMmS = cmd.p[5];
-            } else {
+            } else if (cmd.type == ArmCommand::DRAW_CIRCLE) {
                 tjob.shape = Planner::Shape::CIRCLE;
+                tjob.x1 = cmd.p[0];
+                tjob.y1 = cmd.p[1];
+                tjob.z = cmd.p[2];
+                tjob.r = cmd.p[3];
+                if (cmd.p[5] > 1.0f && cmd.p[5] < 200.0f) tjob.feedMmS = cmd.p[5];
+            } else {
+                tjob.shape = Planner::Shape::SQUARE;
                 tjob.x1 = cmd.p[0];
                 tjob.y1 = cmd.p[1];
                 tjob.z = cmd.p[2];
@@ -115,7 +131,8 @@ bool ArmController::submit(const ArmCommand& cmd, uint32_t timeoutMs) {
                 Serial.printf("[ARM] REJECT pre-flight %s: %s at %d\n",
                               (tjob.shape == Planner::Shape::POINT)   ? "POINT"
                               : (tjob.shape == Planner::Shape::LINE) ? "LINE"
-                                                                     : "CIRCLE",
+                              : (tjob.shape == Planner::Shape::CIRCLE) ? "CIRCLE"
+                                                                     : "SQUARE",
                               vr.reason.c_str(), vr.failIndex);
                 return false;
             }
@@ -160,6 +177,13 @@ void ArmController::taskLoop() {
         vTaskDelayUntil(&lastWake, period);
         esp_task_wdt_reset();
 
+        // Highest command priority: cancel current motion and discard all queued
+        // motion commands before they can restart the robot after STOP_ALL.
+        if (stopRequested_.exchange(false, std::memory_order_acq_rel)) {
+            stopAllAndDiscardQueuedMotion();
+            continue;
+        }
+
         // Safety poll: debounce ISR pending → latch/E_STOP (50ms)
         if (safety_ != nullptr) safety_->pollEndstops();
 
@@ -174,7 +198,8 @@ void ArmController::taskLoop() {
         wasHoming = (hc != nullptr && hc->isActive());
 
         // 2) Endstop bảo vệ + E-stop (homing tự xử lý endstop riêng)
-        if (es != nullptr && hc != nullptr && !hc->isActive() && mode_ != ArmMode::FAULT) {
+        if (!manualRelease_.load(std::memory_order_acquire) && es != nullptr && hc != nullptr &&
+            !hc->isActive() && mode_ != ArmMode::FAULT) {
             const bool estopPending = safety_ ? safety_->isEStop() : false;
             const bool latchPending = safety_ ? safety_->anyLatched() : es->anyLatched();
 
@@ -229,35 +254,11 @@ void ArmController::taskLoop() {
             }
         }
 
-        // 3) Drift watchdog ~ mỗi 500ms (chỉ chạy khi KHÔNG homing) — maps to SafetyManager FAULT
-        if (++driftTickCounter >= (500 / MOTION_TASK_PERIOD_MS)) {
-            driftTickCounter = 0;
-            if (jm != nullptr && (hc == nullptr || !hc->isActive()) && mode_ != ArmMode::FAULT) {
-                for (uint8_t i = 0; i < NUM_MOTORS; ++i) jm->updateDriftCheck(i);
-                if (jm->hasAnyDriftFault()) {
-                    if (pl != nullptr) pl->stop();
-                    for (uint8_t j = 0; j < NUM_MOTORS; ++j) {
-                        if (motors[j] != nullptr) motors[j]->stop();
-                    }
-                    if (safety_) safety_->notifyFault("drift");
-                    mode_ = ArmMode::FAULT;
-                    Serial.println("[ARM] FAULT: step/encoder drift exceeded threshold");
-                }
-            }
-        }
-        // SafetyManager drift→FAULT promotion (in case drift latched between checks, poll handles it;
-        // also sync mode to safety state if safety already FAULT)
-        if (safety_ && safety_->isFault() && mode_ != ArmMode::FAULT) {
-            if (pl != nullptr) pl->stop();
-            for (uint8_t j = 0; j < NUM_MOTORS; ++j) {
-                if (motors[j] != nullptr) motors[j]->stop();
-            }
-            mode_ = ArmMode::FAULT;
-        }
-
-        // 4) Mode runtime (tính lại mỗi tick, tránh kẹt trạng thái)
+        // 3) Mode runtime (tính lại mỗi tick, tránh kẹt trạng thái)
         if (mode_ != ArmMode::FAULT) {
-            if (hc != nullptr && hc->isActive()) {
+            if (manualRelease_.load(std::memory_order_acquire)) {
+                mode_ = ArmMode::RELEASE;
+            } else if (hc != nullptr && hc->isActive()) {
                 mode_ = ArmMode::HOMING;
             } else if (pl != nullptr && pl->isActive()) {
                 mode_ = pl->isDrawing() ? ArmMode::DRAW : ArmMode::CART;
@@ -268,7 +269,7 @@ void ArmController::taskLoop() {
             }
         }
 
-        // 5) Rút lệnh từ queue (không block)
+        // 4) Rút lệnh từ queue (không block)
         while (queue != nullptr && xQueueReceive(queue, &cmd, 0) == pdTRUE) {
             execute(cmd);
         }
@@ -285,13 +286,7 @@ bool ArmController::motionAllowed() const {
 void ArmController::execute(const ArmCommand& cmd) {
     switch (cmd.type) {
         case ArmCommand::STOP_ALL:
-            if (hc != nullptr) hc->cancel();
-            if (pl != nullptr) pl->stop();
-            for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
-                if (motors[i] != nullptr) motors[i]->stop();
-            }
-            if (mode_ != ArmMode::FAULT) mode_ = ArmMode::IDLE;
-            Serial.println("[ARM] STOP ALL");
+            stopAllAndDiscardQueuedMotion();
             break;
 
         case ArmCommand::CLEAR_FAULT: {
@@ -306,12 +301,13 @@ void ArmController::execute(const ArmCommand& cmd) {
                 mode_ = ArmMode::IDLE;
                 Serial.println("[ARM] FAULT cleared -> IDLE");
             } else {
-                Serial.println("[ARM] CLEAR_FAULT rejected: endstop still pressed or drift active");
+                Serial.println("[ARM] CLEAR_FAULT rejected: endstop still pressed");
             }
             break;
         }
 
         case ArmCommand::HOME_ALL:
+            resumeManualRelease();
             if (!motionAllowed()) break;
             if (busy()) break;
             mode_ = ArmMode::HOMING;
@@ -319,6 +315,7 @@ void ArmController::execute(const ArmCommand& cmd) {
             break;
 
         case ArmCommand::HOME_AXIS:
+            resumeManualRelease();
             if (!motionAllowed()) break;
             if (busy() || cmd.axis >= 4) break;
             mode_ = ArmMode::HOMING;
@@ -326,6 +323,7 @@ void ArmController::execute(const ArmCommand& cmd) {
             break;
 
         case ArmCommand::SET_HOME:
+            resumeManualRelease();
             if (busy()) break;
             if (jm != nullptr) {
                 if (cmd.axis == 255) {
@@ -340,7 +338,24 @@ void ArmController::execute(const ArmCommand& cmd) {
             }
             break;
 
+        case ArmCommand::RELEASE_J1_J4:
+            if (busy()) {
+                Serial.println("[ARM] RELEASE J1-J4 bo qua: robot dang chay");
+                break;
+            }
+            if (safety_ != nullptr) safety_->assertManualRelease(true);
+            manualRelease_.store(true, std::memory_order_release);
+            for (uint8_t axis = 0; axis < 4; ++axis) {
+                if (motors[axis] == nullptr || !motors[axis]->enable(false)) {
+                    Serial.printf("[ARM] RELEASE J%u FAIL (UART)\n", axis + 1);
+                    continue;
+                }
+                Serial.printf("[ARM] RELEASE J%u OK — home/NVS giu nguyen\n", axis + 1);
+            }
+            break;
+
         case ArmCommand::JOG_REL:
+            resumeManualRelease();
             if (!motionAllowed()) {
                 Serial.printf("[ARM] TU CHOI JOG J%u: robot dang o mode=%u / FAULT (Bấm CLEAR FAULT để xóa lỗi)\n",
                               cmd.axis + 1, static_cast<unsigned>(mode_.load(std::memory_order_relaxed)));
@@ -357,7 +372,9 @@ void ArmController::execute(const ArmCommand& cmd) {
 
         case ArmCommand::MOVE_CART:
         case ArmCommand::DRAW_LINE:
-        case ArmCommand::DRAW_CIRCLE: {
+        case ArmCommand::DRAW_CIRCLE:
+        case ArmCommand::DRAW_SQUARE: {
+            resumeManualRelease();
             if (!motionAllowed() || pl == nullptr || jm == nullptr) break;
             if (busy()) break;
             if (!jm->allPositioningHomed()) {
@@ -378,12 +395,18 @@ void ArmController::execute(const ArmCommand& cmd) {
                 job.x2 = cmd.p[2];
                 job.y2 = cmd.p[3];
                 job.z = cmd.p[4];
-            } else {
+            } else if (cmd.type == ArmCommand::DRAW_CIRCLE) {
                 job.shape = Planner::Shape::CIRCLE;
                 job.x1 = cmd.p[0]; // cx
                 job.y1 = cmd.p[1]; // cy
                 job.z = cmd.p[2];
                 job.r = cmd.p[3];
+            } else {
+                job.shape = Planner::Shape::SQUARE;
+                job.x1 = cmd.p[0]; // cx
+                job.y1 = cmd.p[1]; // cy
+                job.z = cmd.p[2];
+                job.r = cmd.p[3];  // side
             }
             if (cmd.p[5] > 1.0f && cmd.p[5] < 200.0f) job.feedMmS = cmd.p[5];
             mode_ = (cmd.type == ArmCommand::MOVE_CART) ? ArmMode::CART : ArmMode::DRAW;
@@ -405,6 +428,26 @@ void ArmController::execute(const ArmCommand& cmd) {
     }
 }
 
+void ArmController::stopAllAndDiscardQueuedMotion() {
+    if (hc != nullptr) hc->cancel();
+    if (pl != nullptr) pl->stop();
+    for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+        if (motors[i] != nullptr) motors[i]->stop();
+    }
+    if (queue != nullptr) xQueueReset(queue);
+    if (mode_ != ArmMode::FAULT) mode_ = ArmMode::IDLE;
+    Serial.println("[ARM] STOP ALL: motion cancelled and queue cleared");
+}
+
+void ArmController::resumeManualRelease() {
+    if (!manualRelease_.exchange(false, std::memory_order_acq_rel)) return;
+    if (safety_ != nullptr) safety_->assertManualRelease(false);
+    if (jm != nullptr) {
+        for (uint8_t axis = 0; axis < 4; ++axis) jm->resyncFromEncoder(axis);
+    }
+    Serial.println("[ARM] RELEASE ket thuc — da resync J1-J4 tu encoder");
+}
+
 void ArmController::applyJog(uint8_t axis, float deltaDeg) {
     if (axis < 4) {
         // Khớp 1..4 dẫn động trực tiếp
@@ -415,6 +458,9 @@ void ArmController::applyJog(uint8_t axis, float deltaDeg) {
             if (target > DEFAULT_AXIS_LIMIT_MAX[axis]) target = DEFAULT_AXIS_LIMIT_MAX[axis];
             if (target < DEFAULT_AXIS_LIMIT_MIN[axis]) target = DEFAULT_AXIS_LIMIT_MIN[axis];
             delta = target - cur; // clamp theo soft limit từ vị trí encoder thực tế
+            if ((deltaDeg > 0.0f && delta < 0.0f) || (deltaDeg < 0.0f && delta > 0.0f)) {
+                delta = 0.0f;
+            }
         }
         const int64_t steps = JointModel::degreesToSteps(axis, fabsf(delta));
         Serial.printf("[JOG] J%u: delta=%.2f steps=%lld cw=%d (encOK=%d homed=%d)\n",
@@ -433,6 +479,9 @@ void ArmController::applyJog(uint8_t axis, float deltaDeg) {
             if (target > DEFAULT_AXIS_LIMIT_MAX[4]) target = DEFAULT_AXIS_LIMIT_MAX[4];
             if (target < DEFAULT_AXIS_LIMIT_MIN[4]) target = DEFAULT_AXIS_LIMIT_MIN[4];
             delta = target - cur;
+            if ((deltaDeg > 0.0f && delta < 0.0f) || (deltaDeg < 0.0f && delta > 0.0f)) {
+                delta = 0.0f;
+            }
         }
         const DifferentialWrist::ActuatorSteps steps = g_diffWrist.computeIncrementalSteps(
             delta, 0.0f, JointModel::stepsPerDegree(4), JointModel::stepsPerDegree(5));
@@ -457,6 +506,9 @@ void ArmController::applyJog(uint8_t axis, float deltaDeg) {
             if (target > DEFAULT_AXIS_LIMIT_MAX[5]) target = DEFAULT_AXIS_LIMIT_MAX[5];
             if (target < DEFAULT_AXIS_LIMIT_MIN[5]) target = DEFAULT_AXIS_LIMIT_MIN[5];
             delta = target - cur;
+            if ((deltaDeg > 0.0f && delta < 0.0f) || (deltaDeg < 0.0f && delta > 0.0f)) {
+                delta = 0.0f;
+            }
         }
         const DifferentialWrist::ActuatorSteps steps = g_diffWrist.computeIncrementalSteps(
             0.0f, delta, JointModel::stepsPerDegree(4), JointModel::stepsPerDegree(5));
@@ -482,6 +534,7 @@ String ArmController::statusJson() {
     j += "\"fw\":\"" FW_VERSION "\",";
     switch (mode_) {
         case ArmMode::IDLE:   j += "\"mode\":\"idle\",";   break;
+        case ArmMode::RELEASE:j += "\"mode\":\"release\",";break;
         case ArmMode::HOMING: j += "\"mode\":\"homing\","; break;
         case ArmMode::JOG:    j += "\"mode\":\"jog\",";    break;
         case ArmMode::CART:   j += "\"mode\":\"cart\",";   break;

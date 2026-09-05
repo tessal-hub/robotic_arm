@@ -2,6 +2,8 @@
 #include "rtos_guard.h"
 #include <esp_task_wdt.h>
 
+#include <cstring>
+
 Sensor::Sensor() {
     filtered_angles.fill(0.0f);
     last_raw_angles.fill(0.0f);
@@ -12,6 +14,30 @@ Sensor::Sensor() {
         sensor_error[i].store(false, std::memory_order_relaxed);
     }
     read_fail_counts.fill(0);
+    for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
+        published_angles[i].store(floatToBits(0.0f), std::memory_order_relaxed);
+        published_accumulated[i].store(floatToBits(0.0f), std::memory_order_relaxed);
+        published_turn_counts[i].store(0, std::memory_order_relaxed);
+    }
+}
+
+uint32_t Sensor::floatToBits(float value) {
+    uint32_t bits = 0;
+    static_assert(sizeof(bits) == sizeof(value), "float must be 32-bit");
+    memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+float Sensor::bitsToFloat(uint32_t bits) {
+    float value = 0.0f;
+    memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
+void Sensor::publishSample(uint8_t ch) {
+    published_angles[ch].store(floatToBits(filtered_angles[ch]), std::memory_order_relaxed);
+    published_accumulated[ch].store(floatToBits(accumulated_angles[ch]), std::memory_order_relaxed);
+    published_turn_counts[ch].store(turn_counts[ch], std::memory_order_relaxed);
 }
 
 Sensor::~Sensor() {
@@ -177,6 +203,7 @@ void Sensor::scanOnce() {
         auto dataLock = makeTimedLock(dataMutex, SENSOR_I2C_MUTEX_TIMEOUT_MS);
         if (dataLock) {
             filter(i, raw);
+            publishSample(i);
         }
     }
 }
@@ -305,24 +332,24 @@ float Sensor::getAngle(uint8_t ch) {
     // Ưu tiên đọc dưới lock; nếu timeout 5ms vẫn trả giá trị hiện tại
     // (đọc float 32-bit aligned trên ESP32 không bị rách, đừng block caller).
     auto lock = makeTimedLock(dataMutex, 5);
-    (void)lock;
-    return filtered_angles[ch];
+    if (lock) return filtered_angles[ch];
+    return bitsToFloat(published_angles[ch].load(std::memory_order_relaxed));
 }
 
 float Sensor::getAccumulatedAngle(uint8_t ch) {
     if (ch >= NUM_SENSORS) return 0.0f;
 
     auto lock = makeTimedLock(dataMutex, 5);
-    (void)lock;
-    return accumulated_angles[ch];
+    if (lock) return accumulated_angles[ch];
+    return bitsToFloat(published_accumulated[ch].load(std::memory_order_relaxed));
 }
 
 int32_t Sensor::getTurnCount(uint8_t ch) {
     if (ch >= NUM_SENSORS) return 0;
 
     auto lock = makeTimedLock(dataMutex, 5);
-    (void)lock;
-    return turn_counts[ch];
+    if (lock) return turn_counts[ch];
+    return published_turn_counts[ch].load(std::memory_order_relaxed);
 }
 
 void Sensor::resetAccumulatedAngle(uint8_t ch) {
@@ -331,6 +358,7 @@ void Sensor::resetAccumulatedAngle(uint8_t ch) {
     if (lock) {
         accumulated_angles[ch] = filtered_angles[ch];
         turn_counts[ch] = 0;
+        publishSample(ch);
     }
 }
 

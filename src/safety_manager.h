@@ -63,6 +63,8 @@ public:
   void pollEndstops(uint64_t nowUs); // test-injectable, also checks drift→FAULT
   void pollEndstops(); // on Arduino calls esp_timer_get_time()
   void assertHoming(bool active);
+  // Release là thao tác tay khi driver đã tắt mô-men: bỏ qua endstop ISR/latch cho tới khi resume.
+  void assertManualRelease(bool active) noexcept;
   void assertEStop(const char* reason);
   void notifyFault(const char* reason); // sets FAULT (drift/power) if not already FAULT/E_STOP
   bool tryClearFault();
@@ -85,6 +87,7 @@ private:
   std::function<void()> clearDrift_;
   std::atomic<SafetyState> state_{SafetyState::NORMAL};
   bool homingActive_{false};
+  bool manualReleaseActive_{false};
   std::array<std::array<std::atomic<bool>,2>, NUM_MOTORS> pending_{};
   std::array<std::array<std::atomic<int64_t>,2>, NUM_MOTORS> pendingTime_{};
   std::array<std::array<std::atomic<bool>,2>, NUM_MOTORS> latched_{};

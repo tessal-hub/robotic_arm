@@ -26,6 +26,7 @@ static void test_config_backoff_settle_ms() {
   // Also verify other timeouts kept
   CHECK(HOMING_JOINT_TIMEOUT_MS == 30000, "HOMING_JOINT_TIMEOUT_MS 30s invariant");
   CHECK(HOMING_MAX_ATTEMPTS == 2, "HOMING_MAX_ATTEMPTS 2 invariant");
+  CHECK(HOMING_MIN_MECHANICAL_SPAN_DEG == 35.0f, "J4 mechanical span floor 35 deg");
   CHECK((int)HOMING_BACKOFF_MAX_EXTEND == 3, "HOMING_BACKOFF_MAX_EXTEND 3 invariant");
   // Verify other settles kept: WARMUP 200, ENC_SETTLE 350, DEBOUNCE 50000
   // These are defined in homing.cpp anon namespace, check config indirectly via reading file
@@ -118,11 +119,27 @@ static void test_no_delay_blocking() {
   bool has_verify_wait = content.find("VERIFY_SETTLE_WAIT") != std::string::npos;
   bool has_millis_check = content.find("millis()") != std::string::npos && content.find("HOMING_BACKOFF_SETTLE_MS") != std::string::npos;
   bool has_settle_start = content.find("settleStartMs_") != std::string::npos;
+  bool stops_on_finish = content.find("motors[curAxis_] != nullptr) motors[curAxis_]->stop()") != std::string::npos;
+  bool fast_sensorless_fusion = content.find("if (!hitAny && sgStalled && encoderStalled)") != std::string::npos;
+  bool slow_sensorless_fusion = content.find("if (!hitEndstop && sgStalled && encoderStalled)") != std::string::npos;
+  bool rejects_bad_sensorless_span = content.find("CROSSCHECK encoder span") != std::string::npos;
+  bool rejects_bad_sensorless_ratio = content.find("CROSSCHECK encoder ratio") != std::string::npos;
+  bool directional_stall_frame = content.find("signedEncDelta") != std::string::npos &&
+                               content.find("expectedRawSign") != std::string::npos;
+  bool has_j4_second_side_cap = content.find("exceededSecondSideTravel") != std::string::npos &&
+                               content.find("HOMING_J4_MAX_MECHANICAL_SPAN_DEG") != std::string::npos;
   CHECK(has_backoff_wait, "has BACKOFF_SETTLE_WAIT");
   CHECK(has_warmup_wait, "has WARMUP_SETTLE_WAIT");
   CHECK(has_verify_wait, "has VERIFY_SETTLE_WAIT");
   CHECK(has_millis_check, "uses millis() + HOMING_BACKOFF_SETTLE_MS");
   CHECK(has_settle_start, "has settleStartMs_ member use");
+  CHECK(stops_on_finish, "finishJoint always stops the current motor");
+  CHECK(fast_sensorless_fusion, "J4 FAST requires both StallGuard and AS5600 stall");
+  CHECK(slow_sensorless_fusion, "J4 SLOW requires both StallGuard and AS5600 stall");
+  CHECK(rejects_bad_sensorless_span, "J4 rejects invalid encoder span before SetHome");
+  CHECK(rejects_bad_sensorless_ratio, "J4 rejects invalid encoder ratio before SetHome");
+  CHECK(directional_stall_frame, "J4 ignores reverse encoder jumps in the stall frame");
+  CHECK(has_j4_second_side_cap, "J4 aborts a missing second hard-stop before scan timeout");
   if (has_backoff_wait && has_warmup_wait && has_verify_wait && has_millis_check && has_settle_start) {
     if (!has_blocking_delay) PASS("settle_states_millis_logic");
   }

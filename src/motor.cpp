@@ -343,7 +343,7 @@ void Motor::run(bool cw, uint32_t steps) {
     preparedRun.store(false, std::memory_order_relaxed);
     coordinatedMode.store(false, std::memory_order_relaxed);
 
-    if (!enabled.load(std::memory_order_relaxed)) enable(true);
+    if (!enabled.load(std::memory_order_relaxed) && !enable(true)) return;
     if (!setDirection(cw)) {
         Serial.printf("[MOTOR] %s bo qua run: khong doi duoc chieu UART\n", label);
         return;
@@ -380,7 +380,7 @@ void Motor::runContinuous(bool cw) {
     preparedRun.store(false, std::memory_order_relaxed);
     coordinatedMode.store(false, std::memory_order_relaxed);
 
-    if (!enabled.load(std::memory_order_relaxed)) enable(true);
+    if (!enabled.load(std::memory_order_relaxed) && !enable(true)) return;
     if (!setDirection(cw)) {
         Serial.printf("[MOTOR] %s bo qua runContinuous: khong doi duoc chieu UART\n", label);
         return;
@@ -469,15 +469,15 @@ void IRAM_ATTR Motor::stopFromISR() {
     else GPIO.out_w1tc = stepPinMaskLow;
 }
 
-void Motor::enable(bool en) {
-    enabled.store(en, std::memory_order_relaxed);
+bool Motor::enable(bool en) {
     if (!en) stop();
-    if (isTMC) {
-        if (!takeUart(20)) return;
-        flushUartRx();
-        driver->toff(en ? 4 : 0);
-        giveUart();
-    }
+    if (!isTMC) return false;
+    if (!takeUart(20)) return false;
+    flushUartRx();
+    driver->toff(en ? 4 : 0);
+    giveUart();
+    enabled.store(en, std::memory_order_release);
+    return true;
 }
 
 void Motor::setSpeed(uint32_t intervalUs) {

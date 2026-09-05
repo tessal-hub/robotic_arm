@@ -54,8 +54,8 @@ constexpr uint8_t MAX_WAYPOINTS                 = 32;
 // Chiều quay logic: +1 nếu step CW ứng với góc khớp tăng dương (hiệu chỉnh lúc lắp).
 // J2 và J3: góc dương là hướng vươn ra ngoài.
 constexpr int8_t AXIS_STEP_SIGN[NUM_MOTORS]     = { +1, +1, +1, -1, +1, +1 };
-// Chiều đo của encoder AS5600: J1-J4 quay ngược chiều raw (-1), cụm vi sai J5 (+1) và J6 (-1) đặt đối diện nhau.
-constexpr int8_t AXIS_ENC_SIGN[NUM_MOTORS]      = { -1, -1, -1, -1, +1, -1 };
+// Chiều đo AS5600: J1-J5 dùng raw âm; J6 vẫn raw âm theo xác nhận commissioning.
+constexpr int8_t AXIS_ENC_SIGN[NUM_MOTORS]      = { -1, -1, -1, -1, -1, -1 };
 
 // ==============================================================================
 // 3. I2C SENSOR BUS (PCA9548A Multiplexer + AS5600 Magnetic Encoders)
@@ -125,9 +125,9 @@ constexpr uint16_t DEFAULT_NORMAL_CURRENT       = 800;    // Normal running curr
 constexpr uint16_t DEFAULT_HOMING_CURRENT       = 350;    // Ultra-low current for Homing (mA)
 
 constexpr uint16_t NORMAL_CURRENT_J1            = 1000;    // Base Yaw (mA)
-constexpr uint16_t NORMAL_CURRENT_J2            = 1400;   // Shoulder Pitch (mA) — nâng cánh tay trên
-constexpr uint16_t NORMAL_CURRENT_J3            = 1400;   // Elbow Pitch (mA) — nâng khuỷu tay
-constexpr uint16_t NORMAL_CURRENT_J4            = 1000;    // Wrist Pan (mA)
+constexpr uint16_t NORMAL_CURRENT_J2            = 1700;   // Shoulder Pitch (mA) — nâng cánh tay trên
+constexpr uint16_t NORMAL_CURRENT_J3            = 1700;   // Elbow Pitch (mA) — nâng khuỷu tay
+constexpr uint16_t NORMAL_CURRENT_J4            = 600;    // Wrist Pan (mA)
 constexpr uint16_t NORMAL_CURRENT_J5            = 0;      // A4988 - VREF cứng
 constexpr uint16_t NORMAL_CURRENT_J6            = 0;      // A4988 - VREF cứng
 
@@ -194,6 +194,11 @@ constexpr int32_t  HOMING_STALL_WINDOW_MIN_STEPS = 120;   // Sàn cửa sổ (12
 // Span encoder tối thiểu sau khi quét đủ 2 cữ: thấp hơn ngưỡng này (motor đã đi hàng trăm
 // bước) chứng tỏ encoder đóng băng/đọc lỗi → HỦY khớp, không home ảo.
 constexpr float    HOMING_MIN_ENC_SPAN_DEG[NUM_MOTORS] = { 30.0f, 30.0f, 30.0f, 15.0f, 10.0f, 10.0f };
+// J4 sensorless hard-stop span integrity floor.  Commissioning logs measured
+// 38.8–42.2° on the real joint, so keep a 35° floor without rejecting valid homes.
+constexpr float    HOMING_MIN_MECHANICAL_SPAN_DEG = 35.0f;
+// J4 thực đo span 38.8–42.2°; leg thứ hai vượt 55° mà chưa có cữ là lỗi, không chờ timeout 60s.
+constexpr float    HOMING_J4_MAX_MECHANICAL_SPAN_DEG = 55.0f;
 constexpr float    HOMING_TRIM_MAX_TRAVEL_DEG  = 5.0f;    // Giới hạn hành trình mỗi lần trim VERIFY (chống trim chạy loạn đâm endstop)
 constexpr uint8_t  HOMING_BACKOFF_MAX_EXTEND    = 3;      // Số lần nới rộng backoff (2.5°→5°→10°→20°) khi công tắc chưa nhả (hysteresis đòn bẩy)
 constexpr uint32_t HOMING_BACKOFF_SETTLE_MS    = 30;     // Settle cơ khí & tiếp điểm sau khi dừng đột ngột từ pha quét (non-blocking)
@@ -220,12 +225,29 @@ constexpr float DEFAULT_DEADBAND_ENTER          = 0.3f;   // Enter holding windo
 constexpr float DEFAULT_DEADBAND_EXIT           = 0.8f;   // Exit holding window (degrees)
 constexpr float DEFAULT_ANGLE_TOLERANCE         = 0.5f;   // Tolerance (degrees)
 constexpr float RUNAWAY_ERROR_THRESHOLD         = 25.0f;  // Runaway threshold (degrees) — nới rộng cho hộp số planetary có backlash lớn (~10°-15°)
+constexpr uint16_t DRIFT_CHECK_PERIOD_MS        = 500;    // Idle encoder/step comparison interval
+constexpr uint16_t DRIFT_SETTLE_MS              = 300;    // Let encoder EMA settle after motor stops
+constexpr uint8_t DRIFT_FAULT_CONSECUTIVE_CHECKS = 3;     // Persistent runaway before latching FAULT
 
 // Drawing (Cartesian trajectory, pen = tool coaxial J6)
 constexpr float PEN_LIFT_MM                     = 5.0f;   // Độ nâng bút giữa các nét (Z-raise)
 constexpr float DRAW_FEED_MM_S                  = 20.0f;  // Feed mặc định khi vẽ
 constexpr float DRAW_SEGMENT_MM                 = 1.0f;   // Bước rời rạc hóa quỹ đạo
 constexpr uint8_t PLANNER_QUEUE_DEPTH           = 24;     // Số segment tối đa trong hàng đợi
+
+// Preset "vẽ nhanh": quét IK trong nửa không gian phía trước để đề xuất các cao độ Z
+// có ô vuông liên tục lớn nhất. Tất cả ô được kiểm tra cả lúc chạm giấy và nâng bút.
+constexpr float DRAW_WORKSPACE_SCAN_X_MIN_MM    = 20.0f;
+constexpr float DRAW_WORKSPACE_SCAN_X_MAX_MM    = 280.0f;
+constexpr float DRAW_WORKSPACE_SCAN_Y_MIN_MM    = -200.0f;
+constexpr float DRAW_WORKSPACE_SCAN_Y_MAX_MM    = 200.0f;
+constexpr float DRAW_WORKSPACE_SCAN_Z_MIN_MM    = -10.0f;
+constexpr float DRAW_WORKSPACE_SCAN_Z_MAX_MM    = 330.0f;
+constexpr float DRAW_WORKSPACE_SCAN_STEP_MM     = 10.0f;
+constexpr float DRAW_WORKSPACE_SCAN_Z_STEP_MM   = 10.0f;
+constexpr float DRAW_PRESET_SAFE_SCALE_MM       = 0.60f; // inset 40% vào ô max để chịu sai số cơ khí
+constexpr float DRAW_PRESET_MIN_SQUARE_SIDE_MM  = 40.0f;
+constexpr float DRAW_PRESET_MIN_Z_SEPARATION_MM = 40.0f;
 
 // Motion Control Task configuration (Core 1, 100Hz)
 constexpr uint32_t MOTION_TASK_PERIOD_MS        = 10;
@@ -255,8 +277,10 @@ constexpr float J1_MIN_LIMIT                    = -90.0f; // 270 deg total strok
 constexpr float J1_MAX_LIMIT                    = +90.0f;
 constexpr float J2_MIN_LIMIT                    = -90.0f;  // 180 deg total stroke
 constexpr float J2_MAX_LIMIT                    = +90.0f;
-constexpr float J3_MIN_LIMIT                    = -90.0f;  // 180 deg total stroke (-90..+90)
-constexpr float J3_MAX_LIMIT                    = +90.0f;
+// Owner-locked mechanical envelope: J3 home is the straight/zero position;
+// negative elbow motion is not permitted. Keep this aligned with kin::J3_MIN/MAX.
+constexpr float J3_MIN_LIMIT                    = 0.0f;
+constexpr float J3_MAX_LIMIT                    = +90.0f;  // 90 deg total stroke (0..+90)
 constexpr float J4_MIN_LIMIT                    = -180.0f;
 constexpr float J4_MAX_LIMIT                    = +180.0f;
 constexpr float J5_MIN_LIMIT                    = -120.0f;

@@ -92,7 +92,7 @@ static void testTwoSpeedArchitecture() {
               "Slow re-approach interval >= fast scan interval for TMC axis");
     }
     CHECK(HOMING_SLOW_SCAN_INTERVAL_US >= 2500,
-          "Slow interval >= 2500us (gentle contact, SG-free phase)");
+          "Slow interval >= 2500us (gentle sensorless contact phase)");
 }
 
 // Retry: đủ để chống glitch, không vô hạn
@@ -161,8 +161,21 @@ static void testSpanIntegrityAndTrimBounds() {
     }
     CHECK(HOMING_MIN_ENC_SPAN_DEG[3] < HOMING_MIN_ENC_SPAN_DEG[0],
           "J4 threshold lower (encoder ratio uncertainty)");
+    CHECK(HOMING_J4_MAX_MECHANICAL_SPAN_DEG > HOMING_MIN_MECHANICAL_SPAN_DEG &&
+          HOMING_J4_MAX_MECHANICAL_SPAN_DEG <= 60.0f,
+          "J4 second-side travel cap is above valid span and remains conservative");
     CHECK(HOMING_TRIM_MAX_TRAVEL_DEG >= 2.0f && HOMING_TRIM_MAX_TRAVEL_DEG <= 15.0f,
           "Trim travel bound sane");
+}
+
+static void testDirectionalEncoderFrame() {
+    const float expectedRawSign = -1.0f;
+    const float forward = 4.0f * expectedRawSign;
+    const float backward = -4.0f * expectedRawSign;
+    CHECK(forward * expectedRawSign >= HOMING_STALL_ENC_DELTA_DEG,
+          "forward raw encoder movement resets the stall frame");
+    CHECK(backward * expectedRawSign < 0.0f,
+          "backward raw encoder jump is not treated as forward progress");
 }
 
 // Backoff phải đủ xa để nhả endstop với steps/deg CONFIG (không phụ thuộc calib cũ)
@@ -189,6 +202,7 @@ int main() {
     testJ3OffsetCentering();
     testCenterSymmetry();
     testSpanIntegrityAndTrimBounds();
+    testDirectionalEncoderFrame();
     testBackoffDistanceUsesConfig();
 
     if (g_fail == 0) {

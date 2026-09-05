@@ -19,6 +19,7 @@ enum class HomePhase : uint8_t {
     BACKOFF_SETTLE_WAIT,  // Stage 4b: settle 30ms sau khi dừng đột ngột từ pha quét (HOMING_BACKOFF_SETTLE_MS, non-blocking)
     SCAN_SLOW,            // Stage 5: tiếp cận lại cữ ở tốc độ chậm -> mốc chính xác
     SCAN_MAX,             // Stage 6: quét FAST tới cữ đối diện
+    LEG1_BACKOFF,         // Stage 5b: lùi an toàn khỏi cữ 1 trước khi bắt đầu quét cữ 2
     CENTERING,            // Stage 7: chạy về tâm cơ khí / MIN+offset (J3) bằng bước tương đối
     VERIFY,               // Stage 8: chờ EMA AS5600 ổn định, đối chiếu encoder vs vị trí mong đợi, trim nếu lệch
     VERIFY_SETTLE_WAIT,   // Stage 8b: chờ ENC_SETTLE_MS=350 sau CENTERING trước khi VERIFY (non-blocking)
@@ -28,8 +29,8 @@ enum class HomePhase : uint8_t {
 /**
  * FSM homing tuần tự J1 -> J2 -> J3 -> J4 — kiến trúc quét 2 cữ, 2 tốc độ:
  *  - J1, J2, J3: endstop vật lý MIN+MAX — điểm chạm chậm xác định qua latch ISR (±1 bước).
- *  - J4:         không endstop — chạm xác định qua StallGuard (fast) + step-lag encoder
- *                (fast & slow); vị trí chạm slow được BÙ trừ độ trễ cửa sổ phát hiện.
+ *  - J4:         không endstop — chỉ nhận chạm khi StallGuard và step-lag AS5600 cùng
+ *                xác nhận (fast & slow); vị trí chạm slow được BÙ trừ độ trễ cửa sổ phát hiện.
  *  - J1/J2/J4:   home tại TÂM cơ khí (chạm chậm 2 cữ). J3: home tại MIN endstop + offset.
  *  - J5, J6:     A4988 — chỉ Set-Home thủ công qua web, FSM bỏ qua.
  * Chuỗi mỗi khớp: WARMUP -> SCAN_MIN(fast) -> BACKOFF -> SLOW -> SCAN_MAX(fast) ->
@@ -84,6 +85,9 @@ private:
     // vị trí chạm); encDeltaDeg = độ dịch encoder trong cửa sổ. Rotor còn chạy tự do thì
     // tự cuộn mốc và trả false.
     [[nodiscard]] bool stallWindowCheck(uint8_t axis, Motor& m, float& encDeltaDeg);
+    [[nodiscard]] bool exceededSecondSideTravel(const Motor& m) const;
+    // SG thấp liên tiếp là điều kiện cần, luôn ghép với stallWindowCheck() cho J4.
+    [[nodiscard]] bool stallGuardConfirmed(Motor& m, uint32_t now);
 
     void finishJoint(bool ok);
     void retryOrFail();
@@ -104,7 +108,11 @@ private:
     HomePhase phase_{HomePhase::IDLE};
     uint32_t phaseStartMs_{0};
     uint32_t lastPollMs_{0};
+    uint32_t lastSgPollMs_{0};
     uint8_t tmcStallCount_{0};
+    uint16_t lastSgResult_{1023};
+    uint16_t minSgResult_{1023};
+    uint16_t maxSgResult_{0};
 
     // Scan state (J1..J4)
     float encFirstRaw_{0.0f};   // raw encoder tại cữ ĐẦU TIÊN (chạm chậm)

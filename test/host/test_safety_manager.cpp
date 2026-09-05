@@ -75,15 +75,15 @@ static void test_tryClear_reject_when_pressed() {
   else CHECK(false, "tryClear_reject_when_pressed");
 }
 
-static void test_tryClear_reject_when_drift() {
+static void test_tryClear_acknowledges_drift_after_endstop_release() {
   MockEndstops es; es.setGpio(0, EndstopWhich::MIN, true); // not pressed
   MockJointModel jm; jm.setDriftFault(true);
   SafetyManager sm(&es,&jm);
-  sm.assertEStop("drift test");
+  sm.notifyFault("drift test");
   bool cleared = sm.tryClearFault();
-  bool ok = (!cleared) && (sm.state()==SafetyState::E_STOP) && jm.hasAnyDriftFault();
-  if (ok) PASS("tryClear_reject_when_drift");
-  else CHECK(false, "tryClear_reject_when_drift");
+  bool ok = cleared && (sm.state()==SafetyState::NORMAL) && !jm.hasAnyDriftFault() && sm.isMotionAllowed();
+  if (ok) PASS("tryClear_acknowledges_drift_after_endstop_release");
+  else CHECK(false, "tryClear_acknowledges_drift_after_endstop_release");
 }
 
 static void test_tryClear_success_clears() {
@@ -101,6 +101,18 @@ static void test_tryClear_success_clears() {
   ok = ok && (!es.anyLatched());
   if (ok) PASS("tryClear_success_clears");
   else CHECK(false, "tryClear_success_clears");
+}
+
+static void test_manual_release_ignores_endstop() {
+  MockEndstops es; es.setGpio(0, EndstopWhich::MIN, true);
+  MockJointModel jm;
+  SafetyManager sm(&es, &jm);
+  sm.assertManualRelease(true);
+  es.setGpio(0, EndstopWhich::MIN, false);
+  sm.isrNotify(0, EndstopWhich::MIN, 1000000);
+  sm.pollEndstops(1060000);
+  CHECK(sm.state() == SafetyState::NORMAL && !sm.anyLatched(),
+        "manual release ignores endstop E_STOP/latch");
 }
 
 static void test_isMotionAllowed_matrix() {
@@ -179,8 +191,9 @@ int main() {
   test_low_after_50ms_latches_estop();
   test_homing_no_estop();
   test_tryClear_reject_when_pressed();
-  test_tryClear_reject_when_drift();
+  test_tryClear_acknowledges_drift_after_endstop_release();
   test_tryClear_success_clears();
+  test_manual_release_ignores_endstop();
   test_isMotionAllowed_matrix();
   test_anyLatched_and_assertEStop();
   test_debounce_exact_boundary_and_glitch_recovery();

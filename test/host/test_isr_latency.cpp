@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <chrono>
 #include <atomic>
+#include <fstream>
+#include <string>
 
 static int g_fail = 0;
 static int g_pass = 0;
@@ -28,6 +30,12 @@ struct FakeIsrCtx {
 static inline void fakeIsrHandler(FakeIsrCtx* c, int64_t nowUs) {
   c->pending.store(true, std::memory_order_relaxed);
   c->isrTime.store(nowUs, std::memory_order_relaxed);
+}
+
+static std::string readSource(const char* path) {
+  std::ifstream in(path);
+  if (!in) return {};
+  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
 static void test_isr_no_delay() {
@@ -72,7 +80,6 @@ static void test_isr_delegates_to_safety_manager() {
   es.setGpio(1, EndstopWhich::MAX, false); // LOW = pressed
   sm.isrNotify(1, EndstopWhich::MAX, 3000000);
   sm.pollEndstops(3000000 + 40000); // 40ms < debounce => not yet latched
-  bool notYet = !sm.anyLatched() || !sm.isLatched(1, EndstopWhich::MAX);
   // At least the channel 1 should not yet be latched before debounce (but other channels also false)
   CHECK(!sm.isLatched(1, EndstopWhich::MAX), "isr delegates: before debounce not latched");
 
@@ -95,10 +102,32 @@ static void test_isr_homing_no_estop() {
   else CHECK(false, "isr_homing_no_estop");
 }
 
+static void test_isr_stops_pulse_before_debounce() {
+  const std::string source = readSource("src/endstop.cpp");
+  const size_t handler = source.find("Endstops::isrHandler");
+  const size_t stop = source.find("c->motor->stopFromISR()", handler);
+  const size_t pending = source.find("c->pending.store", handler);
+  const bool ok = handler != std::string::npos && stop != std::string::npos &&
+                  pending != std::string::npos && stop < pending;
+  if (ok) PASS("isr_stops_pulse_before_debounce");
+  else CHECK(false, "ISR must stop the affected pulse train before debounce bookkeeping");
+}
+
+static void test_stop_all_preempts_queue() {
+  const std::string source = readSource("src/arm.cpp");
+  const bool hasMailbox = source.find("stopRequested_.store(true") != std::string::npos;
+  const bool hasEarlyPoll = source.find("stopRequested_.exchange(false") != std::string::npos;
+  const bool clearsQueue = source.find("xQueueReset(queue)") != std::string::npos;
+  if (hasMailbox && hasEarlyPoll && clearsQueue) PASS("stop_all_preempts_queue");
+  else CHECK(false, "STOP_ALL must use an out-of-band request and clear queued motion");
+}
+
 int main() {
   test_isr_no_delay();
   test_isr_delegates_to_safety_manager();
   test_isr_homing_no_estop();
+  test_isr_stops_pulse_before_debounce();
+  test_stop_all_preempts_queue();
 
   if (g_fail == 0) {
     std::printf("ALL PASSED (%d tests)\n", g_pass);

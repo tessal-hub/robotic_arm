@@ -53,6 +53,11 @@ void SafetyManager::isrNotify(uint8_t axis, EndstopWhich which, int64_t isrTimeU
 }
 
 void SafetyManager::pollEndstops(uint64_t nowUs) {
+  if (manualReleaseActive_) {
+    for (auto &row : pending_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
+    for (auto &row : latched_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
+    return;
+  }
   for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
     for (uint8_t wi = 0; wi < 2; ++wi) {
       if (!pending_[a][wi].load(std::memory_order_relaxed)) continue;
@@ -109,6 +114,16 @@ void SafetyManager::assertHoming(bool active) {
   }
 }
 
+void SafetyManager::assertManualRelease(bool active) noexcept {
+  manualReleaseActive_ = active;
+  if (!active) return;
+  for (auto &row : pending_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
+  for (auto &row : latched_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
+  if (state_.load(std::memory_order_acquire) == SafetyState::E_STOP) {
+    state_.store(SafetyState::NORMAL, std::memory_order_release);
+  }
+}
+
 void SafetyManager::assertEStop(const char* reason) {
   (void)reason;
   state_.store(SafetyState::E_STOP, std::memory_order_release);
@@ -128,9 +143,10 @@ void SafetyManager::notifyFault(const char* reason) {
 bool SafetyManager::tryClearFault() {
   bool pressed = false;
   if (anyPressed_) pressed = anyPressed_();
-  bool drift = false;
-  if (hasDrift_) drift = hasDrift_();
-  if (pressed || drift) return false;
+  // A drift latch is precisely what CLEAR_FAULT acknowledges. Rejecting it here
+  // made the recovery path unreachable: clearDrift_() below could never run.
+  // A physically pressed endstop remains a hard gate for restart.
+  if (pressed) return false;
   for (auto &row : latched_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
   for (auto &row : pending_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
   // pendingTime not needed clear but for completeness

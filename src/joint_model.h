@@ -30,6 +30,7 @@ public:
     void attachNvs(NvsStore* nvs);
 
     [[nodiscard]] static float stepsPerDegree(uint8_t axis);
+    [[nodiscard]] static bool hasMeasuredCalibration(uint8_t axis) noexcept;
     [[nodiscard]] static int64_t degreesToSteps(uint8_t axis, float deg);
     [[nodiscard]] static float stepsToDegrees(uint8_t axis, int64_t steps);
     [[nodiscard]] static float wrap180(float deg);

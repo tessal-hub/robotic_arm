@@ -76,7 +76,7 @@ bool HomingController::startAxis(uint8_t axis) {
 }
 
 bool HomingController::homeAtMinOffset(uint8_t axis) const noexcept {
-    // J3 (2): home = endstop MIN + offset (2.5°). J1/J2/J4: home = TÂM cơ khí giữa 2 cữ.
+    // J3 (2): home = endstop MIN + offset (2.5°). Ra khỏi cữ MIN rồi chốt home ngay tại đó.
     return axis == 2;
 }
 
@@ -107,11 +107,13 @@ void HomingController::beginScan() {
     pendingBackoffCw_ = false;
     phaseStartMs_ = millis();
     lastPollMs_ = millis();
-    // Xoá latch cũ không phải press thật (cả MIN và MAX)
+    // Xoá latch cũ không phải press thật (cả MIN và MAX) và bảo đảm enable cả 2 cữ
     for (const auto w : {EndstopWhich::MIN, EndstopWhich::MAX}) {
-        if (es->hasPin(curAxis_, w) && es->isLatched(curAxis_, w) &&
-            !es->isPressed(curAxis_, w)) {
-            es->clearLatch(curAxis_, w);
+        if (es != nullptr) {
+            es->setPinEnabled(curAxis_, w, true);
+            if (es->hasPin(curAxis_, w) && es->isLatched(curAxis_, w) && !es->isPressed(curAxis_, w)) {
+                es->clearLatch(curAxis_, w);
+            }
         }
     }
     enterWarmup();
@@ -187,22 +189,24 @@ void HomingController::enterScanMin() {
 void HomingController::enterScanMax() {
     Motor& m = *motors[curAxis_];
     m.setSpeed(DEFAULT_AXIS_HOMING_SPEEDS[curAxis_]);
+    const EndstopWhich targetSide = (firstSide_ == EndstopWhich::MIN) ? EndstopWhich::MAX : EndstopWhich::MIN;
     if (es != nullptr) {
         es->clearLatch(curAxis_, EndstopWhich::MIN);
         es->clearLatch(curAxis_, EndstopWhich::MAX);
+        es->setPinEnabled(curAxis_, firstSide_, false);
+        es->setPinEnabled(curAxis_, targetSide, true);
     }
-    // FIX #2: Reset backoffExtend_ khi chuyển sang quét cữ thứ hai.
-    // Trước đây backoffExtend_ giữ nguyên từ lần backoff cữ ĐẦU TIÊN → bắt đầu
-    // ở lần nới rộng giữa chừng thay vì từ mức cơ bản, gây "jammed" ảo.
     backoffExtend_ = 0;
-    cwApproach_ = JointModel::cwForDelta(curAxis_, +360.0f);
+    cwApproach_ = JointModel::cwForDelta(curAxis_, (firstSide_ == EndstopWhich::MIN) ? +360.0f : -360.0f);
     tmcStallCount_ = 0;
     resetStallWindow(m);
     m.runContinuous(cwApproach_);
     phase_ = HomePhase::SCAN_MAX;
     phaseStartMs_ = millis();
     lastPollMs_ = millis();
-    Serial.printf("[HOME] J%u: SCAN_MAX fast (cw=%d)\n", curAxis_ + 1, static_cast<int>(cwApproach_));
+    Serial.printf("[HOME] J%u: SCAN_MAX fast (cw=%d, target=%s)\n",
+                  curAxis_ + 1, static_cast<int>(cwApproach_),
+                  (targetSide == EndstopWhich::MIN) ? "MIN" : "MAX");
 }
 
 void HomingController::enterScanBackoff() {
@@ -251,6 +255,11 @@ void HomingController::resetStallWindow(Motor& m) {
     lastCheckSteps_ = m.getAbsoluteSteps();
     lastCheckEnc_ = lastStallEnc_;
     encStallCount_ = 0;
+    lastSgPollMs_ = 0;
+    lastSgResult_ = 1023;
+    minSgResult_ = 1023;
+    maxSgResult_ = 0;
+    tmcStallCount_ = 0;
 }
 
 bool HomingController::stallWindowCheck(uint8_t axis, Motor& m, float& encDeltaDeg) {
@@ -265,7 +274,12 @@ bool HomingController::stallWindowCheck(uint8_t axis, Motor& m, float& encDeltaD
     const int64_t stepDelta = llabs(cur - lastCheckSteps_);
     if (stepDelta < windowSteps) return false;
     const float curEnc = jm->rawEncoder(axis);
-    encDeltaDeg = fabsf(curEnc - lastCheckEnc_);
+    // Một cú nhảy NGƯỢC chiều ở hard-stop không phải bằng chứng rotor vẫn tiến.
+    // encDirMult_ được đo trong WARMUP, nên so raw encoder theo đúng chiều step hiện tại.
+    const float expectedRawSign = ((cur >= lastCheckSteps_) ? 1.0f : -1.0f) *
+                                  static_cast<float>(AXIS_STEP_SIGN[axis]) * encDirMult_;
+    const float signedEncDelta = (curEnc - lastCheckEnc_) * expectedRawSign;
+    encDeltaDeg = std::max(0.0f, signedEncDelta);
     if (encDeltaDeg >= HOMING_STALL_ENC_DELTA_DEG) {
         // Rotor đang di chuyển bình thường -> cuộn cửa sổ
         lastCheckSteps_ = cur;
@@ -285,6 +299,33 @@ bool HomingController::stallWindowCheck(uint8_t axis, Motor& m, float& encDeltaD
     return false;
 }
 
+bool HomingController::exceededSecondSideTravel(const Motor& m) const {
+    return curAxis_ == 3 && secondSide_ &&
+           llabs(m.getAbsoluteSteps()) >= JointModel::degreesToSteps(
+               curAxis_, HOMING_J4_MAX_MECHANICAL_SPAN_DEG);
+}
+
+bool HomingController::stallGuardConfirmed(Motor& m, uint32_t now) {
+    if (!m.isTmc()) return false;
+    if (now - lastSgPollMs_ < HOMING_POLL_MS) {
+        return tmcStallCount_ >= STALL_CONSECUTIVE_POLLS;
+    }
+
+    lastSgPollMs_ = now;
+    lastSgResult_ = m.getSGResult();
+    if (lastSgResult_ != 1023) {
+        minSgResult_ = std::min(minSgResult_, lastSgResult_);
+        maxSgResult_ = std::max(maxSgResult_, lastSgResult_);
+    }
+    if (lastSgResult_ == 1023 || lastSgResult_ > STALL_SG_LEVEL) {
+        tmcStallCount_ = 0;
+        return false;
+    }
+
+    if (tmcStallCount_ < STALL_CONSECUTIVE_POLLS) ++tmcStallCount_;
+    return tmcStallCount_ >= STALL_CONSECUTIVE_POLLS;
+}
+
 void HomingController::enterCenteringScan() {
     Motor& m = *motors[curAxis_];
     // ---- Stage 5: crosscheck — tâm + tỷ số steps/độ thực tế từ góc tích lũy unwrapped ----
@@ -295,12 +336,15 @@ void HomingController::enterCenteringScan() {
                                               es->hasPin(curAxis_, EndstopWhich::MAX));
 
     // Integrity check:
-    // Với trục không endstop (J4): kiểm tra contactSpan_ cơ khí phải >= 45° góc khớp (chặn kẹt cữ ảo).
-    const int64_t minMechanicalSpanSteps = JointModel::degreesToSteps(curAxis_, 45.0f);
+    // Với trục không endstop (J4): kiểm tra contactSpan_ cơ khí phải đạt sàn
+    // commissioning để chặn kẹt cữ ảo nhưng không loại nhầm hành trình thực tế.
+    const int64_t minMechanicalSpanSteps =
+        JointModel::degreesToSteps(curAxis_, HOMING_MIN_MECHANICAL_SPAN_DEG);
     if (!hasEndstop && contactSpan_ < minMechanicalSpanSteps) {
-        Serial.printf("[HOME] J%u: CROSSCHECK contactSpan %lld < %lld steps (45 deg) — ket cu ao, HUY KHOP\n",
+        Serial.printf("[HOME] J%u: CROSSCHECK contactSpan %lld < %lld steps (%.1f deg) — ket cu ao, HUY KHOP\n",
                       curAxis_ + 1, static_cast<long long>(contactSpan_),
-                      static_cast<long long>(minMechanicalSpanSteps));
+                      static_cast<long long>(minMechanicalSpanSteps),
+                      HOMING_MIN_MECHANICAL_SPAN_DEG);
         finishJoint(false);
         return;
     }
@@ -310,10 +354,22 @@ void HomingController::enterCenteringScan() {
                           DEFAULT_AXIS_GEAR_RATIOS[curAxis_]) / 360.0f;
     float measuredSpd = cfgSpd;
     float ratio = 1.0f;
+    if (!hasEndstop && spanRaw < HOMING_MIN_ENC_SPAN_DEG[curAxis_]) {
+        Serial.printf("[HOME] J%u: CROSSCHECK encoder span %.2f < %.2f deg — HUY KHOP\n",
+                      curAxis_ + 1, spanRaw, HOMING_MIN_ENC_SPAN_DEG[curAxis_]);
+        finishJoint(false);
+        return;
+    }
     if (spanRaw >= HOMING_MIN_ENC_SPAN_DEG[curAxis_]) {
         measuredSpd = static_cast<float>(contactSpan_) / spanRaw;
         ratio = (cfgSpd > 0.0f) ? (measuredSpd / cfgSpd) : 1.0f;
         if (ratio < MEASURED_RATIO_MIN || ratio > MEASURED_RATIO_MAX) {
+            if (!hasEndstop) {
+                Serial.printf("[HOME] J%u: CROSSCHECK encoder ratio %.2f ngoai [%g,%g] — HUY KHOP\n",
+                              curAxis_ + 1, ratio, MEASURED_RATIO_MIN, MEASURED_RATIO_MAX);
+                finishJoint(false);
+                return;
+            }
             measuredSpd = cfgSpd;
             Serial.printf("[HOME] J%u: measured ratio %.2f ngoai [%g,%g] -> giu config\n",
                           curAxis_ + 1, ratio, MEASURED_RATIO_MIN, MEASURED_RATIO_MAX);
@@ -328,15 +384,8 @@ void HomingController::enterCenteringScan() {
 
     // ---- Chạy về home bằng bước tương đối (rotor đi tự do -> chính xác từng bước);
     //      VERIFY sẽ đối chiếu encoder độc lập và trim nếu steps/deg đo được còn lệch. ----
-    int64_t stepsBack;
-    if (homeAtMinOffset(curAxis_)) {
-        const int64_t offsetSteps = JointModel::degreesToSteps(curAxis_, HOME_OFFSET_FROM_MIN_DEG);
-        // firstSide == MIN: cữ chạm thứ hai là MAX, đang đứng ở MAX -> lùi (contactSpan_ - offsetSteps) về MIN + 2.5°.
-        // firstSide == MAX: cữ chạm thứ hai là MIN, đang đứng ở MIN -> lùi offsetSteps về MIN + 2.5°.
-        stepsBack = (firstSide_ == EndstopWhich::MIN) ? (contactSpan_ - offsetSteps) : offsetSteps;
-    } else {
-        stepsBack = contactSpan_ / 2;
-    }
+    // Các trục quét 2 cữ (J1, J2, J4): chạy về tâm đối xứng cơ học giữa 2 cữ
+    int64_t stepsBack = contactSpan_ / 2;
     if (stepsBack < 0) stepsBack = 0;
     const bool cwBack = !cwApproach_; // quay về phía cữ chạm đầu tiên
     m.setSpeed(DEFAULT_AXIS_HOMING_SPEEDS[curAxis_]);
@@ -363,8 +412,10 @@ void HomingController::enterVerify() {
                                                 es->hasPin(curAxis_, EndstopWhich::MAX));
 
     if (hasEndstop) {
-        Serial.printf("[HOME] J%u: VERIFY OK (co endstop — chot home tai tam co khi, enc_zero=%.1f)\n",
-                      curAxis_ + 1, raw);
+        Serial.printf("[HOME] J%u: VERIFY OK (co endstop — %s, enc_zero=%.1f)\n",
+                      curAxis_ + 1,
+                      homeAtMinOffset(curAxis_) ? "chot home tai MIN+offset" : "chot home tai tam co khi",
+                      raw);
     } else {
         Serial.printf("[HOME] J%u: VERIFY OK (sensorless hard-stop center, enc_zero=%.1f)\n",
                       curAxis_ + 1, raw);
@@ -447,33 +498,6 @@ void HomingController::tickScan(uint32_t now, Motor& m) {
                               jm->angleFromSteps(curAxis_), jm->rawEncoder(curAxis_));
             }
 
-            // 1. Endstop vật lý (leg 1 chấp nhận cả 2 cữ — lắp ngược có thể chạm MAX trước)
-            EndstopWhich hit = targetSide;
-            bool hitAny = false;
-            if (es != nullptr) {
-                if (firstLeg) {
-                    for (const auto w : {EndstopWhich::MIN, EndstopWhich::MAX}) {
-                        if (es->hasPin(curAxis_, w) &&
-                            (es->isLatched(curAxis_, w) || es->isPressed(curAxis_, w))) {
-                            if (es->isPressed(curAxis_, w) || !m.isRunning()) {
-                                hit = w;
-                                hitAny = true;
-                                break;
-                            }
-                            es->clearLatch(curAxis_, w); // latch nhiễu khi motor vẫn quay
-                        }
-                    }
-                } else if (es->hasPin(curAxis_, targetSide) &&
-                           (es->isLatched(curAxis_, targetSide) || es->isPressed(curAxis_, targetSide))) {
-                    if (es->isPressed(curAxis_, targetSide) || !m.isRunning()) {
-                        hitAny = true;
-                        es->consumeLatch(curAxis_, targetSide);
-                    } else {
-                        es->clearLatch(curAxis_, targetSide);
-                    }
-                }
-            }
-
             // Bảo vệ leg 2: StallGuard/step-lag chỉ bật sau khi đã rời cữ đầu đủ xa (> 10°)
             const int64_t curSteps = m.getAbsoluteSteps();
             bool movedFarEnough = true;
@@ -485,46 +509,69 @@ void HomingController::tickScan(uint32_t now, Motor& m) {
                 }
             }
 
-            // 2. TMC2209 StallGuard4 (chỉ pha FAST — ở tốc độ chậm SG không tin cậy)
-            if (!hitAny && m.isTmc() && movedFarEnough &&
-                (now - phaseStartMs_ > FAST_CONTACT_GRACE_MS) && (now - lastPollMs_ >= 20)) {
-                lastPollMs_ = now;
-                const uint16_t sg = m.getSGResult();
-                if (sg <= STALL_SG_LEVEL && sg != 1023) {
-                    ++tmcStallCount_;
-                    if (tmcStallCount_ >= 2) {
-                        hitAny = true;
-                        Serial.printf("[HOME] J%u: SCAN_%s SG stall (sg=%u <= %u)\n",
-                                      curAxis_ + 1, firstLeg ? "MIN" : "MAX", sg, STALL_SG_LEVEL);
+            // 1. Endstop vật lý (cữ có bật ngắt enable)
+            EndstopWhich hit = targetSide;
+            bool hitAny = false;
+            if (es != nullptr) {
+                for (const auto w : {EndstopWhich::MIN, EndstopWhich::MAX}) {
+                    if (!es->hasPin(curAxis_, w) || !es->isPinEnabled(curAxis_, w)) continue;
+
+                    // Chỉ công tắc ĐANG BỊ ĐÈ THẬT SỰ (isPressed) hoặc đã được SafetyManager xác nhận (isLatched)
+                    // mới được coi là tiếp xúc cơ khí. Tuyệt đối không nhận diện cữ nếu chân đang không nhấn (glitch)!
+                    const bool pressed = es->isPressed(curAxis_, w);
+                    const bool latched = es->isLatched(curAxis_, w);
+
+                    if (pressed || latched) {
+                        if (firstLeg || movedFarEnough) {
+                            hit = w;
+                            hitAny = true;
+                            break;
+                        }
+                        es->clearLatch(curAxis_, w);
+                    } else if (es->isrPending(curAxis_, w)) {
+                        // isrPending = true nhưng chân hiện tại không nhấn -> xung nhiễu thoáng qua, xoá cờ!
+                        es->clearLatch(curAxis_, w);
                     }
-                } else if (sg > STALL_SG_LEVEL && sg != 1023) {
-                    tmcStallCount_ = 0;
                 }
             }
 
-            // 3. Step-lag encoder — CHỈ cho trục không endstop (J4, là sensor dò độc lập).
-            //    Với J1..J3, encoder đóng băng (ACK mà góc đứng yên) sẽ tạo stall ảo chặn
-            //    trước endstop thật → fake contact + fake span; pha FAST của trục có
-            //    endstop chỉ tin endstop latch + StallGuard (2 sensor độc lập với encoder).
-            //    Step-lag vẫn giữ ở pha SLOW làm fallback khi endstop đứt dây (span
-            //    integrity check ở CROSSCHECK sẽ chặn fake span).
+            const bool hasEndstop = (es != nullptr) && (es->hasPin(curAxis_, EndstopWhich::MIN) ||
+                                                        es->hasPin(curAxis_, EndstopWhich::MAX));
+
+            if (!hasEndstop && exceededSecondSideTravel(m)) {
+                m.stop();
+                Serial.printf("[HOME] J4: SCAN_MAX vuot %.1f deg khong co cu thu 2 — HUY KHOP\n",
+                              HOMING_J4_MAX_MECHANICAL_SPAN_DEG);
+                finishJoint(false);
+                return;
+            }
+
             float encDelta = 0.0f;
-            const bool hasEndstop = es->hasPin(curAxis_, EndstopWhich::MIN) ||
-                                    es->hasPin(curAxis_, EndstopWhich::MAX);
-            if (!hitAny && !hasEndstop && movedFarEnough &&
-                (now - phaseStartMs_ > FAST_CONTACT_GRACE_MS) &&
-                stallWindowCheck(curAxis_, m, encDelta)) {
+            const bool sensorlessReady = !hasEndstop && movedFarEnough &&
+                                         (now - phaseStartMs_ > FAST_CONTACT_GRACE_MS);
+            const bool encoderStalled = sensorlessReady && stallWindowCheck(curAxis_, m, encDelta);
+            const bool sgStalled = sensorlessReady && stallGuardConfirmed(m, now);
+            if (!hitAny && sgStalled && encoderStalled) {
                 hitAny = true;
-                Serial.printf("[HOME] J%u: SCAN_%s stall (encDelta=%.2f < %.2f deg)\n",
+                Serial.printf("[HOME] J%u: SCAN_%s SENSORLESS stall (sg=%u <= %u, range=%u..%u, encDelta=%.2f < %.2f deg)\n",
                               curAxis_ + 1, firstLeg ? "MIN" : "MAX",
+                              lastSgResult_, STALL_SG_LEVEL,
+                              minSgResult_, maxSgResult_,
                               encDelta, HOMING_STALL_ENC_DELTA_DEG);
             }
 
             // 4. Motor dừng sớm mà không có contact nào (ISR dừng nhầm / UART từ chối chạy)
             if (!hitAny && !m.isRunning() && (now - phaseStartMs_ > 500)) {
                 m.stop();
-                Serial.printf("[HOME] J%u: SCAN_%s motor stopped early — khong xac dinh duoc cu\n",
-                              curAxis_ + 1, firstLeg ? "MIN" : "MAX");
+                Serial.printf("[HOME] J%u: SCAN_%s motor stopped early (hitAny=%d, isrP_MIN=%d isrP_MAX=%d p_MIN=%d p_MAX=%d en_MIN=%d en_MAX=%d)\n",
+                              curAxis_ + 1, firstLeg ? "MIN" : "MAX",
+                              static_cast<int>(hitAny),
+                              es ? es->isrPending(curAxis_, EndstopWhich::MIN) : 0,
+                              es ? es->isrPending(curAxis_, EndstopWhich::MAX) : 0,
+                              es ? es->isPressed(curAxis_, EndstopWhich::MIN) : 0,
+                              es ? es->isPressed(curAxis_, EndstopWhich::MAX) : 0,
+                              es ? es->isPinEnabled(curAxis_, EndstopWhich::MIN) : 0,
+                              es ? es->isPinEnabled(curAxis_, EndstopWhich::MAX) : 0);
                 finishJoint(false); return;
             }
 
@@ -599,22 +646,39 @@ void HomingController::tickScan(uint32_t now, Motor& m) {
 
             // 1. Endstop của cữ đang dò (J1..J3) — nguồn chính xác nhất
             bool hitEndstop = false;
-            if (es != nullptr && es->hasPin(curAxis_, approachSide_) &&
-                (es->isLatched(curAxis_, approachSide_) || es->isPressed(curAxis_, approachSide_))) {
-                if (es->isPressed(curAxis_, approachSide_) || !m.isRunning()) {
+            if (es != nullptr && es->hasPin(curAxis_, approachSide_) && es->isPinEnabled(curAxis_, approachSide_)) {
+                if (es->isPressed(curAxis_, approachSide_)) {
                     hitEndstop = true;
-                } else {
+                } else if (es->isLatched(curAxis_, approachSide_)) {
+                    if (!m.isRunning()) hitEndstop = true;
+                    else es->clearLatch(curAxis_, approachSide_);
+                } else if (es->isrPending(curAxis_, approachSide_)) {
                     es->clearLatch(curAxis_, approachSide_);
                 }
             }
 
-            // 2. Step-lag encoder (primary cho J4; fallback endstop hỏng). Bỏ poll SG ở
-            // pha SLOW: SG4 không tin cậy ở tốc độ thấp, dễ false-trip.
+            const bool hasEndstop = (es != nullptr) && (es->hasPin(curAxis_, EndstopWhich::MIN) ||
+                                                        es->hasPin(curAxis_, EndstopWhich::MAX));
+
+            if (!hasEndstop && exceededSecondSideTravel(m)) {
+                m.stop();
+                Serial.printf("[HOME] J4: SCAN_SLOW vuot %.1f deg khong co cu thu 2 — HUY KHOP\n",
+                              HOMING_J4_MAX_MECHANICAL_SPAN_DEG);
+                finishJoint(false);
+                return;
+            }
+
             float encDelta = 0.0f;
             bool hitStall = false;
-            if (!hitEndstop && (now - phaseStartMs_ > SLOW_CONTACT_GRACE_MS) &&
-                stallWindowCheck(curAxis_, m, encDelta)) {
+            const bool sensorlessReady = !hasEndstop && (now - phaseStartMs_ > SLOW_CONTACT_GRACE_MS);
+            const bool encoderStalled = sensorlessReady && stallWindowCheck(curAxis_, m, encDelta);
+            const bool sgStalled = sensorlessReady && stallGuardConfirmed(m, now);
+            if (!hitEndstop && sgStalled && encoderStalled) {
                 hitStall = true;
+                Serial.printf("[HOME] J%u: SLOW SENSORLESS stall (sg=%u <= %u, range=%u..%u, encDelta=%.2f < %.2f deg)\n",
+                              curAxis_ + 1, lastSgResult_, STALL_SG_LEVEL,
+                              minSgResult_, maxSgResult_,
+                              encDelta, HOMING_STALL_ENC_DELTA_DEG);
             }
 
             // 3. Motor dừng sớm không rõ lý do
@@ -643,25 +707,74 @@ void HomingController::tickScan(uint32_t now, Motor& m) {
             }
             if (hitEndstop && es != nullptr) es->consumeLatch(curAxis_, approachSide_);
 
+            if (homeAtMinOffset(curAxis_)) {
+                // J3: Đã chạm cữ MIN chính xác — lùi ra khỏi cữ MIN một đoạn offset (2.5°) rồi chốt HOME ngay tại đó!
+                encFirstRaw_ = (jm != nullptr) ? jm->rawEncoder(curAxis_) : 0.0f;
+                firstSide_ = approachSide_;
+                m.setAbsoluteSteps(0);
+                const int64_t offsetSteps = JointModel::degreesToSteps(curAxis_, HOME_OFFSET_FROM_MIN_DEG);
+                const bool cwBack = !cwApproach_; // quay ngược lại để rời khỏi cữ MIN (cw = 1)
+                m.setSpeed(DEFAULT_AXIS_HOMING_SPEEDS[curAxis_]);
+                if (offsetSteps > 0) m.run(cwBack, static_cast<uint32_t>(offsetSteps));
+                phase_ = HomePhase::CENTERING;
+                phaseStartMs_ = now;
+                settleStartMs_ = now;
+                Serial.printf("[HOME] J%u: MIN SLOW CONTACT (enc=%.1f) -> ra khoi cu MIN %lld steps (cw=%d) roi chot HOME\n",
+                              curAxis_ + 1, encFirstRaw_, static_cast<long long>(offsetSteps), static_cast<int>(cwBack));
+                return;
+            }
+
             if (!secondSide_) {
-                // Cữ ĐẦU TIÊN — gốc bước mới tại điểm chạm đã bù
-                encFirstRaw_ = jm->rawEncoder(curAxis_);
+                // Cữ ĐẦU TIÊN — gốc bước mới tại điểm chạm đã bù (J1, J2, J4 quét 2 cữ để lấy tâm)
+                encFirstRaw_ = (jm != nullptr) ? jm->rawEncoder(curAxis_) : 0.0f;
                 firstSide_ = approachSide_;
                 secondSide_ = true;
                 m.setAbsoluteSteps(cur - contactStep);
                 Serial.printf("[HOME] J%u: SLOW CONTACT #1 (%s, enc=%.1f, contact=%lld)\n",
                               curAxis_ + 1, (approachSide_ == EndstopWhich::MIN) ? "MIN" : "MAX",
                               encFirstRaw_, static_cast<long long>(contactStep));
-                enterScanMax();
+
+                // Lùi an toàn khỏi cữ 1 (5.0°) trước khi bắt đầu quét cữ 2.
+                // Vô hiệu hóa ngắt cữ 1 để tránh dội tiếp điểm / rung lắc khi motor đảo chiều làm dừng sớm.
+                const int64_t backoffSteps = JointModel::degreesToSteps(curAxis_, 5.0f);
+                const bool cwBack = !cwApproach_;
+                if (es != nullptr) {
+                    es->clearLatch(curAxis_, firstSide_);
+                    es->setPinEnabled(curAxis_, firstSide_, false);
+                }
+                m.setSpeed(DEFAULT_AXIS_HOMING_SPEEDS[curAxis_]);
+                if (backoffSteps > 0) m.run(cwBack, static_cast<uint32_t>(backoffSteps));
+                phase_ = HomePhase::LEG1_BACKOFF;
+                phaseStartMs_ = now;
+                settleStartMs_ = now;
+                Serial.printf("[HOME] J%u: LEG1 BACKOFF %lld steps (cw=%d) de roi khoi cu %s\n",
+                              curAxis_ + 1, static_cast<long long>(backoffSteps),
+                              static_cast<int>(cwBack), (firstSide_ == EndstopWhich::MIN) ? "MIN" : "MAX");
+                return;
             } else {
-                // Cữ THỨ HAI — đóng gói quét
-                encSecondRaw_ = jm->rawEncoder(curAxis_);
+                // Cữ THỨ HAI — đóng gói quét (J1, J2, J4)
+                encSecondRaw_ = (jm != nullptr) ? jm->rawEncoder(curAxis_) : 0.0f;
                 contactSpan_ = llabs(contactStep);
                 Serial.printf("[HOME] J%u: SLOW CONTACT #2 (%s, enc=%.1f, span=%lld)\n",
                               curAxis_ + 1, (approachSide_ == EndstopWhich::MIN) ? "MIN" : "MAX",
                               encSecondRaw_, static_cast<long long>(contactSpan_));
                 enterCenteringScan();
             }
+            return;
+        }
+        case HomePhase::LEG1_BACKOFF: {
+            if (now - phaseStartMs_ > HOMING_JOINT_TIMEOUT_MS) { m.stop(); finishJoint(false); return; }
+            if (m.isRunning()) {
+                settleStartMs_ = now;
+                return;
+            }
+            if (now - settleStartMs_ < HOMING_BACKOFF_SETTLE_MS) return;
+
+            if (es != nullptr) {
+                es->clearLatch(curAxis_, firstSide_);
+                es->consumeLatch(curAxis_, firstSide_);
+            }
+            enterScanMax();
             return;
         }
         case HomePhase::CENTERING: {
@@ -759,6 +872,11 @@ void HomingController::tick() {
 }
 
 void HomingController::finishJoint(bool ok) {
+    // Every failure path (including sensorless cross-check rejection) must leave
+    // the axis positively stopped.  Most callers already stop on contact, but
+    // making this idempotent prevents a stale pulse from keeping ArmController
+    // busy and blocking the next HOME_AXIS command.
+    if (motors[curAxis_] != nullptr) motors[curAxis_]->stop();
     // Clear pending backoff state so stale steps don't survive retry/cancel
     pendingBackoffSteps_ = 0;
     pendingBackoffCw_ = false;
@@ -773,6 +891,8 @@ void HomingController::finishJoint(bool ok) {
     if (es != nullptr) {
         es->clearLatch(curAxis_, EndstopWhich::MIN);
         es->clearLatch(curAxis_, EndstopWhich::MAX);
+        es->setPinEnabled(curAxis_, EndstopWhich::MIN, true);
+        es->setPinEnabled(curAxis_, EndstopWhich::MAX, true);
     }
     Serial.printf("[HOME] J%u: %s\n", curAxis_ + 1, ok ? "SETREF OK" : "FAILED");
 
@@ -786,6 +906,9 @@ void HomingController::finishJoint(bool ok) {
         beginScan();
     } else {
         active_ = false;
+        if (es != nullptr) {
+            es->clearAllLatches();
+        }
         if (safety_) safety_->assertHoming(false);
         lastOk_ = true;
         phase_ = HomePhase::IDLE;
@@ -824,8 +947,12 @@ void HomingController::cancel() {
     restoreDriverDefaults(curAxis_);
     if (jm != nullptr) jm->resyncFromEncoder(curAxis_);
     if (es != nullptr) {
-        es->clearLatch(curAxis_, EndstopWhich::MIN);
-        es->clearLatch(curAxis_, EndstopWhich::MAX);
+        for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
+            es->clearLatch(a, EndstopWhich::MIN);
+            es->clearLatch(a, EndstopWhich::MAX);
+            es->setPinEnabled(a, EndstopWhich::MIN, true);
+            es->setPinEnabled(a, EndstopWhich::MAX, true);
+        }
     }
     // Clear pending backoff state to avoid stale on next start
     pendingBackoffSteps_ = 0;
@@ -843,7 +970,7 @@ void HomingController::cancel() {
 String HomingController::toJson() const {
     static const char* PHASE_NAMES[] = {
         "idle", "warmup", "warmup_settle_wait", "scan_min", "scan_backoff",
-        "backoff_settle_wait", "scan_slow", "scan_max", "centering", "verify",
+        "backoff_settle_wait", "scan_slow", "scan_max", "leg1_backoff", "centering", "verify",
         "verify_settle_wait", "done"
     };
     static_assert(sizeof(PHASE_NAMES) / sizeof(PHASE_NAMES[0]) ==

@@ -10,7 +10,7 @@ bool WorkPlane::setThreePointCalibration(const Point3D& p1, const Point3D& p2, c
     if (len1 < 20.0f || len2 < 20.0f) {
         m_lastError = "LỖI: Các điểm hiệu chuẩn quá gần nhau (Khoảng cách tối thiểu 20mm)";
         m_isCalibrated = false;
-        m_enabled = false;
+        m_enabled.store(false, std::memory_order_release);
         return false;
     }
 
@@ -22,7 +22,7 @@ bool WorkPlane::setThreePointCalibration(const Point3D& p1, const Point3D& p2, c
     if (sinAngle < 0.1736f) {
         m_lastError = "LỖI SUY BIẾN: 3 điểm gần như thẳng hàng (Góc mở < 10°). Vui lòng chọn điểm P3 xa trục P1-P2.";
         m_isCalibrated = false;
-        m_enabled = false;
+        m_enabled.store(false, std::memory_order_release);
         return false;
     }
 
@@ -33,7 +33,7 @@ bool WorkPlane::setThreePointCalibration(const Point3D& p1, const Point3D& p2, c
     m_origin = p1;
 
     m_isCalibrated = true;
-    m_enabled = true;
+    m_enabled.store(true, std::memory_order_release);
     m_lastError = "";
 
     Serial.printf("[UCS] WorkPlane calibrated: Origin(%.1f, %.1f, %.1f), Normal(%.3f, %.3f, %.3f)\n",
@@ -42,14 +42,14 @@ bool WorkPlane::setThreePointCalibration(const Point3D& p1, const Point3D& p2, c
 }
 
 Point3D WorkPlane::toRobotXYZ(float u, float v, float wLift) const {
-    if (!m_enabled) {
+    if (!isEnabled()) {
         return {u, v, wLift}; // Fallback identity
     }
     return m_origin + (m_uAxis * u) + (m_vAxis * v) + (m_normal * wLift);
 }
 
 Point3D WorkPlane::fromRobotXYZ(const Point3D& robotP) const {
-    if (!m_enabled) {
+    if (!isEnabled()) {
         return robotP;
     }
     const Point3D d = robotP - m_origin;

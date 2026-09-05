@@ -1,5 +1,7 @@
 #include "nvs_store.h"
 
+#include <cmath>
+
 namespace {
 constexpr const char* NS = "arm-cfg";
 constexpr const char* WIFI_VALID_KEY = "wf_valid";
@@ -61,13 +63,15 @@ NvsStore::JointHome NvsStore::loadJointHome(uint8_t axis) const {
     if (h.valid) {
         snprintf(key, sizeof(key), "j%u_raw", axis);
         h.rawDeg = prefs_.getFloat(key, 0.0f);
-        if (h.rawDeg < 0.0f || h.rawDeg >= 360.0f) h.valid = false;
+        if (!std::isfinite(h.rawDeg) || h.rawDeg < 0.0f || h.rawDeg >= 360.0f) h.valid = false;
     }
     return h;
 }
 
 bool NvsStore::saveJointHome(uint8_t axis, float rawDeg) {
-    if (!ok_ || axis >= NUM_MOTORS) return false;
+    if (!ok_ || axis >= NUM_MOTORS || !std::isfinite(rawDeg) || rawDeg < 0.0f || rawDeg >= 360.0f) {
+        return false;
+    }
     char valueKey[12];
     char validKey[12];
     snprintf(valueKey, sizeof(valueKey), "j%u_raw", axis);
@@ -75,7 +79,13 @@ bool NvsStore::saveJointHome(uint8_t axis, float rawDeg) {
 
     if (prefs_.putBool(validKey, false) != 1) return false;
     if (prefs_.putFloat(valueKey, rawDeg) != sizeof(float)) return false;
-    return prefs_.putBool(validKey, true) == 1;
+    if (prefs_.putBool(validKey, true) != 1) return false;
+
+    // Verify both marker and payload immediately. This catches a failed flash
+    // commit instead of reporting a home as saved when boot would discard it.
+    const float stored = prefs_.getFloat(valueKey, NAN);
+    return prefs_.getBool(validKey, false) && std::isfinite(stored) &&
+           fabsf(stored - rawDeg) < 0.001f;
 }
 
 void NvsStore::clearJointHome(uint8_t axis) {
@@ -96,7 +106,9 @@ NvsStore::CalibData NvsStore::loadCalib(uint8_t axis) const {
         c.encSign = prefs_.getFloat(key, 1.0f);
         snprintf(key, sizeof(key), "j%u_mspd", axis);
         c.stepsPerDeg = prefs_.getFloat(key, 0.0f);
-        if (c.stepsPerDeg <= 0.0f) c.valid = false;
+        if (!std::isfinite(c.encSign) || !std::isfinite(c.stepsPerDeg) || c.stepsPerDeg <= 0.0f) {
+            c.valid = false;
+        }
     }
     return c;
 }

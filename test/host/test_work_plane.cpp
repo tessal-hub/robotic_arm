@@ -55,11 +55,18 @@ static void testTooCloseRejected() {
     CHECK(!wp.setThreePointCalibration(p1, p2, p3), "too close rejected");
 }
 
+static void testEnableRequiresCalibration() {
+    WorkPlane wp;
+    wp.setEnabled(true);
+    CHECK(!wp.isEnabled(), "cannot enable an uncalibrated work plane");
+}
+
 int main() {
     testIdentityWhenDisabled();
     testValidCalibration();
     testCollinearRejected();
     testTooCloseRejected();
+    testEnableRequiresCalibration();
     if (g_fail == 0) {
         std::printf("ALL PASSED (work plane)\n");
         return 0;

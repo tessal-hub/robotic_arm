@@ -65,7 +65,8 @@ bool Planner::submit(const Job& job) {
             Serial.printf("[PLAN] REJECT %s: %s at %d (cur %.1f,%.1f,%.1f)\n",
                           (job.shape == Shape::POINT)   ? "POINT"
                           : (job.shape == Shape::LINE) ? "LINE"
-                                                       : "CIRCLE",
+                          : (job.shape == Shape::CIRCLE) ? "CIRCLE"
+                                                       : "SQUARE",
                           vr.reason.c_str(), vr.failIndex, curPose.x, curPose.y, curPose.z);
             return false;
         }
@@ -99,6 +100,12 @@ bool Planner::submit(const Job& job) {
             prog_ = 0.0f;
             break;
         }
+        case Shape::SQUARE: {
+            if (job_.r <= 0.0f) return false;
+            totalLen_ = 4.0f * job_.r;
+            prog_ = 0.0f;
+            break;
+        }
         default:
             return false;
     }
@@ -108,6 +115,7 @@ bool Planner::submit(const Job& job) {
     segDone_ = 0;
     const char* shapeName = (job_.shape == Shape::LINE)    ? "LINE"
                             : (job_.shape == Shape::CIRCLE) ? "CIRCLE"
+                            : (job_.shape == Shape::SQUARE) ? "SQUARE"
                                                             : "POINT";
     Serial.printf("[PLAN] Job %s: len=%.1fmm feed=%.1fmm/s (WorkPlane: %s)\n",
                   shapeName, totalLen_, job_.feedMmS,
@@ -226,13 +234,32 @@ bool Planner::nextDrawSegment() {
         nx += ux * step;
         ny += uy * step;
         prog_ += step;
-    } else { // CIRCLE
+    } else if (job_.shape == Shape::CIRCLE) {
         const float radius = job_.r;
         const float arcStep = (remain < DRAW_SEGMENT_MM) ? remain : DRAW_SEGMENT_MM;
         prog_ += arcStep;
         const float ang = startAng_ + prog_ / radius; // CCW
         nx = job_.x1 + radius * cosf(ang);
         ny = job_.y1 + radius * sinf(ang);
+    } else { // SQUARE: bắt đầu ở góc dưới-trái, quét CCW bốn cạnh
+        const float side = job_.r;
+        const float half = side * 0.5f;
+        const float step = (remain < DRAW_SEGMENT_MM) ? remain : DRAW_SEGMENT_MM;
+        prog_ += step;
+        const float p = prog_;
+        if (p <= side) {
+            nx = job_.x1 - half + p;
+            ny = job_.y1 - half;
+        } else if (p <= 2.0f * side) {
+            nx = job_.x1 + half;
+            ny = job_.y1 - half + (p - side);
+        } else if (p <= 3.0f * side) {
+            nx = job_.x1 + half - (p - 2.0f * side);
+            ny = job_.y1 + half;
+        } else {
+            nx = job_.x1 - half;
+            ny = job_.y1 + half - (p - 3.0f * side);
+        }
     }
 
     curX_ = nx;
@@ -249,10 +276,23 @@ void Planner::tick() {
         case State::LIFTING: {
             if (motorsBusy(motors)) return;
             const float safeZ = job_.z + PEN_LIFT_MM;
-            const float targetZ = (curZ_ > safeZ) ? curZ_ : safeZ;
-            curZ_ = targetZ;
-            if (!startMoveTo(curX_, curY_, targetZ, DRAW_FEED_MM_S)) return;
-            state_ = State::TRAVELING;
+            // FK pose at HOME/park may not satisfy the fixed pen-down orientation.
+            // Stage directly to the known IK-safe start point at pen-lift height,
+            // instead of trying to re-solve the current parked TCP pose.
+            if (job_.shape == Shape::CIRCLE) {
+                curX_ = job_.x1 + job_.r * cosf(startAng_);
+                curY_ = job_.y1 + job_.r * sinf(startAng_);
+            } else if (job_.shape == Shape::SQUARE) {
+                curX_ = job_.x1 - job_.r * 0.5f;
+                curY_ = job_.y1 - job_.r * 0.5f;
+            } else {
+                curX_ = job_.x1;
+                curY_ = job_.y1;
+            }
+            curZ_ = safeZ;
+            if (!startMoveTo(curX_, curY_, curZ_, DRAW_FEED_MM_S)) return;
+            const bool needDrop = job_.drawNow || (job_.shape == Shape::POINT);
+            state_ = needDrop ? State::DROPPING : State::FINISHED_LIFT;
             break;
         }
 
@@ -262,6 +302,9 @@ void Planner::tick() {
             if (job_.shape == Shape::CIRCLE) {
                 curX_ = job_.x1 + job_.r * cosf(startAng_);
                 curY_ = job_.y1 + job_.r * sinf(startAng_);
+            } else if (job_.shape == Shape::SQUARE) {
+                curX_ = job_.x1 - job_.r * 0.5f;
+                curY_ = job_.y1 - job_.r * 0.5f;
             } else {
                 curX_ = job_.x1;
                 curY_ = job_.y1;

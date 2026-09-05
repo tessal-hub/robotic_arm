@@ -17,7 +17,7 @@ class JointModel;
 class HomingController;
 class Planner;
 
-enum class ArmMode : uint8_t { IDLE = 0, HOMING, JOG, CART, DRAW, FAULT };
+enum class ArmMode : uint8_t { IDLE = 0, RELEASE, HOMING, JOG, CART, DRAW, FAULT };
 
 class WifiManager;
 void armSetWifiProvider(WifiManager* w); // inject provider cho statusJson (tránh vòng include)
@@ -30,10 +30,12 @@ struct ArmCommand {
         HOME_ALL,    // homing chuỗi J1..J4
         HOME_AXIS,   // homing 1 khớp (axis)
         SET_HOME,    // đặt home thủ công tại vị trí hiện tại (axis)
+        RELEASE_J1_J4,
         CLEAR_FAULT, // thoát trạng thái FAULT
         MOVE_CART,   // p[0..2]=x,y,z — di chuyển TCP tới điểm (bút xuống)
         DRAW_LINE,   // p[0..4]=x1,y1,x2,y2,z ; p[5]=feed
-        DRAW_CIRCLE  // p[0..2]=cx,cy,z ; p[3]=r ; p[5]=feed
+        DRAW_CIRCLE, // p[0..2]=cx,cy,z ; p[3]=r ; p[5]=feed
+        DRAW_SQUARE  // p[0..2]=cx,cy,z ; p[3]=side ; p[5]=feed
     };
     Type type{Type::NONE};
     uint8_t axis{0};
@@ -70,6 +72,8 @@ private:
     static void taskEntry(void* param);
     void taskLoop();
     void execute(const ArmCommand& cmd);
+    void stopAllAndDiscardQueuedMotion();
+    void resumeManualRelease();
     void applyJog(uint8_t axis, float deltaDeg);
     [[nodiscard]] bool motionAllowed() const;
 
@@ -84,6 +88,8 @@ private:
     TaskHandle_t task{nullptr};
     std::unique_ptr<SafetyManager> safety_{nullptr};
     std::atomic<ArmMode> mode_{ArmMode::IDLE};
+    std::atomic<bool> stopRequested_{false};
+    std::atomic<bool> manualRelease_{false};
     uint32_t driftTickCounter{0};
     String lastPlannerError_{"OK"};
     int lastPlannerFailIndex_{-1};

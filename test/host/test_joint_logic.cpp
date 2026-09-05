@@ -1,5 +1,6 @@
 // Host tests: JointModel direction logic (cwForDelta, stepsPerDegree).
 #include "config.h"
+#include "joint_calibration.h"
 #include <cmath>
 #include <cstdio>
 
@@ -50,11 +51,48 @@ static void testStepsPerDegreePositive() {
     }
 }
 
+static void testJ3SoftLimitContract() {
+    CHECK(J3_MIN_LIMIT == 0.0f, "J3 minimum limit is zero degrees");
+    CHECK(J3_MAX_LIMIT == 90.0f, "J3 maximum limit is positive 90 degrees");
+    CHECK(DEFAULT_AXIS_LIMIT_MIN[2] == J3_MIN_LIMIT,
+          "J3 minimum in shared soft-limit table");
+    CHECK(DEFAULT_AXIS_LIMIT_MAX[2] == J3_MAX_LIMIT,
+          "J3 maximum in shared soft-limit table");
+    CHECK(DEFAULT_AXIS_CALIB_RANGE[2] == 90.0f,
+          "J3 calibration range is 90 degrees");
+}
+
+static void testMeasuredCalibrationAcceptance() {
+    constexpr uint8_t axis = 2;
+    const float configured = jointcal::configuredStepsPerDegree(axis);
+    CHECK(jointcal::isPlausible(axis, +1.0f, configured * 0.5f),
+          "accept 50% measured steps/degree boundary");
+    CHECK(jointcal::isPlausible(axis, -1.0f, configured * 2.0f),
+          "accept 200% measured steps/degree boundary");
+    CHECK(!jointcal::isPlausible(axis, 0.0f, configured),
+          "reject calibration with invalid encoder sign");
+    CHECK(!jointcal::isPlausible(axis, +1.0f, configured * 0.49f),
+          "reject calibration below physical range");
+    CHECK(!jointcal::isPlausible(axis, +1.0f, configured * 2.01f),
+          "reject calibration above physical range");
+    CHECK(!jointcal::isPlausible(axis, +1.0f, NAN),
+          "reject non-finite calibration");
+    CHECK(jointcal::normalizedSign(-1.0f) == -1.0f, "preserve negative encoder sign");
+    CHECK(jointcal::normalizedSign(+1.0f) == +1.0f, "preserve positive encoder sign");
+}
+
+static void testJ5EncoderDirection() {
+    CHECK(AXIS_ENC_SIGN[4] == -1, "J5 encoder direction is reversed");
+}
+
 int main() {
     testCwForDeltaJ1PositiveSign();
     testCwForDeltaJ2NegativeSign();
     testCwForDeltaJ3NegativeSign();
     testStepsPerDegreePositive();
+    testJ3SoftLimitContract();
+    testMeasuredCalibrationAcceptance();
+    testJ5EncoderDirection();
     if (g_fail == 0) {
         std::printf("ALL PASSED (joint logic)\n");
         return 0;

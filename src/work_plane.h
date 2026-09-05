@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <atomic>
 #include <cmath>
 
 struct Point3D {
@@ -49,7 +50,7 @@ private:
     Point3D m_vAxis{0.0f, 1.0f, 0.0f};
     Point3D m_normal{0.0f, 0.0f, 1.0f};
     bool    m_isCalibrated{false};
-    bool    m_enabled{false};
+    std::atomic<bool> m_enabled{false};
     String  m_lastError{""};
 
 public:
@@ -71,8 +72,8 @@ public:
      */
     [[nodiscard]] Point3D fromRobotXYZ(const Point3D& robotP) const;
 
-    void setEnabled(bool en) noexcept { m_enabled = en && m_isCalibrated; }
-    [[nodiscard]] bool isEnabled() const noexcept { return m_enabled; }
+    void setEnabled(bool en) noexcept { m_enabled.store(en && m_isCalibrated, std::memory_order_release); }
+    [[nodiscard]] bool isEnabled() const noexcept { return m_enabled.load(std::memory_order_acquire); }
     [[nodiscard]] bool isCalibrated() const noexcept { return m_isCalibrated; }
     [[nodiscard]] const String& getLastError() const noexcept { return m_lastError; }
     [[nodiscard]] Point3D getOrigin() const noexcept { return m_origin; }
@@ -84,7 +85,7 @@ public:
         m_vAxis = Point3D(0.0f, 1.0f, 0.0f);
         m_normal = Point3D(0.0f, 0.0f, 1.0f);
         m_isCalibrated = false;
-        m_enabled = false;
+        m_enabled.store(false, std::memory_order_release);
         m_lastError = "";
     }
 };

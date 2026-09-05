@@ -21,13 +21,13 @@ class JointModel;
  */
 class Planner {
 public:
-    enum class Shape : uint8_t { NONE = 0, POINT, LINE, CIRCLE };
+    enum class Shape : uint8_t { NONE = 0, POINT, LINE, CIRCLE, SQUARE };
 
     struct Job {
         Shape shape{Shape::NONE};
         // POINT : tới (x1,y1,z) rồi nâng bút
         // LINE  : từ (x1,y1) tới (x2,y2)
-        // CIRCLE: tâm (x1,y1), bán kính r
+        // CIRCLE: tâm (x1,y1), bán kính r; SQUARE: tâm (x1,y1), cạnh r
         float x1{0}, y1{0};
         float x2{0}, y2{0};
         float z{0};      // mặt giấy (Z vẽ)
@@ -38,7 +38,7 @@ public:
 
     enum class State : uint8_t {
         IDLE = 0,
-        LIFTING,       // nâng bút khỏi giấy trước khi travel
+        LIFTING,       // stage tới đầu nét ở độ cao nâng bút (an toàn cả từ HOME/park)
         TRAVELING,     // di chuyển tới điểm bắt đầu (bút đang nâng)
         DROPPING,      // hạ bút xuống z vẽ
         DRAWING,       // đang sinh + chạy các segment
@@ -57,7 +57,8 @@ public:
     void stop();                       // huỷ ngay, dừng motor
     [[nodiscard]] bool isActive() const noexcept { return state_ != State::IDLE; }
     [[nodiscard]] bool isDrawing() const noexcept {
-        return hasJob_ && (job_.shape == Shape::LINE || job_.shape == Shape::CIRCLE);
+        return hasJob_ && (job_.shape == Shape::LINE || job_.shape == Shape::CIRCLE ||
+                           job_.shape == Shape::SQUARE);
     }
     [[nodiscard]] State state() const noexcept { return state_; }
 

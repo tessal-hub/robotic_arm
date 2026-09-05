@@ -29,7 +29,8 @@ public:
     Endstops(const Endstops&) = delete;
     Endstops& operator=(const Endstops&) = delete;
 
-    // Khởi tạo GPIO + attach interrupt. motors: mảng NUM_MOTORS con trỏ để clear latches (không còn stopFromISR trong ISR).
+     // Khởi tạo GPIO + attach interrupt. Mỗi ISR giữ owner motor tương ứng để
+     // cắt xung ngay trên cạnh FALLING; debounce/latch vẫn do SafetyManager xử lý.
     void begin(Motor** motors);
 
     // Inject SafetyManager — ISR sẽ forward pending/time qua safety->isrNotify.
@@ -38,6 +39,10 @@ public:
     [[nodiscard]] bool hasPin(uint8_t axis, EndstopWhich w) const noexcept;
     [[nodiscard]] bool isPressed(uint8_t axis, EndstopWhich w) const noexcept;
     [[nodiscard]] bool isLatched(uint8_t axis, EndstopWhich w) const noexcept;
+
+    // Mask / Cho phép từng cữ kích hoạt ngắt (FSM homing dùng để vô hiệu hóa cữ ngược hướng)
+    void setPinEnabled(uint8_t axis, EndstopWhich w, bool en) noexcept;
+    [[nodiscard]] bool isPinEnabled(uint8_t axis, EndstopWhich w) const noexcept;
 
     // Đọc và xoá latch (FSM dùng). Trả về true nếu latch đang set trước khi xoá.
     bool consumeLatch(uint8_t axis, EndstopWhich w) noexcept;
@@ -60,10 +65,13 @@ private:
     struct IsrCtx {
         std::atomic<bool> pending{false};
         std::atomic<int64_t> isrTime{0};
+        std::atomic<bool> enabled{true};
+        int8_t pin{-1};
         uint8_t axis{0};
         EndstopWhich which{EndstopWhich::MIN};
         SafetyManager* safety{nullptr};
         Endstops* self{nullptr};
+        Motor* motor{nullptr};
     };
 
     static void IRAM_ATTR isrHandler(void* arg);
