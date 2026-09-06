@@ -85,6 +85,7 @@ private:
     // vị trí chạm); encDeltaDeg = độ dịch encoder trong cửa sổ. Rotor còn chạy tự do thì
     // tự cuộn mốc và trả false.
     [[nodiscard]] bool stallWindowCheck(uint8_t axis, Motor& m, float& encDeltaDeg);
+    [[nodiscard]] int64_t compensatedContactStep(const Motor& m, float encDelta) const;
     [[nodiscard]] bool exceededSecondSideTravel(const Motor& m) const;
     // SG thấp liên tiếp là điều kiện cần, luôn ghép với stallWindowCheck() cho J4.
     [[nodiscard]] bool stallGuardConfirmed(Motor& m, uint32_t now);
@@ -120,17 +121,14 @@ private:
     float encCenterRaw_{0.0f};
     float encBefore_{0.0f};
     int64_t contactSpan_{0};    // khoảng cách bước (đã bù) giữa 2 điểm chạm chậm
+    int64_t centeringTargetSteps_{0}; // xác nhận đủ hành trình, không chốt Home sau ISR abort
+    int64_t firstScanStartSteps_{0};
+    int64_t backoffTargetSteps_{0};
+    float measuredSpd_{0.0f};   // J4 chỉ persist sau VERIFY
     float encDirMult_{1.0f};
     bool warmupCW_{false};
-    bool warmupProbed_{false}; // đã thử chiều ngược khi công tắc vẫn nhấn sau bước warmup
-    uint32_t warmupSteps_{0};  // số bước warmup (probe chiều ngược chạy lại đúng khoảng này)
-    // deprecated: warmupSettling_/warmupSettleStartMs_ kept for compat — logic now via
-    // HomePhase::WARMUP_SETTLE_WAIT + settleStartMs_; do not use directly
-    bool warmupSettling_{false};
-    uint32_t warmupSettleStartMs_{0};
-    // FIX #6: ghi nhớ trạng thái endstop lúc bắt đầu WARMUP — dùng để chọn hướng probe
-    bool warmupFromMinP_{false};      // MIN endstop đang nhấn khi bắt đầu enterWarmup()
-    bool warmupFromMaxP_{false};      // MAX endstop đang nhấn khi bắt đầu enterWarmup()
+    bool warmupProbed_{false};  // đã thử chiều ngược khi công tắc vẫn nhấn sau bước warmup
+    uint32_t warmupSteps_{0};   // số bước warmup (probe chiều ngược chạy lại đúng khoảng này)
     bool secondSide_{false};    // false: đang dò cữ đầu tiên; true: cữ thứ hai
     bool cwApproach_{false};    // chiều quét hiện tại (fast & slow cùng chiều; backoff đảo)
     uint8_t backoffExtend_{0};  // số lần đã nới rộng backoff cho pha hiện tại (chống hysteresis công tắc)
@@ -152,6 +150,7 @@ private:
     float lastStallEnc_{0.0f};
     uint32_t lastStallCheckMs_{0};
     int64_t lastCheckSteps_{0};
+    int64_t lastStallSampleSteps_{0};
     float lastCheckEnc_{0.0f};
     uint8_t encStallCount_{0};
 };

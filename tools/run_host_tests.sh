@@ -40,6 +40,8 @@ g++ -std=c++17 -Wall -Wextra -I test/host -I src \
 "$TRAJ_OUT" || exit 1
 
 echo "=== homing logic ==="
+g++ -std=gnu++17 -Wall -Wextra -I test/host -I src test/host/test_homing_fsm.cpp -o /tmp/opencode/homing_fsm_test
+/tmp/opencode/homing_fsm_test || exit 1
 HOMING_OUT=/tmp/opencode/homing_logic_test
 g++ -std=gnu++17 -Wall -Wextra -I test/host -I src \
     test/host/test_homing_logic.cpp \

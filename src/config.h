@@ -157,7 +157,7 @@ constexpr uint16_t DEFAULT_AXIS_HOMING_CURRENTS[NUM_MOTORS] = {
 };
 
 constexpr uint32_t HOMING_STEP_INTERVAL_J1      = 1800;   // us/step
-constexpr uint32_t HOMING_STEP_INTERVAL_J2      = 1500;
+constexpr uint32_t HOMING_STEP_INTERVAL_J2      = 1800;   // 556 steps/s, bằng Jog J2 để giảm tải khi home
 constexpr uint32_t HOMING_STEP_INTERVAL_J3      = 1500;
 constexpr uint32_t HOMING_STEP_INTERVAL_J4      = 2000;   // 500 steps/sec (torque cao, ít rung cho J4)
 constexpr uint32_t HOMING_STEP_INTERVAL_J5      = 2500;   // 400 steps/sec (torque cao nhất cho A4988)
@@ -194,9 +194,9 @@ constexpr int32_t  HOMING_STALL_WINDOW_MIN_STEPS = 120;   // Sàn cửa sổ (12
 // Span encoder tối thiểu sau khi quét đủ 2 cữ: thấp hơn ngưỡng này (motor đã đi hàng trăm
 // bước) chứng tỏ encoder đóng băng/đọc lỗi → HỦY khớp, không home ảo.
 constexpr float    HOMING_MIN_ENC_SPAN_DEG[NUM_MOTORS] = { 30.0f, 30.0f, 30.0f, 15.0f, 10.0f, 10.0f };
-// J4 sensorless hard-stop span integrity floor.  Commissioning logs measured
-// 38.8–42.2° on the real joint, so keep a 35° floor without rejecting valid homes.
-constexpr float    HOMING_MIN_MECHANICAL_SPAN_DEG = 35.0f;
+// J4 sensorless hard-stop span integrity floor. Commissioning 2026-09-06 lặp lại
+// 679–716 steps (~19–20° theo config), nên giữ sàn 15° để chặn contact kép gần nhau.
+constexpr float    HOMING_MIN_MECHANICAL_SPAN_DEG = 15.0f;
 // J4 thực đo span 38.8–42.2°; leg thứ hai vượt 55° mà chưa có cữ là lỗi, không chờ timeout 60s.
 constexpr float    HOMING_J4_MAX_MECHANICAL_SPAN_DEG = 55.0f;
 constexpr float    HOMING_TRIM_MAX_TRAVEL_DEG  = 5.0f;    // Giới hạn hành trình mỗi lần trim VERIFY (chống trim chạy loạn đâm endstop)

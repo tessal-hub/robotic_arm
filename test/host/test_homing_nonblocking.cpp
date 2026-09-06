@@ -26,7 +26,7 @@ static void test_config_backoff_settle_ms() {
   // Also verify other timeouts kept
   CHECK(HOMING_JOINT_TIMEOUT_MS == 30000, "HOMING_JOINT_TIMEOUT_MS 30s invariant");
   CHECK(HOMING_MAX_ATTEMPTS == 2, "HOMING_MAX_ATTEMPTS 2 invariant");
-  CHECK(HOMING_MIN_MECHANICAL_SPAN_DEG == 35.0f, "J4 mechanical span floor 35 deg");
+  CHECK(HOMING_MIN_MECHANICAL_SPAN_DEG == 15.0f, "J4 commissioned mechanical span floor 15 deg");
   CHECK((int)HOMING_BACKOFF_MAX_EXTEND == 3, "HOMING_BACKOFF_MAX_EXTEND 3 invariant");
   // Verify other settles kept: WARMUP 200, ENC_SETTLE 350, DEBOUNCE 50000
   // These are defined in homing.cpp anon namespace, check config indirectly via reading file
@@ -124,8 +124,8 @@ static void test_no_delay_blocking() {
   bool slow_sensorless_fusion = content.find("if (!hitEndstop && sgStalled && encoderStalled)") != std::string::npos;
   bool rejects_bad_sensorless_span = content.find("CROSSCHECK encoder span") != std::string::npos;
   bool rejects_bad_sensorless_ratio = content.find("CROSSCHECK encoder ratio") != std::string::npos;
-  bool directional_stall_frame = content.find("signedEncDelta") != std::string::npos &&
-                               content.find("expectedRawSign") != std::string::npos;
+  bool direction_independent_stall_frame = content.find("encDeltaDeg = fabsf(curEnc - lastCheckEnc_)") != std::string::npos &&
+                                           content.find("sweepJointSign") != std::string::npos;
   bool has_j4_second_side_cap = content.find("exceededSecondSideTravel") != std::string::npos &&
                                content.find("HOMING_J4_MAX_MECHANICAL_SPAN_DEG") != std::string::npos;
   CHECK(has_backoff_wait, "has BACKOFF_SETTLE_WAIT");
@@ -138,8 +138,12 @@ static void test_no_delay_blocking() {
   CHECK(slow_sensorless_fusion, "J4 SLOW requires both StallGuard and AS5600 stall");
   CHECK(rejects_bad_sensorless_span, "J4 rejects invalid encoder span before SetHome");
   CHECK(rejects_bad_sensorless_ratio, "J4 rejects invalid encoder ratio before SetHome");
-  CHECK(directional_stall_frame, "J4 ignores reverse encoder jumps in the stall frame");
+  CHECK(direction_independent_stall_frame, "J4 detects motion independent of noisy warmup sign and learns sign from full sweep");
   CHECK(has_j4_second_side_cap, "J4 aborts a missing second hard-stop before scan timeout");
+  CHECK(content.find("m.setChopperMode(curAxis_ == 1)") != std::string::npos,
+        "J2 homes with SpreadCycle while J4 retains StealthChop for StallGuard");
+  CHECK(content.find("BACKOFF encoder chua dich") != std::string::npos,
+        "J4 extends backoff through backlash before declaring a jam");
   if (has_backoff_wait && has_warmup_wait && has_verify_wait && has_millis_check && has_settle_start) {
     if (!has_blocking_delay) PASS("settle_states_millis_logic");
   }
@@ -165,6 +169,69 @@ static void test_backoff_not_blocking_logic() {
   bool proceed = (now_after - settleStart >= settleMs);
   CHECK(proceed, "backoff_wait_proceeds_after_30ms");
   if (proceed) PASS("backoff_not_blocking_timing");
+}
+
+static void test_j3_scans_both_stops_before_offset() {
+  const std::string source = readFile("src/homing.cpp");
+  const size_t start = source.find("case HomePhase::SCAN_SLOW:");
+  const size_t end = source.find("case HomePhase::LEG1_BACKOFF:", start);
+  CHECK(start != std::string::npos && end != std::string::npos, "find production SLOW handler");
+  if (start == std::string::npos || end == std::string::npos) return;
+  const std::string slow = source.substr(start, end - start);
+  CHECK(slow.find("homeAtMinOffset") == std::string::npos,
+        "J3 must not bypass second contact in SLOW");
+  CHECK(slow.find("phase_ = HomePhase::CENTERING") == std::string::npos,
+        "SLOW cannot directly mark first contact ready for home");
+  CHECK(slow.find("secondSide_ = true") != std::string::npos &&
+        slow.find("enterCenteringScan();") != std::string::npos,
+        "both contacts use shared sweep completion");
+  CHECK(source.find("? contactSpan_ - offsetSteps : offsetSteps") != std::string::npos,
+        "J3 MIN offset handles either contact order");
+  CHECK(source.find("contactSpan_ <= offsetSteps") != std::string::npos,
+        "J3 rejects span too short for offset");
+  const size_t scanMax = source.find("void HomingController::enterScanMax()");
+  const size_t backoff = source.find("void HomingController::enterScanBackoff()", scanMax);
+  CHECK(scanMax != std::string::npos && backoff != std::string::npos,
+        "find production second scan entry");
+  if (scanMax != std::string::npos && backoff != std::string::npos) {
+    CHECK(source.substr(scanMax, backoff - scanMax).find("cwApproach_ = !cwApproach_") != std::string::npos,
+          "second scan reverses actual direction even if first contact is MAX");
+  }
+}
+
+static void test_endstop_scan_guards() {
+  const std::string source = readFile("src/homing.cpp");
+  CHECK(!source.empty(), "read production homing source");
+  const size_t scan = source.find("void HomingController::enterScanMax()");
+  const size_t backoff = source.find("void HomingController::enterScanBackoff()", scan);
+  CHECK(scan != std::string::npos && backoff != std::string::npos, "find second scan entry");
+  if (scan != std::string::npos && backoff != std::string::npos) {
+    const std::string entry = source.substr(scan, backoff - scan);
+    CHECK(entry.find("setPinEnabled(curAxis_, firstSide_, true)") != std::string::npos,
+          "first switch must be armed during second scan");
+    CHECK(entry.find("setPinEnabled(curAxis_, targetSide, true)") != std::string::npos,
+          "target switch must be armed during second scan");
+  }
+  CHECK(source.find("if (firstLeg || movedFarEnough)") == std::string::npos,
+        "physical contact must not be discarded by sensorless travel grace");
+  CHECK(source.find("isPhysicallyPressed(curAxis_, firstSide_)") != std::string::npos,
+        "masked first switch must be physically released before scanning");
+  CHECK(source.find("cwApproach_ = warmupCW_;") != std::string::npos,
+        "warmup contact backs off relative to actual approach direction");
+  CHECK(source.find("if (minP || maxP)") < source.find("m.run(warmupCW_, warmupSteps)"),
+        "pressed switch at start rejects warmup before movement");
+  CHECK(source.find("m.getAbsoluteSteps() != centeringTargetSteps_") != std::string::npos,
+        "interrupted centering cannot save home");
+  const std::string endstops = readFile("src/endstop.cpp");
+  const size_t raw = endstops.find("bool Endstops::isPhysicallyPressed(");
+  const size_t next = endstops.find("bool Endstops::isLatched(", raw);
+  CHECK(raw != std::string::npos && next != std::string::npos, "find raw GPIO reader");
+  if (raw != std::string::npos && next != std::string::npos) {
+    const std::string reader = endstops.substr(raw, next - raw);
+    CHECK(reader.find("digitalRead") != std::string::npos &&
+          reader.find("isPinEnabled") == std::string::npos,
+          "raw switch read remains available while interrupt is masked");
+  }
 }
 
 static void test_warmup_settle_timing() {
@@ -193,6 +260,8 @@ int main() {
   test_config_backoff_settle_ms();
   test_enum_has_settle_states();
   test_no_delay_blocking();
+  test_j3_scans_both_stops_before_offset();
+  test_endstop_scan_guards();
   test_backoff_not_blocking_logic();
   test_warmup_settle_timing();
   test_verify_settle_timing();

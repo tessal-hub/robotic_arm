@@ -213,6 +213,7 @@ TMC2209Diag Motor::getDriverStatus() {
 
 void Motor::begin(uint16_t initialCurrentMa, uint16_t initialMicrosteps,
                    bool initialSpreadCycle, uint8_t initialHoldScale, uint8_t iholddelay) {
+    gpio_reset_pin(static_cast<gpio_num_t>(stepPin));
     pinMode(stepPin, OUTPUT);
     digitalWrite(stepPin, LOW);
     gpio_config_t cfg = {};
@@ -226,6 +227,7 @@ void Motor::begin(uint16_t initialCurrentMa, uint16_t initialMicrosteps,
     gpio_set_drive_capability(static_cast<gpio_num_t>(stepPin), GPIO_DRIVE_CAP_3);
 
     if (dirPin != 255) {
+        gpio_reset_pin(static_cast<gpio_num_t>(dirPin));
         pinMode(dirPin, OUTPUT);
         digitalWrite(dirPin, LOW);
         gpio_config_t dirCfg = {};
@@ -249,10 +251,13 @@ void Motor::begin(uint16_t initialCurrentMa, uint16_t initialMicrosteps,
         .callback = &Motor::onStepTimer,
         .arg = this,
         .dispatch_method = ESP_TIMER_TASK,
-        .name = "motor_step",
+        .name = label,
         .skip_unhandled_events = true
     };
-    esp_timer_create(&timerArgs, &stepTimer);
+    const esp_err_t err = esp_timer_create(&timerArgs, &stepTimer);
+    if (err != ESP_OK) {
+        Serial.printf("[MOTOR LOI] %s esp_timer_create that bai: %d\n", label, err);
+    }
 
     if (!isTMC) {
         enabled.store(true, std::memory_order_relaxed);
@@ -371,7 +376,14 @@ void Motor::run(bool cw, uint32_t steps) {
     }
 
     running.store(true, std::memory_order_release);
-    if (stepTimer != nullptr) esp_timer_start_once(stepTimer, currentSpeedUs.load(std::memory_order_relaxed));
+    if (stepTimer != nullptr) {
+        const esp_err_t timerErr = esp_timer_start_once(stepTimer, currentSpeedUs.load(std::memory_order_relaxed));
+        if (timerErr != ESP_OK) {
+            Serial.printf("[MOTOR LOI] %s esp_timer_start_once that bai: %d\n", label, timerErr);
+        }
+    } else {
+        Serial.printf("[MOTOR LOI] %s stepTimer null, khong the phat xung!\n", label);
+    }
 }
 
 void Motor::runContinuous(bool cw) {
@@ -397,7 +409,14 @@ void Motor::runContinuous(bool cw) {
     currentSpeedUs.store(startSpeedUs, std::memory_order_relaxed);
 
     running.store(true, std::memory_order_release);
-    if (stepTimer != nullptr) esp_timer_start_once(stepTimer, currentSpeedUs.load(std::memory_order_relaxed));
+    if (stepTimer != nullptr) {
+        const esp_err_t timerErr = esp_timer_start_once(stepTimer, currentSpeedUs.load(std::memory_order_relaxed));
+        if (timerErr != ESP_OK) {
+            Serial.printf("[MOTOR LOI] %s esp_timer_start_once that bai: %d\n", label, timerErr);
+        }
+    } else {
+        Serial.printf("[MOTOR LOI] %s stepTimer null, khong the phat xung!\n", label);
+    }
 }
 
 bool Motor::prepareCoordinatedRun(bool cw, uint32_t steps, uint32_t intervalUs) {
@@ -471,7 +490,10 @@ void IRAM_ATTR Motor::stopFromISR() {
 
 bool Motor::enable(bool en) {
     if (!en) stop();
-    if (!isTMC) return false;
+    if (!isTMC) {
+        enabled.store(en, std::memory_order_release);
+        return true;
+    }
     if (!takeUart(20)) return false;
     flushUartRx();
     driver->toff(en ? 4 : 0);

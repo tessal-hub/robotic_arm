@@ -38,6 +38,7 @@ private:
 };
 
 struct SerialStub {
+    void println(const char* text) { std::puts(text); }
     template<typename... Args>
     void printf(const char* fmt, Args... args) {
         std::printf(fmt, args...);

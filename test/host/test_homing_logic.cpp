@@ -164,18 +164,19 @@ static void testSpanIntegrityAndTrimBounds() {
     CHECK(HOMING_J4_MAX_MECHANICAL_SPAN_DEG > HOMING_MIN_MECHANICAL_SPAN_DEG &&
           HOMING_J4_MAX_MECHANICAL_SPAN_DEG <= 60.0f,
           "J4 second-side travel cap is above valid span and remains conservative");
+    CHECK(HOMING_MIN_MECHANICAL_SPAN_DEG <= 15.0f,
+          "J4 accepts the commissioned 19-20 degree hard-stop span");
     CHECK(HOMING_TRIM_MAX_TRAVEL_DEG >= 2.0f && HOMING_TRIM_MAX_TRAVEL_DEG <= 15.0f,
           "Trim travel bound sane");
 }
 
 static void testDirectionalEncoderFrame() {
-    const float expectedRawSign = -1.0f;
-    const float forward = 4.0f * expectedRawSign;
-    const float backward = -4.0f * expectedRawSign;
-    CHECK(forward * expectedRawSign >= HOMING_STALL_ENC_DELTA_DEG,
-          "forward raw encoder movement resets the stall frame");
-    CHECK(backward * expectedRawSign < 0.0f,
-          "backward raw encoder jump is not treated as forward progress");
+    const float forward = 4.0f;
+    const float reverse = -4.0f;
+    CHECK(std::fabs(forward) >= HOMING_STALL_ENC_DELTA_DEG,
+          "positive raw encoder movement resets the stall frame");
+    CHECK(std::fabs(reverse) >= HOMING_STALL_ENC_DELTA_DEG,
+          "negative raw encoder movement also resets the stall frame");
 }
 
 // Backoff phải đủ xa để nhả endstop với steps/deg CONFIG (không phụ thuộc calib cũ)

@@ -38,6 +38,8 @@ public:
 
     [[nodiscard]] bool hasPin(uint8_t axis, EndstopWhich w) const noexcept;
     [[nodiscard]] bool isPressed(uint8_t axis, EndstopWhich w) const noexcept;
+    // Đọc GPIO cả khi ISR bị mask để xác nhận đã rời cữ trước khi bật lại.
+    [[nodiscard]] bool isPhysicallyPressed(uint8_t axis, EndstopWhich w) const noexcept;
     [[nodiscard]] bool isLatched(uint8_t axis, EndstopWhich w) const noexcept;
 
     // Mask / Cho phép từng cữ kích hoạt ngắt (FSM homing dùng để vô hiệu hóa cữ ngược hướng)

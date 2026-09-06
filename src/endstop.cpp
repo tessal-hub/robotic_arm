@@ -137,7 +137,11 @@ bool Endstops::hasPin(uint8_t axis, EndstopWhich w) const noexcept {
 }
 
 bool Endstops::isPressed(uint8_t axis, EndstopWhich w) const noexcept {
-    if (!hasPin(axis, w) || !isPinEnabled(axis, w)) return false;
+    return isPinEnabled(axis, w) && isPhysicallyPressed(axis, w);
+}
+
+bool Endstops::isPhysicallyPressed(uint8_t axis, EndstopWhich w) const noexcept {
+    if (!hasPin(axis, w)) return false;
 #ifdef ARDUINO
     return digitalRead(ch(axis, w).pin) == ENDSTOP_ACTIVE_STATE;
 #else

@@ -38,10 +38,11 @@ static WebServer g_server(WEB_SERVER_PORT);
 static ArmController g_arm;
 
 void setup() {
-    // 0) Khóa LOW và cấu hình push-pull 40mA cho tất cả các chân STEP/DIR của 6 motor ngay từ đầu
+    // 0) Tách JTAG/ROM matrix (gpio_reset_pin), khóa LOW và cấu hình push-pull 40mA cho tất cả các chân STEP/DIR của 6 motor ngay từ đầu
     for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
         const uint8_t sp = g_motors[i].getStepPin();
         const uint8_t dp = g_motors[i].getDirPin();
+        gpio_reset_pin(static_cast<gpio_num_t>(sp));
         pinMode(sp, OUTPUT);
         digitalWrite(sp, LOW);
         gpio_config_t cfg = {};
@@ -55,6 +56,7 @@ void setup() {
         gpio_set_drive_capability(static_cast<gpio_num_t>(sp), GPIO_DRIVE_CAP_3);
 
         if (dp != PIN_UNSET && dp != 255) {
+            gpio_reset_pin(static_cast<gpio_num_t>(dp));
             pinMode(dp, OUTPUT);
             digitalWrite(dp, LOW);
             gpio_config_t dirCfg = {};

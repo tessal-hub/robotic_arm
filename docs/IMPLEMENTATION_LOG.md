@@ -3246,3 +3246,174 @@ Khi người dùng bấm Jog $+30^\circ$:
 ### Việc còn lại (nếu có)
 - Nạp firmware, Release J1–J4 rồi chạm endstop để xác nhận không có FAULT; sau đó gửi JOG nhỏ theo chiều rời endstop và kiểm tra log `RELEASE ket thuc — da resync J1-J4 tu encoder`.
 
+
+---
+
+## 2026-09-05 — J3 quét hai cữ trước khi về MIN + offset
+
+### Việc đã làm
+- What: `src/homing.cpp` bỏ nhánh J3 chốt Home ngay ở contact đầu tiên. J3 dùng chung luồng FAST → BACKOFF → SLOW cho cả hai cữ, CROSSCHECK rồi mới CENTERING tới MIN + 2.5°.
+- Why: Owner yêu cầu quét đủ hai cữ; log cũ nhận MAX nhưng vẫn ghi MIN SLOW CONTACT rồi lưu Home.
+- How: MIN chạm trước → từ MAX lùi `span−offset`; MAX chạm trước → từ MIN lùi `offset`. Offset dùng steps/deg sau CROSSCHECK; span không lớn hơn offset thì hủy attempt. Lượt quét hai đảo chiều quét thực tế, không suy lại chiều từ nhãn cữ đầu.
+- What: Bổ sung regression kiểm tra source FSM trong `test/host/test_homing_nonblocking.cpp`: J3 không bỏ qua cữ hai, công thức xử lý hai thứ tự contact, guard span và đảo chiều thực tế. Cập nhật module/FSM trong `docs/SYSTEM_OVERVIEW.html`.
+
+### Build gate
+- `pio run` → SUCCESS; RAM 49,956 bytes (15.2%), Flash 932,473 bytes (27.9%).
+- `tools/run_host_tests.sh` → ALL HOST TESTS PASSED (gồm homing logic và regression source FSM). Không thay đổi kinematics.
+
+### Việc còn lại
+- Chưa nạp hoặc chạy trên robot. Kiểm tra Home J3: phải xuất hiện SLOW CONTACT #1 và #2 (hai cữ khác nhau), CROSSCHECK, CENTERING, VERIFY MIN+offset rồi SETREF OK. Xác minh điểm dừng thực tế tại MIN+2.5°; lỗi motor stopped early/nhiễu công tắc trong log cũ vẫn cần đo trên phần cứng nếu tái diễn.
+
+---
+
+## 2026-09-05 — J2 Home: thử SpreadCycle và giảm tốc
+
+### Việc đã làm
+- What: `src/homing.cpp` chọn SpreadCycle riêng J2 trong WARMUP, giữ StealthChop cho các TMC còn lại (J4 cần StallGuard4). Thêm log cấu hình dòng/chopper/tốc độ yêu cầu trước WARMUP. `src/config.h`: HOMING_STEP_INTERVAL_J2 từ 1500 lên 1800µs, bằng tốc độ Jog J2; SLOW vẫn 3000µs.
+- Why: Owner báo Home J2 giật/yếu. Log có khoảng 66.7° bước tính toán nhưng encoder chỉ đổi 18.1°; chưa phân biệt được mất bước, cơ khí hay tỷ lệ encoder. Đây là điều chỉnh để kiểm chứng trên robot, không khẳng định đã giải quyết nguyên nhân phần cứng.
+- How: Tận dụng chế độ chopper hiện có, J2 nhận cữ bằng endstop vật lý nên không cần StallGuard. Không tăng dòng Home 1000mA: owner mô tả NEMA17 lớn và TMC2209 không có tản nhiệt, chưa có dòng định mức motor. Giữ xử lý ISR/FAULT và retry khi motor stopped early.
+- What: Thêm regression source contract cho lựa chọn chopper trong `test/host/test_homing_nonblocking.cpp`; cập nhật module/FSM/checklist trong SYSTEM_OVERVIEW.
+
+### Build gate
+- `pio run` → SUCCESS; RAM 49,956 bytes (15.2%), Flash 932,617 bytes (27.9%).
+- `tools/run_host_tests.sh` → ALL HOST TESTS PASSED. Không sửa kinematics.
+
+### Việc còn lại
+- Chưa nạp hoặc thử robot. Xác nhận log J2 SpreadCycle, 1000mA, fast=1800 và so lại độ giật/góc encoder. Nếu motor stopped early tái diễn, kiểm tra tín hiệu endstop/driver; không tự bỏ bảo vệ hay tăng dòng để che lỗi.
+- Cần mã motor/dòng định mức và kiểm tra tản nhiệt module trước khi tăng dòng. NORMAL_CURRENT_J2 hiện cấu hình 1700mA khi khởi tạo; kết thúc homing hiện khôi phục DEFAULT_NORMAL_CURRENT=800mA theo code sẵn có.
+
+---
+
+## 2026-09-05 — Homing: bật lại endstop khi quét và chặn thoát cữ sai chiều
+
+### Việc đã làm
+- What: `src/endstop.h/.cpp` thêm `isPhysicallyPressed()` đọc GPIO khi ISR bị mask. `src/homing.cpp` chỉ mask cữ đầu trong LEG1_BACKOFF 5°; nếu chưa nhả thì hủy, nếu đã nhả thì bật lại cả hai ngắt trước SCAN_MAX.
+- What: Contact endstop vật lý không còn bị bỏ qua vì chưa đi đủ 10° (ngưỡng chỉ còn áp dụng sensorless). SCAN_MAX chạm lại cữ đầu hoặc SCAN_SLOW chạm sai cữ thì dừng/hủy.
+- What: Công tắc đang nhấn trước WARMUP → từ chối chạy, cần rời cữ trước HOME. WARMUP mới chạm cữ → backoff đảo đúng chiều vừa chạy, không nhảy vào SCAN_MIN chiều mặc định. Reset encDirMult về config đầu mỗi attempt để tránh dùng hướng từ attempt trước khi WARMUP bị ngắt.
+- What: `src/homing.h/.cpp` lưu đích bước CENTERING; motor dừng sớm trước đích → hủy, không ghi Home/NVS. Log FAST thêm GPIO MIN/MAX và enable để chẩn đoán tiếp điểm không báo.
+- Why: Log J2 cho thấy MAX được chạm khi cw=0, MIN nằm ở chiều cw=1; retry WARMUP chạm MIN rồi nhảy sang SCAN_MIN cw=0 và BACKOFF cw=1 đã có thể đẩy lại vào MIN. Cữ đầu cũng bị mask suốt lượt quét hai trong code cũ. Chưa thể kết luận tín hiệu MIN đã xuất hiện đúng thời điểm chạm vật lý trong lượt timeout.
+- How: Giữ nguyên dòng, tốc độ, ISR abort và debounce 50ms, không kéo dài timeout. Giữ retry hữu hạn; attempt mới không chạy nếu công tắc vẫn nhấn. Cập nhật module/FSM/checklist SYSTEM_OVERVIEW.
+
+### Build gate
+- `pio run` → SUCCESS; RAM 49,964 bytes (15.2%), Flash 933,333 bytes (27.9%).
+- `tools/run_host_tests.sh` → ALL HOST TESTS PASSED. Bổ sung regression source contract trong test_homing_nonblocking.cpp cho re-arm cữ, đọc GPIO khi mask, contact không bị bỏ qua, hướng backoff WARMUP và đích CENTERING; các kiểm tra host không thay thế thử GPIO/motor thật.
+
+### Việc còn lại
+- Chưa nạp hoặc xác minh trên robot. Rời cả hai cữ trước HOME; log SCAN_MAX phải có en=1/1. Kiểm tra mỗi công tắc khiến đúng GPIO MIN/MAX đổi sang 1. Nếu giữ công tắc mà log/web không đổi, kiểm tra dây/pin/tiếp điểm trước khi thử lại hành trình tự động.
+
+---
+
+## 2026-09-05 — Hoàn thiện FSM homing J4 và test chạy code thực
+
+### Việc đã làm
+- What: `src/homing.h/.cpp` nối VERIFY thật thay cho chốt Home trực tiếp. J4 đối chiếu tâm encoder sau settle, trim tối đa hai lần với guard sai số tăng/hành trình 5°. Kết quả steps/deg chỉ được apply/persist sau VERIFY thành công, ngay trước SetHome. Mỗi attempt xóa cờ homed runtime J4 để lỗi homing không để Cartesian dùng trạng thái cũ; không xóa NVS đã lưu.
+- What: J4 yêu cầu encoder khỏe/hữu hạn trước khi khởi động và trong mọi tick. WARMUP không dịch cho phép đúng một probe ngược 3° rồi hủy nếu vẫn không phản hồi; không dùng fallback dấu config cho encoder J4 đứng yên. SG trả sentinel không khả dụng → hủy attempt.
+- What: Giữ mốc đầu nghi stall, yêu cầu mỗi lần xác nhận encoder cách đủ cửa sổ bước và bão hòa counter. Bù contact theo dấu step ở cả FAST/SLOW, bỏ bước đã phát khi rotor kẹt trước khi tính span/centering. CROSSCHECK kiểm tra cả chiều encoder so với sweep.
+- What: SCAN_BACKOFF và LEG1_BACKOFF của J4 chờ encoder settle 350ms, kiểm tra chạy đủ bước và dịch đúng chiều; không thoát cữ thì hủy. Áp dụng cap 55° hiện có cho cả FAST/SLOW cữ đầu từ mốc đầu SCAN_MIN; cữ hai giữ cap từ contact đầu.
+- Why: Owner yêu cầu hoàn thiện kiến trúc J4. Code cũ có VERIFY/trim nhưng không được gọi, bù contact giả định bước tăng, persist calibration trước xác minh và chưa kiểm tra backoff sensorless đã thoát thật.
+- How: Giữ module/FSM chung, không thay hình học, dòng 450mA, tốc độ 2000/3000µs hay ngưỡng StallGuard. Tách duy nhất boundary phần cứng qua HOMING_HOST_TEST để test chạy trực tiếp production homing.cpp; không chép lại thuật toán trong test.
+- What: Thêm `test/host/homing_fsm_mocks.h`, `test/host/test_homing_fsm.cpp`, tích hợp `tools/run_host_tests.sh`; stub Arduino hỗ trợ println. Test chuỗi hoàn chỉnh với hai dấu encoder, bắt đầu ở hard-stop, kẹt warmup/backoff, SG-only/encoder-only, thiếu cữ ở FAST/SLOW, mất encoder/NaN/SG, counter hai cửa sổ, bù bước hai chiều, VERIFY/trim runaway và cancel. Cập nhật SYSTEM_OVERVIEW module/FSM/checklist theo code hiện tại.
+
+### Build gate
+- `pio run` → SUCCESS; RAM 49,996 bytes (15.3%), Flash 935,025 bytes (28.0%).
+- `tools/run_host_tests.sh` → ALL HOST TESTS PASSED; sau bổ sung cap SLOW cữ đầu, build lại và chạy riêng test production J4 FSM mở rộng → ALL PASSED.
+- `git diff --check` → PASS. Không thay đổi kinematics.
+
+### Việc còn lại
+- Chưa nạp hoặc commissioning trên robot. Test mô phỏng không chứng minh thông số SG/encoder phù hợp phần cứng thật. Home J4 thực tế phải qua hai SLOW CONTACT, CROSSCHECK, VERIFY OK rồi SETREF; ghi span, SG range và sai số tâm qua nhiều lần lặp.
+- NVS vẫn dùng API hiện hữu: applyHomingCalibration/setHomeHere báo lỗi ghi qua Serial; lần này thay thời điểm lưu, không thay giao thức ghi hai bản ghi NVS thành transaction nguyên tử.
+
+---
+
+## 2026-09-05 — Homing hardening: null guards, per-axis restore current, dọn dẹp state & dead code
+
+### Việc đã làm
+- What: Bổ sung guard `es != nullptr` tại `enterWarmup()`, `tickScan()` WARMUP case, và `SCAN_BACKOFF` (chặn crash null pointer nếu `es` null).
+- What: Bổ sung guard `jm != nullptr` tại các đoạn log tiến trình (Serial.printf trong `SCAN_MIN`/`SCAN_MAX` và `SCAN_SLOW`) và trong nhánh kiểm tra encoder J4 tại `SCAN_BACKOFF`/`LEG1_BACKOFF`.
+- What: Bổ sung defensive guard bounds/null pointer cho `motors[curAxis_]` trong `tick()`, `finishJoint()`, `cancel()`, và `restoreDriverDefaults()`.
+- What: `restoreDriverDefaults()` khôi phục đúng dòng định mức từng khớp (`DEFAULT_AXIS_RUN_CURRENTS[axis]`: J1=1000mA, J2=1700mA, J3=1700mA, J4=600mA) thay vì ghi đè 800mA chung cho toàn bộ các trục; khôi phục đúng chopper mode (SpreadCycle cho J2, StealthChop cho J1/J3/J4).
+- What: `beginScan()` dọn sạch toàn bộ biến stall (`encStallCount_`, `lastSgResult_`, `minSgResult_`, `maxSgResult_`) và verify (`trimStartErr_`, `trimStartSteps_`) để tránh carry-over state cũ qua các lần retry.
+- What: Xóa hoàn toàn các biến/field dead và deprecated trong `src/homing.h/.cpp` (`warmupSettling_`, `warmupSettleStartMs_`, `warmupFromMinP_`, `warmupFromMaxP_`).
+- What: Đơn giản hóa `m.setAbsoluteSteps(0)` tại contact #1 (cữ đầu tiên làm gốc bước tương đối, bỏ nhánh ternary dư thừa). Bổ sung khởi tạo `firstScanStartSteps_` tại nhánh WARMUP chạm cữ sớm.
+
+### Build gate
+- `pio run` (via `python -m platformio run`) → SUCCESS; RAM 49,980 bytes (15.3%), Flash 935,913 bytes (28.0%).
+- Không đụng đến kinematics.
+
+### Việc còn lại
+- Nạp firmware và commissioning kiểm tra thực tế trên robot arm.
+
+---
+
+## 2026-09-05 — Khắc phục triệt để lỗi Sensorless Homing J4 (WARMUP jump bound, hard-stop flex deadzone, CROSSCHECK ratio)
+
+### Việc đã làm
+- What: `src/homing.cpp` sửa 3 rào cản khiến J4 thất bại trên phần cứng thực tế (trong khi J2/J3 đã SETREF OK):
+  1. **WARMUP encoder jump guard (Blocker 1)**: Ngưỡng kiểm tra nhảy bất thường đổi từ `commandedDeg / MEASURED_RATIO_MIN = 3.01 / 0.5 = 6.02°` sang hằng số chuyên dụng `HOMING_J4_WARMUP_MAX_DELTA_DEG = 30.0f`. Thực tế phần cứng J4 có AS5600 quay theo tỷ lệ ~5.2× so với khớp (107 pulses motor quay 12.04° tạo ra delta encoder thực tế 11.60°..22.32°). Ngưỡng 6.02° cũ đã loại nhầm chuyển động vật lý bình thường ở 9/10 lần thử. Ngưỡng 30° mới vừa đón nhận trọn vẹn dải 11°..23° thực tế, vừa giữ nguyên kiểm thử host test (nhảy bất thường 32.26° vẫn bị hủy đúng quy cách).
+  2. **WARMUP hard-stop flex deadzone (Blocker 2)**: Thêm hằng số `HOMING_J4_WARMUP_DEADZONE_DEG = 1.50f` riêng cho J4 WARMUP (giữ `ENC_DIR_DEADZONE_DEG` per-axis 0.30° cho J1-J3 và cho pha BACKOFF). Khi J4 khởi động đang tỳ vào hard-stop, mô-men 450mA chỉ tạo độ rơ/đàn hồi cơ khí 0.53°. Ngưỡng deadzone 0.20° cũ ngộ nhận 0.53° là chuyển động tự do dẫn tới gán nhầm dấu `encDirMult_=+1` và không kích hoạt probe ngược 3°. Ngưỡng 1.50° nhận diện chính xác trạng thái kẹt cữ (0.53° < 1.50°), kích hoạt probe ngược 3° sang hướng tự do, đo chuẩn xác `encDirMult_=-1` và vượt qua BACKOFF (movedSigned 4.83° >= 0.30°).
+  3. **CROSSCHECK ratio guard (Blocker 3)**: Tại `enterCenteringScan()`, tỷ số `ratio = measuredSpd / cfgSpd` của J4 (thực tế ~0.19 do tỷ lệ encoder ~5.2×) không còn bị `if (!hasEndstop)` hủy bỏ thẳng tay (`HUY KHOP`). Thay vào đó: chỉ hủy khi ratio ngoài `[0.05, 20.0]` (chặn encoder hỏng/đứt kết nối/đóng băng), còn khi lệch ngoài `[0.5, 2.0]`, J4 tự động fallback về `measuredSpd = cfgSpd` (`giu config`) tương tự hành vi của J1, J2 và J3.
+- Why: Phản hồi log thực tế từ robot arm sau khi J2 và J3 đã SETREF OK, nhưng J4 liên tục FAILED do 3 rào cản phần mềm trên.
+- How: Tách biệt rõ ràng ngưỡng WARMUP deadzone (1.50°) và BACKOFF minimum travel (0.30°); giữ nguyên toàn bộ các chuỗi an toàn, timeout 60s/30s, bù bước hai chiều, VERIFY trim và quy chuẩn hình học.
+
+### Build gate
+- `pio run` (via PlatformIO CLI) → **SUCCESS**; RAM 49,980 bytes (15.3%), Flash 936,025 bytes (28.0%).
+- `test_kinematics` (g++) → **ALL KINEMATICS & DIFFERENTIAL WRIST TESTS PASSED** (2230/2230 roundtrips).
+- `test_homing_fsm` (g++) → **ALL PASSED (production J4 homing FSM)**.
+- `test_homing_nonblocking` (g++) → **ALL PASSED (13 tests)**.
+
+### Việc còn lại
+- Nạp firmware và commissioning Home J4 trên robot arm. Log kỳ vọng: WARMUP hợp lệ (hoặc probe ngược nếu bắt đầu sát cữ) → SCAN_MIN CONTACT → BACKOFF thoát cữ OK → SCAN_SLOW CONTACT #1 → LEG1_BACKOFF → SCAN_MAX CONTACT → SCAN_SLOW CONTACT #2 → CROSSCHECK `giu config` → CENTERING → VERIFY OK → SETREF OK.
+
+---
+
+## 2026-09-05 — Chẩn đoán Motor 5 (J6) không quay & Cô lập triệt để GPIO JTAG/Timer
+
+### Việc đã làm
+- **Triệu chứng**: Khi điều khiển Jog cổ tay vi sai (J5 Tilt hay J6 Roll), cả `motors[4]` (J5) và `motors[5]` (J6) đều nhận lệnh bước (`leftSteps = ±800, rightSteps = ±800`), nhưng người dùng quan sát thực tế chỉ có 1 động cơ (Motor 4) quay, động cơ còn lại (Motor 5) hoàn toàn bất động.
+- **Phân tích nguyên nhân & Sửa code (`src/main.cpp`, `src/motor.cpp`)**:
+  1. **Giải phóng IO_MUX khỏi JTAG MTDO (`gpio_reset_pin`)**: Motor 5 sử dụng `STEP_PIN_5 = 40` (trùng chân JTAG `MTDO` trên ESP32-S3) và `DIR_PIN_5 = 47`. Mặc định ROM/bootloader chiếm giữ ngoại vi JTAG trên GPIO 40 khiến `pinMode` và `gpio_config` không thể chuyển đổi hoàn toàn sang đầu ra GPIO thuần nếu thiếu `gpio_reset_pin()`. Đã bổ sung `gpio_reset_pin()` cho toàn bộ các chân STEP và DIR của 6 motor ở cả `setup()` (`src/main.cpp`) và `Motor::begin()` (`src/motor.cpp`).
+  2. **Gán nhãn riêng (label) và kiểm tra lỗi esp_timer**: Thay thế chuỗi cố định `"motor_step"` bằng `label` riêng của từng motor trong `esp_timer_create_args_t`, đồng thời kiểm tra và in cảnh báo Serial nếu `esp_timer_create` hoặc `esp_timer_start_once` gặp lỗi.
+  3. **Sửa logic `Motor::enable()` cho driver A4988**: `Motor::enable()` trước đây trả về `false` đối với driver không phải TMC (`!isTMC`), gây rủi ro nếu có luồng kiểm tra logic kích hoạt. Đã sửa: lưu trạng thái `enabled` và trả về `true`.
+- **Hướng dẫn kiểm tra phần cứng cho người dùng (Hardware Checklist)**:
+  - Cung cấp checklist kiểm tra A4988 cho Motor 5: chân `RESET` và `SLEEP` phải nối tắt với nhau; chân `ENABLE` kéo xuống GND; biến trở `VREF` không được vặn về 0V; kiểm tra giắc cắm 4 dây cuộn dây động cơ và phương pháp tráo đổi chéo 2 module A4988 / 2 dây motor để xác định driver hay motor hỏng.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,980 bytes (15.3%), Flash 936,425 bytes (28.0%).
+- `test_kinematics` (g++) → **ALL KINEMATICS & DIFFERENTIAL WRIST TESTS PASSED** (2230/2230 roundtrips).
+
+### Việc còn lại
+- Người dùng nạp firmware mới (`pio run -t upload`) và thực hiện checklist phần cứng kiểm tra Motor 5.
+
+---
+
+## 2026-09-06 — J4 homing: loại contact giả do dấu encoder WARMUP
+
+### Việc đã làm
+- What: `src/homing.cpp` đổi phát hiện step-lag và xác nhận BACKOFF J4 sang độ lớn delta AS5600 (`fabsf`), không dùng `encDirMult_` đo từ WARMUP 3°. Dấu encoder J4 nay được suy ra từ delta encoder của toàn sweep hai cữ tại CROSSCHECK, trước VERIFY/trim/persist.
+- Why: Log robot thật cho thấy `encDirMult_` WARMUP thay đổi `+1/-1`; khi dấu tức thời sai, chuyển động tự do bị clamp thành `encDelta=0`, tạo stall/contact giả. Hệ quả là BACKOFF báo sai “không thoát hard-stop” hoặc hai contact chỉ cách ~755 bước, thấp hơn sàn 1244 bước (35°).
+- How: Step-lag chỉ trả lời encoder có dịch chuyển hay không nên không cần dấu. Vẫn giữ giao `StallGuard ∧ AS5600`, hai poll liên tiếp, travel cap 55°, sàn span 35°, encoder span/ratio guards, retry và VERIFY; không thay dòng, tốc độ hay hình học.
+- What: Cập nhật regression trong `test/host/test_homing_logic.cpp`, `test/host/test_homing_nonblocking.cpp` và mô tả FSM trong `docs/SYSTEM_OVERVIEW.html`.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,980 bytes (15.3%), Flash 936,165 bytes (28.0%).
+- `tools/run_host_tests.sh` → **ALL HOST TESTS PASSED**, gồm production J4 homing FSM, homing logic, 13 test non-blocking và kinematics 2230/2230 roundtrips.
+
+### Việc còn lại
+- Nạp firmware và Home J4 trên robot. Kỳ vọng hai `SLOW CONTACT` cách nhau ít nhất 1244 bước, sau đó `CROSSCHECK` → `CENTERING` → `VERIFY OK` → `SETREF OK`; nếu còn fail, gửi log mới có SG range/contact span để tune theo phần cứng.
+
+---
+
+## 2026-09-06 — J4 homing: hiệu chỉnh span và backoff theo commissioning
+
+### Việc đã làm
+- What: `src/config.h` đổi sàn `HOMING_MIN_MECHANICAL_SPAN_DEG` của J4 từ 35° xuống 15°. Log mới có hai sweep hoàn chỉnh lặp lại 679 và 716 bước (~19–20° theo config), nên sàn 35°/1244 bước loại sai hành trình thật; sàn 15° vẫn chặn contact kép gần nhau.
+- What: `src/homing.cpp` nâng WARMUP jump guard từ 30° lên 40° để bao phủ delta thực đo 31.20° và 32.87°. Khi J4 chạy đủ backoff nhưng AS5600 chưa dịch qua 0.30° do backlash, FSM nay dùng cơ chế sẵn có nới 2.5°→5°→10°→20°; target step không đạt hoặc hết bốn mức vẫn hủy.
+- Why: Firmware 22:18:57 đã qua phần sửa dấu encoder nhưng thất bại ở ba guard không còn khớp số đo: span floor 35°, jump 30° và backoff 2.5° không đủ thắng backlash.
+- How: Giữ nguyên `StallGuard ∧ AS5600`, encoder span/ratio validation, cap 55°, dòng 450mA, tốc độ, retry và VERIFY. Cập nhật test host và `docs/SYSTEM_OVERVIEW.html` theo code thật.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,980 bytes (15.3%), Flash 936,353 bytes (28.0%).
+- `tools/run_host_tests.sh` → **ALL HOST TESTS PASSED**, kinematics 2230/2230, production J4 FSM và 13 test non-blocking.
+
+### Việc còn lại
+- Nạp firmware và Home J4 thực tế. Sweep 679–716 bước nay phải qua CROSSCHECK; kỳ vọng tiếp theo `CENTERING` → `VERIFY OK` → `SETREF OK`. Entry ngay trước ghi kỳ vọng 1244 bước đã được sửa forward bằng entry này, không rewrite lịch sử.
