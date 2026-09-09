@@ -13,7 +13,7 @@ chính xác với bản vẽ tay gốc (xem `docs/sketches/` nếu có lưu ản
                               <--16-->
                                  |
                     ,----[ J4 ]--+------[ J5 ] ─────── [ J6 ] ─────── (Pen TCP)
-                    |            |          \    31mm     \    20mm     \
+                    |            |          \    31mm     \    130mm    \
                     | 88mm       '--110mm----'             '-(D_TOOL)---'
                     |
                   [ J3 ]---- (elbow, quay ngang)
@@ -34,8 +34,8 @@ chính xác với bản vẽ tay gốc (xem `docs/sketches/` nếu có lưu ản
 - **J3 → điểm gập**: 88mm — J3 là khớp **elbow pitch**, trục xoay **song song J2**.
 - **Điểm gập → J5 (Wrist Tilt)**: 16mm + 110mm = **126mm** nối tiếp trên trục cẳng tay.
 - **J5 → J6 (Tool Roll)**: **31mm** dọc theo trục công cụ.
-- **J6 → Pen Tip (TCP)**: **20mm** gắn đồng trục với J6.
-- **Tổng chiều dài khâu công cụ hiệu dụng (J5 → Pen TCP)**: $31\text{mm} + 20\text{mm} = \mathbf{51\text{mm}}$.
+- **J6 → Pen Tip (TCP)**: **130mm** gắn đồng trục với J6.
+- **Tổng chiều dài khâu công cụ hiệu dụng (J5 → Pen TCP)**: $31\text{mm} + 130\text{mm} = \mathbf{161\text{mm}}$.
 
 ## 2. Quan hệ giao nhau giữa các trục khớp
 
@@ -45,12 +45,12 @@ chính xác với bản vẽ tay gốc (xem `docs/sketches/` nếu có lưu ản
 | J3 → J4 | Trục **vuông góc** với J3, có khoảng lệch vuông góc chung (common perpendicular) = $a_3 = 88\text{mm}$. |
 | J4, J5 | Trục xoay cắt nhau tại tâm cổ tay J5 ($d_4 = 126\text{mm}$). |
 | J5 → J6 | Trục $Z_6$ (Tool Roll) vuông góc với trục nghiêng $Z_5$, đặt cách J5 một khoảng $d_6 = 31\text{mm}$. |
-| J6 → TCP | Bút gắn đồng trục với $Z_6$, dài $D_{\text{tool}} = 20\text{mm}$. |
+| J6 → TCP | Bút gắn đồng trục với $Z_6$, dài $D_{\text{tool}} = 130\text{mm}$. |
 
 **Hệ quả đối với IK Pen-Down (Bút chỉ thẳng đứng $\theta_4 = 0, \theta_6 = 0$):**
-Vì bút luôn hướng thẳng đứng xuống dưới (song song trục $-Z$), đoạn $31\text{mm}$ (J5 $\to$ J6) và $20\text{mm}$ (J6 $\to$ TCP) nằm thẳng hàng dọc, tạo thành cánh tay đòn thẳng đứng dài **$51\text{mm}$**.
+Vì bút luôn hướng thẳng đứng xuống dưới (song song trục $-Z$), đoạn $31\text{mm}$ (J5 $\to$ J6) và $130\text{mm}$ (J6 $\to$ TCP) nằm thẳng hàng dọc, tạo thành cánh tay đòn thẳng đứng dài **$161\text{mm}$**.
 IK được giải theo 2 bước:
-1. Tính tọa độ tâm trục nghiêng **J5** ($Z_{\text{J5}} = Z_{\text{target}} + 51.0\text{mm}, X_{\text{J5}} = X_{\text{target}}, Y_{\text{J5}} = Y_{\text{target}}$).
+1. Tính tọa độ tâm trục nghiêng **J5** ($Z_{\text{J5}} = Z_{\text{target}} + 161.0\text{mm}, X_{\text{J5}} = X_{\text{target}}, Y_{\text{J5}} = Y_{\text{target}}$).
 2. Giải hình học phẳng 2 khâu cho J1-J2-J3 theo định lý cosin, đặt $\theta_5 = -(t_2 + t_3 + \delta)$.
 
 ## 3. Bảng tham số DH (Modified DH — Craig convention)
@@ -65,7 +65,7 @@ Công thức biến đổi: `T_i = Rx(alpha_{i-1}) · Tx(a_{i-1}) · Rz(theta_i)
 | 4 | **88** | -90 | **126** (=16+110) | θ4 (biến) | Forearm offset → Wrist pan |
 | 5 | 0 | +90 | 0 | θ5 (biến) | Wrist tilt |
 | 6 | 0 | -90 | **31** | θ6 (biến) | Wrist roll (J5 → J6) |
-| TCP | — | — | **D_TOOL = 20** | — | Bút, gắn đồng trục với J6 |
+| TCP | — | — | **D_TOOL = 130** | — | Bút, gắn đồng trục với J6 |
 
 ## 4. Offset góc: Encoder Zero ↔ DH Theta
 
@@ -85,7 +85,7 @@ Công thức chuyển đổi: `theta_DH(i) = theta_encoder(i) + OFFSET(i)`
 Tại vị trí Home (mọi encoder = 0°), mô hình FK dự đoán:
 - **Tâm trục J5**: $(X = 126.0\text{mm}, Y = 0.0\text{mm}, Z = 365.0\text{mm})$ ($126 = 16+110; 365 = 139+138+88$)
 - **Tâm trục J6**: $(X = 157.0\text{mm}, Y = 0.0\text{mm}, Z = 365.0\text{mm})$ ($157 = 126 + 31$)
-- **Đầu nhọn bút (TCP)**: $(X = 177.0\text{mm}, Y = 0.0\text{mm}, Z = 365.0\text{mm})$ ($177 = 126 + 31 + 20$)
+- **Đầu nhọn bút (TCP)**: $(X = 287.0\text{mm}, Y = 0.0\text{mm}, Z = 365.0\text{mm})$ ($287 = 126 + 31 + 130$)
 
 ## 6. Tầm với & vùng làm việc (Workspace)
 
@@ -95,13 +95,13 @@ Tại vị trí Home (mọi encoder = 0°), mô hình FK dự đoán:
 | Góc lệch cẳng tay $\delta$ | 55.06° ($=\text{atan2}(126, 88)$) |
 | Tầm với xa nhất đến tâm J5 | 291.7mm ($= 138.0 + 153.69$) |
 | Tầm với gần nhất (inner deadzone) | 15.7mm ($=|153.69 - 138.0|$) |
-| Chiều dài khâu công cụ hiệu dụng (J5 $\to$ TCP) | **51.0mm** ($= 31\text{mm} + 20\text{mm}$) |
+| Chiều dài khâu công cụ hiệu dụng (J5 $\to$ TCP) | **161.0mm** ($= 31\text{mm} + 130\text{mm}$) |
 | Độ cao tối đa tâm J5 | 430.7mm |
 
 ## 7. Kỳ dị động học đã phát hiện (Singularity)
 
 Khi hướng công cụ (tool z-axis) **chỉ thẳng đứng** (song song trục J1) $\to$ trục J1 và J6 trùng phương.
-Sử dụng **Closed-form Analytic IK** (`kin::ikPenDown()` trong `src/kinematics.cpp`) giải giải tích trực tiếp góc vai-khuỷu (J2-J3) với $Z_{\text{wrist}} = Z_{\text{target}} + 51.0\text{mm}$ và cố định J4=0, J6=0, triệt tiêu hoàn toàn trôi nghiệm.
+Sử dụng **Closed-form Analytic IK** (`kin::ikPenDown()` trong `src/kinematics.cpp`) giải giải tích trực tiếp góc vai-khuỷu (J2-J3) với $Z_{\text{wrist}} = Z_{\text{target}} + 161.0\text{mm}$ và cố định J4=0, J6=0, triệt tiêu hoàn toàn trôi nghiệm.
 
 ## 8. Cơ cấu Vi sai Bánh răng Côn Cổ tay J5–J6 (2-DOF Bevel Gear Differential Wrist)
 
@@ -152,7 +152,7 @@ Cụm cổ tay J5 (Tilt / Nghiêng) và J6 (Roll / Xoay bút) sử dụng cơ c�
 
 ### 8.2. Đặc tính vận hành thực tế
 1. **Chia sẻ tải trọng**: Cả hai động cơ NEMA 14 (J5 và J6) đều đặt cố định trên thân cẳng tay (không cần slip-ring hay dây xoắn), cùng đồng thời chia đôi mô-men xoắn khi nghiêng hoặc xoay bút.
-2. **Không trôi điểm gốc (Encoder Alignment)**: Hai encoder AS5600 đọc góc tuyệt đối trực tiếp của 2 bánh răng côn bên ($E_L, E_R$). Khi bật nguồn hoặc hiệu chuẩn Home, firmware khôi phục tức thời trạng thái $(\theta_{J5}, \theta_{J6})$ thông qua lớp `DifferentialWrist` trong `src/differential_wrist.h`.
+2. **Không trôi điểm gốc (Encoder Alignment)**: Hai encoder AS5600 đọc góc tuyệt đối trực tiếp của 2 bánh răng côn bên ($E_L, E_R$). Khi bật nguồn hoặc hiệu chuẩn Home, firmware khôi phục tức thời trạng thái $(\theta_{J5}, \theta_{J6})$ qua các hàm thuần trong namespace `wrist` tại `src/differential_wrist.h`.
 
 ---
 
@@ -164,7 +164,6 @@ Cụm cổ tay J5 (Tilt / Nghiêng) và J6 (Roll / Xoay bút) sử dụng cơ c�
 | `src/joint_model.h` / `.cpp` | Tích hợp giải mã $E_L, E_R \to J_5, J_6$ và $M_L, M_R \to J_5, J_6$ |
 | `src/arm.cpp` | Điều khiển Jog độc lập (Jog Tilt $\to M_L, M_R$ cùng chiều; Jog Roll $\to M_L, M_R$ ngược chiều) |
 | `src/planner.cpp` | Đồng bộ bước vi sai cho các segment vẽ quỹ đạo |
-| `digital_clone.py` | Trình mô phỏng 3D/2D tích hợp module vi sai `DifferentialWrist` |
 | `test/kinematics/test_kinematics.cpp` | Host unit test tự động cho toàn bộ chuyển đổi vi sai |
 | `src/kinematics.h` / `src/kinematics.cpp` | Bản port C++/float cho ESP32-S3 firmware |
 

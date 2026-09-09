@@ -107,6 +107,8 @@ static void test_manual_release_ignores_endstop() {
   MockEndstops es; es.setGpio(0, EndstopWhich::MIN, true);
   MockJointModel jm;
   SafetyManager sm(&es, &jm);
+  sm.assertEStop("pressed before release");
+  CHECK(sm.state() == SafetyState::E_STOP, "manual release starts from E_STOP");
   sm.assertManualRelease(true);
   es.setGpio(0, EndstopWhich::MIN, false);
   sm.isrNotify(0, EndstopWhich::MIN, 1000000);

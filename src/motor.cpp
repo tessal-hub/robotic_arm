@@ -379,6 +379,9 @@ void Motor::run(bool cw, uint32_t steps) {
     if (stepTimer != nullptr) {
         const esp_err_t timerErr = esp_timer_start_once(stepTimer, currentSpeedUs.load(std::memory_order_relaxed));
         if (timerErr != ESP_OK) {
+            running.store(false, std::memory_order_release);
+            stepsRemaining.store(0, std::memory_order_relaxed);
+            targetSteps.store(0, std::memory_order_relaxed);
             Serial.printf("[MOTOR LOI] %s esp_timer_start_once that bai: %d\n", label, timerErr);
         }
     } else {
@@ -412,6 +415,9 @@ void Motor::runContinuous(bool cw) {
     if (stepTimer != nullptr) {
         const esp_err_t timerErr = esp_timer_start_once(stepTimer, currentSpeedUs.load(std::memory_order_relaxed));
         if (timerErr != ESP_OK) {
+            running.store(false, std::memory_order_release);
+            stepsRemaining.store(0, std::memory_order_relaxed);
+            targetSteps.store(0, std::memory_order_relaxed);
             Serial.printf("[MOTOR LOI] %s esp_timer_start_once that bai: %d\n", label, timerErr);
         }
     } else {
@@ -496,10 +502,16 @@ bool Motor::enable(bool en) {
     }
     if (!takeUart(20)) return false;
     flushUartRx();
-    driver->toff(en ? 4 : 0);
+    const uint8_t expectedToff = en ? 4 : 0;
+    driver->toff(expectedToff);
+    flushUartRx();
+    driverVersion = driver->version();
+    uartOk = (driverVersion == 0x21);
+    flushUartRx();
+    const bool ok = uartOk && driver->toff() == expectedToff;
     giveUart();
-    enabled.store(en, std::memory_order_release);
-    return true;
+    if (ok) enabled.store(en, std::memory_order_release);
+    return ok;
 }
 
 void Motor::setSpeed(uint32_t intervalUs) {
@@ -519,14 +531,6 @@ void Motor::setCurrent(uint16_t mA) {
     giveUart();
 }
 
-void Motor::setHold(uint8_t scale) {
-    holdScale = scale;
-    if (!isTMC || !takeUart(20)) return;
-    flushUartRx();
-    driver->ihold(holdScale);
-    giveUart();
-}
-
 void Motor::setChopperMode(bool spreadCycle) {
     spreadCycleMode = spreadCycle;
     if (!isTMC || !takeUart(20)) return;
@@ -534,14 +538,6 @@ void Motor::setChopperMode(bool spreadCycle) {
     driver->en_spreadCycle(spreadCycleMode);
     driver->pwm_autoscale(!spreadCycleMode);
     driver->pwm_autograd(!spreadCycleMode);
-    giveUart();
-}
-
-void Motor::setMicrosteps(uint16_t ms) {
-    microstepsVal = ms;
-    if (!isTMC || !takeUart(20)) return;
-    flushUartRx();
-    driver->microsteps(ms);
     giveUart();
 }
 

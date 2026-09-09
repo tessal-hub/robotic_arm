@@ -7,8 +7,6 @@
 #include "work_plane.h"
 
 namespace {
-constexpr float DEG2RAD = 0.017453292519943295f;
-
 inline bool motorsBusy(Motor** m) {
     for (uint8_t i = 0; i < NUM_MOTORS; ++i)
         if (m[i]->isRunning()) return true;
@@ -28,6 +26,7 @@ void Planner::begin(Motor** motors_, JointModel* joints_) {
 bool Planner::submit(const Job& job) {
     if (isActive()) return false;
     if (job.shape == Shape::NONE) return false;
+    if (!syncWristFeedback()) return false;
 
     // Vị trí Cartesian xuất phát = TCP hiện tại theo FK (hoặc UCS nếu WorkPlane bật)
     float enc[6];
@@ -45,35 +44,6 @@ bool Planner::submit(const Job& job) {
     }
 
     // Pre-flight lightweight B validation (§3.4) — reject out-of-reach BEFORE moving, HTTP 400
-    {
-        TrajectoryValidator::Job vj;
-        vj.type = static_cast<TrajectoryValidator::Job::Type>(job.shape);
-        vj.x1 = job.x1;
-        vj.y1 = job.y1;
-        vj.x2 = job.x2;
-        vj.y2 = job.y2;
-        vj.z = job.z;
-        vj.r = job.r;
-        vj.feedMmS = job.feedMmS;
-        vj.drawNow = job.drawNow;
-        kin::Pose curPose{curX_, curY_, curZ_};
-        validator_.setWorkPlane(workPlane);
-        ValidationResult vr = validator_.validate(vj, curPose);
-        if (!vr.ok) {
-            lastError_ = vr.reason;
-            lastFailIndex_ = vr.failIndex;
-            Serial.printf("[PLAN] REJECT %s: %s at %d (cur %.1f,%.1f,%.1f)\n",
-                          (job.shape == Shape::POINT)   ? "POINT"
-                          : (job.shape == Shape::LINE) ? "LINE"
-                          : (job.shape == Shape::CIRCLE) ? "CIRCLE"
-                                                       : "SQUARE",
-                          vr.reason.c_str(), vr.failIndex, curPose.x, curPose.y, curPose.z);
-            return false;
-        }
-        lastError_ = "OK";
-        lastFailIndex_ = -1;
-    }
-
     job_ = job;
 
     switch (job_.shape) {
@@ -128,7 +98,16 @@ void Planner::stop() {
     for (uint8_t i = 0; i < NUM_MOTORS; ++i) motors[i]->stop();
     hasJob_ = false;
     state_ = State::IDLE;
-    Serial.println("[PLAN] STOP boi nguoi dung");
+    Serial.println("[PLAN] STOP");
+}
+
+bool Planner::syncWristFeedback() {
+    if (!jm->isHomed(4) || !jm->isHomed(5) || !jm->encOK(4) || !jm->encOK(5)) {
+        Serial.println("[PLAN] LOI: J5/J6 can Set Home va 2 encoder khoe de chay Cartesian/Draw");
+        stop();
+        return false;
+    }
+    return jm->resyncFromEncoder(4) && jm->resyncFromEncoder(5);
 }
 
 bool Planner::startMoveTo(float x, float y, float z, float feedMmS) {
@@ -154,6 +133,10 @@ bool Planner::startMoveTo(float x, float y, float z, float feedMmS) {
         return false;
     }
 
+    // Encoder-anchored wrist: mọi waypoint bắt đầu từ vị trí actuator AS5600
+    // thực tế, nên sai số/mất bước A4988 được bù ở segment kế tiếp thay vì tích lũy.
+    if (!syncWristFeedback()) return false;
+
     // Bước step từng trục + trục chủ đạo (nhiều step nhất)
     int64_t steps[NUM_MOTORS];
     float deltaAct[NUM_MOTORS];
@@ -173,7 +156,7 @@ bool Planner::startMoveTo(float x, float y, float z, float feedMmS) {
 
     // Khớp J5, J6 qua cơ cấu Vi sai Bánh răng Côn (Differential Wrist)
     {
-        const DifferentialWrist::ActuatorState actTarget = g_diffWrist.inverse(target[4], target[5]);
+        const wrist::ActuatorState actTarget = wrist::inverse(target[4], target[5]);
         const float curM5 = jm->actuatorAngleFromSteps(4);
         const float curM6 = jm->actuatorAngleFromSteps(5);
         deltaAct[4] = actTarget.leftDeg - curM5;
@@ -209,15 +192,42 @@ bool Planner::startMoveTo(float x, float y, float z, float feedMmS) {
     if (dominantIntervalUs < MIN_STEP_INTERVAL_US) dominantIntervalUs = MIN_STEP_INTERVAL_US;
     if (dominantIntervalUs > MAX_STEP_INTERVAL_US) dominantIntervalUs = MAX_STEP_INTERVAL_US;
 
+    uint32_t intervals[NUM_MOTORS]{};
+    bool directions[NUM_MOTORS]{};
     for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
         if (steps[i] <= 0) continue;
         const float scale = static_cast<float>(steps[i]) / static_cast<float>(maxSteps);
         uint32_t interval = static_cast<uint32_t>(dominantIntervalUs / scale);
-        if (interval > MAX_STEP_INTERVAL_US) interval = MAX_STEP_INTERVAL_US;
         if (interval < MIN_STEP_INTERVAL_US) interval = MIN_STEP_INTERVAL_US;
-        motors[i]->setSpeed(interval);
-        const bool cw = JointModel::cwForDelta(i, deltaAct[i]);
-        motors[i]->run(cw, static_cast<uint32_t>(steps[i]));
+        intervals[i] = interval;
+        directions[i] = JointModel::cwForDelta(i, deltaAct[i]);
+    }
+
+    // Các đoạn vẽ ngắn phải khởi động đồng thời; nếu gọi run() tuần tự, mỗi trục
+    // tự ramp và kết thúc lệch nhau tại từng waypoint 1 mm, tạo rung tuần hoàn.
+    if (state_ == State::DRAWING) {
+        for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+            if (steps[i] <= 0) continue;
+            if (!motors[i]->prepareCoordinatedRun(
+                    directions[i], static_cast<uint32_t>(steps[i]), intervals[i])) {
+                stop();
+                return false;
+            }
+        }
+        for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+            if (steps[i] <= 0) continue;
+            if (!motors[i]->startPreparedRun()) {
+                stop();
+                return false;
+            }
+        }
+    } else {
+        // Staging/nâng/hạ có hành trình dài: giữ S-curve của Motor::run().
+        for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+            if (steps[i] <= 0) continue;
+            motors[i]->setSpeed(intervals[i]);
+            motors[i]->run(directions[i], static_cast<uint32_t>(steps[i]));
+        }
     }
     return true;
 }
@@ -244,7 +254,7 @@ bool Planner::nextDrawSegment() {
     } else { // SQUARE: bắt đầu ở góc dưới-trái, quét CCW bốn cạnh
         const float side = job_.r;
         const float half = side * 0.5f;
-        const float step = (remain < DRAW_SEGMENT_MM) ? remain : DRAW_SEGMENT_MM;
+        const float step = (remain < DRAW_LINE_SEGMENT_MM) ? remain : DRAW_LINE_SEGMENT_MM;
         prog_ += step;
         const float p = prog_;
         if (p <= side) {
@@ -295,26 +305,6 @@ void Planner::tick() {
             state_ = needDrop ? State::DROPPING : State::FINISHED_LIFT;
             break;
         }
-
-        case State::TRAVELING:
-            if (motorsBusy(motors)) return;
-            // Di chuyển ngang ở độ cao ĐÃ NÂNG tới điểm bắt đầu nét vẽ / đích POINT
-            if (job_.shape == Shape::CIRCLE) {
-                curX_ = job_.x1 + job_.r * cosf(startAng_);
-                curY_ = job_.y1 + job_.r * sinf(startAng_);
-            } else if (job_.shape == Shape::SQUARE) {
-                curX_ = job_.x1 - job_.r * 0.5f;
-                curY_ = job_.y1 - job_.r * 0.5f;
-            } else {
-                curX_ = job_.x1;
-                curY_ = job_.y1;
-            }
-            if (!startMoveTo(curX_, curY_, curZ_, job_.feedMmS)) return;
-            {
-                const bool needDrop = job_.drawNow || (job_.shape == Shape::POINT);
-                state_ = needDrop ? State::DROPPING : State::FINISHED_LIFT;
-            }
-            break;
 
         case State::DROPPING:
             if (motorsBusy(motors)) return;

@@ -108,9 +108,7 @@ public:
 
     void setSpeed(uint32_t intervalUs);
     void setCurrent(uint16_t mA);
-    void setHold(uint8_t scale);
     void setChopperMode(bool spreadCycle);
-    void setMicrosteps(uint16_t ms);
     void setSGThreshold(uint8_t sgthrs);
     uint16_t getSGResult();
 
@@ -123,7 +121,6 @@ public:
     TMC2209Stepper* getDriver() noexcept { return driver.get(); }
 
     [[nodiscard]] bool isRunning() const noexcept { return running.load(std::memory_order_relaxed); }
-    [[nodiscard]] bool isEnabled() const noexcept { return enabled.load(std::memory_order_relaxed); }
     [[nodiscard]] bool getDirCW() const noexcept { return dirCW.load(std::memory_order_relaxed); }
     [[nodiscard]] uint32_t getStepsRemaining() const noexcept { return stepsRemaining.load(std::memory_order_relaxed); }
     [[nodiscard]] uint32_t getTargetSteps() const noexcept { return targetSteps.load(std::memory_order_relaxed); }

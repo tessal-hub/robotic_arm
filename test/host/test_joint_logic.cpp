@@ -40,9 +40,9 @@ static void testCwForDeltaJ2NegativeSign() {
 }
 
 static void testCwForDeltaJ3NegativeSign() {
-    CHECK(AXIS_STEP_SIGN[2] > 0, "J3 STEP_SIGN positive");
-    CHECK(cwForDelta(2, +5.0f) == true, "J3 +delta => cw");
-    CHECK(cwForDelta(2, -5.0f) == false, "J3 -delta => ccw");
+    CHECK(AXIS_STEP_SIGN[2] < 0, "J3 STEP_SIGN negative");
+    CHECK(cwForDelta(2, +5.0f) == false, "J3 +delta => ccw");
+    CHECK(cwForDelta(2, -5.0f) == true, "J3 -delta => cw");
 }
 
 static void testStepsPerDegreePositive() {

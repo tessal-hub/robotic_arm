@@ -49,13 +49,12 @@ constexpr uint8_t STEP_PIN_5                    = 40;  // Motor 5 (Joint 6 - Fla
 constexpr uint8_t DIR_PIN_5                     = 47;
 
 constexpr uint8_t NUM_MOTORS                    = 6;
-constexpr uint8_t MAX_WAYPOINTS                 = 32;
 
 // Chiều quay logic: +1 nếu step CW ứng với góc khớp tăng dương (hiệu chỉnh lúc lắp).
 // J2 và J3: góc dương là hướng vươn ra ngoài.
-constexpr int8_t AXIS_STEP_SIGN[NUM_MOTORS]     = { +1, +1, +1, -1, +1, +1 };
+constexpr int8_t AXIS_STEP_SIGN[NUM_MOTORS]     = { +1, +1, -1, -1, +1, +1 };
 // Chiều đo AS5600: J1-J5 dùng raw âm; J6 vẫn raw âm theo xác nhận commissioning.
-constexpr int8_t AXIS_ENC_SIGN[NUM_MOTORS]      = { -1, -1, -1, -1, -1, -1 };
+constexpr int8_t AXIS_ENC_SIGN[NUM_MOTORS]      = { -1, -1, 1, -1, -1, -1 };
 
 // ==============================================================================
 // 3. I2C SENSOR BUS (PCA9548A Multiplexer + AS5600 Magnetic Encoders)
@@ -68,10 +67,6 @@ constexpr uint8_t PCA_ADDR                      = 0x70;
 constexpr uint8_t AS5600_ADDR                   = 0x36;
 constexpr uint8_t NUM_SENSORS                   = 6;
 
-// Sensor Health & Diagnostics Constants
-constexpr uint8_t AS5600_AGC_MIN_HEALTHY        = 30;
-constexpr uint8_t AS5600_AGC_MAX_HEALTHY        = 225;
-
 // Sensor Task configuration (Core 0, 20ms 50Hz)
 // SensorScanTask chạy Core 0 (RF/WiFi core) — WiFi chỉ dùng interrupt sau khi kết nối,
 // không chiếm CPU liên tục. Tách biệt hoàn toàn với arm_motion (Core 1).
@@ -80,7 +75,6 @@ constexpr uint32_t SENSOR_TASK_STACK_SIZE       = 4096;
 constexpr UBaseType_t SENSOR_TASK_PRIORITY      = 4;
 constexpr BaseType_t SENSOR_TASK_CORE           = 0;
 constexpr uint32_t SENSOR_I2C_MUTEX_TIMEOUT_MS  = 30;
-constexpr uint32_t WDT_TIMEOUT_SEC              = 5;
 
 // ==============================================================================
 // 4. ENDSTOPS / LIMIT SWITCHES (J1, J2, J3)
@@ -122,12 +116,11 @@ constexpr float DEFAULT_GEAR_RATIO              = GEAR_RATIO_J1;
 constexpr uint16_t DEFAULT_FULL_STEPS           = 200;    // 1.8 degree stepper (200 steps/rev)
 constexpr uint16_t DEFAULT_MICROSTEPS           = 16;     // 1/16 microstepping
 constexpr uint16_t DEFAULT_NORMAL_CURRENT       = 800;    // Normal running current (mA)
-constexpr uint16_t DEFAULT_HOMING_CURRENT       = 350;    // Ultra-low current for Homing (mA)
 
 constexpr uint16_t NORMAL_CURRENT_J1            = 1000;    // Base Yaw (mA)
 constexpr uint16_t NORMAL_CURRENT_J2            = 1700;   // Shoulder Pitch (mA) — nâng cánh tay trên
 constexpr uint16_t NORMAL_CURRENT_J3            = 1700;   // Elbow Pitch (mA) — nâng khuỷu tay
-constexpr uint16_t NORMAL_CURRENT_J4            = 600;    // Wrist Pan (mA)
+constexpr uint16_t NORMAL_CURRENT_J4            = 500;    // Wrist Pan (mA)
 constexpr uint16_t NORMAL_CURRENT_J5            = 0;      // A4988 - VREF cứng
 constexpr uint16_t NORMAL_CURRENT_J6            = 0;      // A4988 - VREF cứng
 
@@ -140,10 +133,10 @@ constexpr uint16_t DEFAULT_AXIS_RUN_CURRENTS[NUM_MOTORS] = {
     NORMAL_CURRENT_J6
 };
 
-constexpr uint16_t HOMING_CURRENT_J1            = 800;    // Base Yaw (mA) — cần traverse full range, ISR endstop bảo vệ chạm
+constexpr uint16_t HOMING_CURRENT_J1            = 1000;    // Base Yaw (mA) — cần traverse full range, ISR endstop bảo vệ chạm
 constexpr uint16_t HOMING_CURRENT_J2            = 1000;    // Shoulder Pitch (mA)
 constexpr uint16_t HOMING_CURRENT_J3            = 1000;    // Elbow Pitch (mA)
-constexpr uint16_t HOMING_CURRENT_J4            = 450;    // Wrist Roll (mA) — dòng vừa đủ êm, chạm nhẹ cữ kẹt cứng không rung lắc
+constexpr uint16_t HOMING_CURRENT_J4            = 550;    // Wrist Pan (mA) — đủ mô-men vượt ma sát/cáp trong StealthChop, Back-EMF rõ cho SG4
 constexpr uint16_t HOMING_CURRENT_J5            = 0;      // A4988 - VREF cứng
 constexpr uint16_t HOMING_CURRENT_J6            = 0;      // A4988 - VREF cứng
 
@@ -156,12 +149,12 @@ constexpr uint16_t DEFAULT_AXIS_HOMING_CURRENTS[NUM_MOTORS] = {
     HOMING_CURRENT_J6
 };
 
-constexpr uint32_t HOMING_STEP_INTERVAL_J1      = 1800;   // us/step
-constexpr uint32_t HOMING_STEP_INTERVAL_J2      = 1800;   // 556 steps/s, bằng Jog J2 để giảm tải khi home
-constexpr uint32_t HOMING_STEP_INTERVAL_J3      = 1500;
-constexpr uint32_t HOMING_STEP_INTERVAL_J4      = 2000;   // 500 steps/sec (torque cao, ít rung cho J4)
-constexpr uint32_t HOMING_STEP_INTERVAL_J5      = 2500;   // 400 steps/sec (torque cao nhất cho A4988)
-constexpr uint32_t HOMING_STEP_INTERVAL_J6      = 2500;
+constexpr uint32_t HOMING_STEP_INTERVAL_J1      = 1200;   // 833 steps/s (1.5x)
+constexpr uint32_t HOMING_STEP_INTERVAL_J2      = 1200;   // 833 steps/s (1.5x)
+constexpr uint32_t HOMING_STEP_INTERVAL_J3      = 1000;   // 1000 steps/s (1.5x)
+constexpr uint32_t HOMING_STEP_INTERVAL_J4      = 1333;   // ~750 steps/s (1.5x)
+constexpr uint32_t HOMING_STEP_INTERVAL_J5      = 1667;   // ~600 steps/s (1.5x)
+constexpr uint32_t HOMING_STEP_INTERVAL_J6      = 1667;   // ~600 steps/s (1.5x)
 
 constexpr uint32_t DEFAULT_AXIS_HOMING_SPEEDS[NUM_MOTORS] = {
     HOMING_STEP_INTERVAL_J1,
@@ -184,7 +177,7 @@ constexpr uint32_t HOMING_POLL_MS               = 20;     // Chu kỳ giám sát
 
 // Homing 2 tốc độ (quét 2 cữ J1..J4): FAST tìm cữ thô, SLOW tiếp cận lại lấy mốc chính xác.
 // Glitch ở pha FAST tự hồi phục vì pha SLOW dò lại đúng cữ đó; VERIFY đối chiếu encoder độc lập.
-constexpr uint32_t HOMING_SLOW_SCAN_INTERVAL_US = 3000;   // us/step pha tiếp cận chậm (mốc chính xác, ít đập cữ)
+constexpr uint32_t HOMING_SLOW_SCAN_INTERVAL_US = 2000;   // 500 steps/s (1.5x), vẫn chậm hơn FAST
 constexpr uint8_t  HOMING_MAX_ATTEMPTS          = 2;      // Số lần thử tối đa mỗi khớp trước khi hủy chuỗi
 constexpr float    HOMING_VERIFY_TOL_BASE_DEG   = 0.5f;   // Verify tại home: dung sai gốc (độ raw encoder)
 constexpr float    HOMING_VERIFY_TOL_SPAN_PCT   = 1.0f;   // Verify: + % của nửa span (chịu sai số steps/deg đo được)
@@ -197,27 +190,26 @@ constexpr float    HOMING_MIN_ENC_SPAN_DEG[NUM_MOTORS] = { 30.0f, 30.0f, 30.0f, 
 // J4 sensorless hard-stop span integrity floor. Commissioning 2026-09-06 lặp lại
 // 679–716 steps (~19–20° theo config), nên giữ sàn 15° để chặn contact kép gần nhau.
 constexpr float    HOMING_MIN_MECHANICAL_SPAN_DEG = 15.0f;
-// J4 thực đo span 38.8–42.2°; leg thứ hai vượt 55° mà chưa có cữ là lỗi, không chờ timeout 60s.
-constexpr float    HOMING_J4_MAX_MECHANICAL_SPAN_DEG = 55.0f;
+// J4 commissioning mới cần quét tới 150° để tìm cữ; vẫn bị chặn bởi timeout 60s.
+constexpr float    HOMING_J4_MAX_MECHANICAL_SPAN_DEG = 150.0f;
 constexpr float    HOMING_TRIM_MAX_TRAVEL_DEG  = 5.0f;    // Giới hạn hành trình mỗi lần trim VERIFY (chống trim chạy loạn đâm endstop)
 constexpr uint8_t  HOMING_BACKOFF_MAX_EXTEND    = 3;      // Số lần nới rộng backoff (2.5°→5°→10°→20°) khi công tắc chưa nhả (hysteresis đòn bẩy)
 constexpr uint32_t HOMING_BACKOFF_SETTLE_MS    = 30;     // Settle cơ khí & tiếp điểm sau khi dừng đột ngột từ pha quét (non-blocking)
 
 // Speed & Acceleration Timing (microseconds per step pulse)
-constexpr uint32_t DEFAULT_STEP_INTERVAL_US     = 1200;   // Target step interval -> ~833 steps/sec
-constexpr uint32_t HOMING_STEP_INTERVAL_US      = 1800;   // Fallback homing speed
+constexpr uint32_t DEFAULT_STEP_INTERVAL_US     = 800;    // Target step interval -> 1250 steps/sec (1.5x)
 constexpr uint32_t MIN_STEP_INTERVAL_US         = 120;    // Max speed limit -> ~8333 steps/sec
 constexpr uint32_t MAX_STEP_INTERVAL_US         = 3500;   // Starting speed interval (~285 steps/sec, max static torque)
 constexpr uint32_t DEFAULT_ACCEL_RATE           = 12;
 
 // Tốc độ Jog độc lập từng khớp (us/step) — tối ưu mô-men xoắn cao tuyệt đối, không trượt bước:
 constexpr uint32_t DEFAULT_AXIS_JOG_SPEEDS[NUM_MOTORS] = {
-    1200,  // J1 (6:1):  833 steps/sec  -> 15.63 deg/sec
-    1800,  // J2 (20:1): 556 steps/sec  -> 3.13 deg/sec (mô-men xoắn nâng cánh tay cực đại)
-    1800,  // J3 (20:1): 556 steps/sec  -> 3.13 deg/sec (mô-men xoắn nâng khuỷu cực đại)
-    1500,  // J4 (4:1):  667 steps/sec  -> 18.75 deg/sec
-    2500,  // J5 (3:1):  400 steps/sec  -> 15.00 deg/sec (A4988, mô-men xoắn kéo bánh răng côn)
-    2500   // J6 (3:1):  400 steps/sec  -> 15.00 deg/sec (A4988, mô-men xoắn kéo bánh răng côn)
+    800,   // J1 (6:1):  1250 steps/s -> 23.44 deg/s
+    1200,  // J2 (20:1): 833 steps/s  -> 4.69 deg/s
+    1200,  // J3 (20:1): 833 steps/s  -> 4.69 deg/s
+    1000,  // J4 (4:1):  1000 steps/s -> 28.13 deg/s
+    1667,  // J5 (3:1):  ~600 steps/s -> 22.50 deg/s
+    1667   // J6 (3:1):  ~600 steps/s -> 22.50 deg/s
 };
 
 // Schmitt-Trigger Deadband for closed-loop holding
@@ -231,8 +223,9 @@ constexpr uint8_t DRIFT_FAULT_CONSECUTIVE_CHECKS = 3;     // Persistent runaway 
 
 // Drawing (Cartesian trajectory, pen = tool coaxial J6)
 constexpr float PEN_LIFT_MM                     = 5.0f;   // Độ nâng bút giữa các nét (Z-raise)
-constexpr float DRAW_FEED_MM_S                  = 20.0f;  // Feed mặc định khi vẽ
+constexpr float DRAW_FEED_MM_S                  = 10.0f;  // Feed mặc định êm hơn; giảm rung tại biên segment
 constexpr float DRAW_SEGMENT_MM                 = 1.0f;   // Bước rời rạc hóa quỹ đạo
+constexpr float DRAW_LINE_SEGMENT_MM            = 2.0f;   // Line thẳng: ít stop/start hơn, circle/square giữ 1 mm
 constexpr uint8_t PLANNER_QUEUE_DEPTH           = 24;     // Số segment tối đa trong hàng đợi
 
 // Preset "vẽ nhanh": quét IK trong nửa không gian phía trước để đề xuất các cao độ Z
@@ -247,6 +240,7 @@ constexpr float DRAW_WORKSPACE_SCAN_STEP_MM     = 10.0f;
 constexpr float DRAW_WORKSPACE_SCAN_Z_STEP_MM   = 10.0f;
 constexpr float DRAW_PRESET_SAFE_SCALE_MM       = 0.60f; // inset 40% vào ô max để chịu sai số cơ khí
 constexpr float DRAW_PRESET_MIN_SQUARE_SIDE_MM  = 40.0f;
+constexpr float DRAW_PRESET_MAX_SIZE_MM         = 260.0f;
 constexpr float DRAW_PRESET_MIN_Z_SEPARATION_MM = 40.0f;
 
 // Motion Control Task configuration (Core 1, 100Hz)
@@ -260,8 +254,8 @@ constexpr float DH_A2_MM                        = 138.0f; // J2 -> J3: Cánh tay
 constexpr float DH_A3_MM                        = 88.0f;  // J3 -> Điểm gập (Elbow longitudinal offset)
 constexpr float DH_D4_MM                        = 126.0f; // Điểm gập -> Tâm trục nghiêng J5 (16mm + 110mm = 126mm)
 constexpr float DH_D6_MM                        = 31.0f;  // J5 -> J6: Khoảng cách dọc trục công cụ (Tool Roll offset)
-constexpr float DH_D_TOOL_MM                    = 20.0f;  // Bút (tool), gắn đồng trục với J6 (20mm từ J6)
-constexpr float DH_TOOL_EFFECTIVE_MM            = 51.0f;  // Tổng chiều dài khâu công cụ hiệu dụng (J5 -> TCP = 31 + 20)
+constexpr float DH_D_TOOL_MM                    = 130.0f; // Bút (tool), gắn đồng trục với J6 (130mm từ J6)
+constexpr float DH_TOOL_EFFECTIVE_MM            = 161.0f; // Tổng chiều dài khâu công cụ hiệu dụng (J5 -> TCP = 31 + 130)
 constexpr float DH_D6_TOOL_MM                   = DH_TOOL_EFFECTIVE_MM; // Alias tương thích ngược
 
 // Angle Offsets: theta_DH = theta_encoder + OFFSET

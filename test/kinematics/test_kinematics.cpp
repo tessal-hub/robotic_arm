@@ -24,11 +24,11 @@ static void testFkHome() {
     printf("FK home wrist=(%.3f, %.3f, %.3f) tcp=(%.3f, %.3f, %.3f)\n",
            r.wristCenter.x, r.wristCenter.y, r.wristCenter.z,
            r.tcp.x, r.tcp.y, r.tcp.z);
-    // docs/ARM_GEOMETRY.md mục 5: wrist center (J5) = (126, 0, 365), tcp = (177, 0, 365)
+    // docs/ARM_GEOMETRY.md mục 5: wrist center (J5) = (126, 0, 365), tcp = (287, 0, 365)
     CHECK(near(r.wristCenter.x, 126.0f, 1e-3f), "wrist x");
     CHECK(near(r.wristCenter.y, 0.0f, 1e-3f), "wrist y");
     CHECK(near(r.wristCenter.z, 365.0f, 1e-3f), "wrist z");
-    CHECK(near(r.tcp.x, 177.0f, 1e-3f), "tcp x");
+    CHECK(near(r.tcp.x, 287.0f, 1e-3f), "tcp x");
     CHECK(near(r.tcp.y, 0.0f, 1e-3f), "tcp y");
     CHECK(near(r.tcp.z, 365.0f, 1e-3f), "tcp z");
 }
@@ -75,21 +75,20 @@ static void testIkRejectsUnreachable() {
     CHECK(!kin::ikPenDown({50.0f, 0.0f, -80.0f}, enc), "below-floor target rejected");
 }
 
-static void testDifferentialWrist() {
-    DifferentialWrist dw(1.0f);
+static void testDifferentialMapping() {
 
-    // 1. Pure Tilt (M_L = 30°, M_R = 30°) => Tilt = 30°, Roll = 0°
-    DifferentialWrist::JointState j1 = dw.forward(30.0f, 30.0f);
-    CHECK(near(j1.tiltDeg, 30.0f, 1e-4f), "diff pure tilt");
+    // 1. Commissioned J5 sign: equal positive motors produce positive Tilt.
+    wrist::JointState j1 = wrist::forward(30.0f, 30.0f);
+    CHECK(near(j1.tiltDeg, 30.0f, 1e-4f), "diff pure tilt sign");
     CHECK(near(j1.rollDeg, 0.0f, 1e-4f), "diff pure tilt zero roll");
 
     // 2. Pure Roll (M_L = 45°, M_R = -45°) => Tilt = 0°, Roll = 45°
-    DifferentialWrist::JointState j2 = dw.forward(45.0f, -45.0f);
+    wrist::JointState j2 = wrist::forward(45.0f, -45.0f);
     CHECK(near(j2.tiltDeg, 0.0f, 1e-4f), "diff pure roll zero tilt");
     CHECK(near(j2.rollDeg, 45.0f, 1e-4f), "diff pure roll");
 
     // 3. Inverse Kinematics (Tilt = 15°, Roll = -20°) => M_L = -5°, M_R = 35°
-    DifferentialWrist::ActuatorState a3 = dw.inverse(15.0f, -20.0f);
+    wrist::ActuatorState a3 = wrist::inverse(15.0f, -20.0f);
     CHECK(near(a3.leftDeg, -5.0f, 1e-4f), "diff inverse left");
     CHECK(near(a3.rightDeg, 35.0f, 1e-4f), "diff inverse right");
 
@@ -98,8 +97,8 @@ static void testDifferentialWrist() {
         for (int r = -180; r <= 180; r += 30) {
             const float tilt = static_cast<float>(t);
             const float roll = static_cast<float>(r);
-            const DifferentialWrist::ActuatorState act = dw.inverse(tilt, roll);
-            const DifferentialWrist::JointState rec = dw.forward(act.leftDeg, act.rightDeg);
+            const wrist::ActuatorState act = wrist::inverse(tilt, roll);
+            const wrist::JointState rec = wrist::forward(act.leftDeg, act.rightDeg);
             CHECK(near(rec.tiltDeg, tilt, 1e-4f), "diff roundtrip tilt");
             CHECK(near(rec.rollDeg, roll, 1e-4f), "diff roundtrip roll");
         }
@@ -111,7 +110,7 @@ int main() {
     testFkHome();
     testIkRoundTrip();
     testIkRejectsUnreachable();
-    testDifferentialWrist();
+    testDifferentialMapping();
     if (g_fail == 0) {
         printf("ALL KINEMATICS & DIFFERENTIAL WRIST TESTS PASSED\n");
         return 0;

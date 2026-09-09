@@ -52,7 +52,7 @@ public:
     // Đặt vị trí HIỆN TẠI làm mốc home (góc = 0) + lưu NVS nếu encoder khoẻ.
     void setHomeHere(uint8_t axis);
     // Đồng bộ step counter với encoder — dùng khi cancel/STOP để tránh drift.
-    void resyncFromEncoder(uint8_t axis);
+    [[nodiscard]] bool resyncFromEncoder(uint8_t axis);
     void clearHome(uint8_t axis);
     void forgetHome(uint8_t axis);  // xoá cả NVS (nút CLEAR CALIB trên web)
 

@@ -209,7 +209,7 @@ tr:hover td{background:#243247}
       <tr><td>Dự phòng còn trống</td><td colspan="2"><code>13</code>, <code>14</code>, <code>17</code>, <code>18</code>, <code>48</code></td></tr>
       <tr><td>Cấm dùng</td><td colspan="2"><code>4</code> (bootloop) · <code>0/3/45/46</code> (strapping) · <code>19/20</code> (USB-OTG) · <code>26–32</code> (flash nội bộ)</td></tr>
     </table>
-    <div class="warn-box">Quy ước chiều quay: gear ratio (config.h) là ĐỘ LỚN dương; chiều quay dời vào <code>AXIS_STEP_SIGN</code> = { +1, −1, −1, −1, +1, +1 } (J2/J3/J4 quay ngược chiều motor). <code>AXIS_ENC_SIGN</code> = { −1, −1, −1, −1, −1, −1 }; J5 đã đảo chiều encoder theo xác nhận commissioning — vẫn phải xác minh thực tế lúc lắp ráp (xem checklist An toàn).</div>
+    <div class="warn-box">Quy ước chiều quay: gear ratio (config.h) là ĐỘ LỚN dương; chiều quay dời vào <code>AXIS_STEP_SIGN</code> = { +1, +1, −1, −1, +1, +1 }. <code>AXIS_ENC_SIGN</code> = { −1, −1, +1, −1, −1, −1 }; vẫn phải xác minh thực tế lúc lắp ráp (xem checklist An toàn).</div>
   </div>
 </div>
 
@@ -278,10 +278,10 @@ tr:hover td{background:#243247}
       <summary>config.h — mọi hằng số cấu hình <span class="file">src/config.h</span></summary>
       <div class="body">
         Single source of truth firmware-side: pinout, địa chỉ UART, gear ratio, dòng điện homing/normal,
-        tốc độ step (interval µs: default 400 ≈ 2500 step/s, min 120 ≈ 8333/s, max 2500), deadband closed-loop
+        tốc độ step (interval µs: default 800 = 1250 step/s, min 120 ≈ 8333/s, max 3500), deadband closed-loop
         (enter 0.3°/exit 0.8°), ngưỡng drift 5°, tham số DH + offset θ2=−90°, soft limit từng khớp
-        (J1 ±90°, J2 ±90°, J3 [0°;+90°] — không cho phép góc âm, J4 ±180°, J5 ±120°, J6 ±360°), tham số vẽ (lift 5 mm, feed 20 mm/s,
-        segment 1 mm, queue 24), cấu hình task, WiFi/AP/mDNS.
+        (J1 ±90°, J2 ±90°, J3 [0°;+90°] — không cho phép góc âm, J4 ±180°, J5 ±120°, J6 ±360°), tham số vẽ (lift 5 mm, feed mặc định 10 mm/s,
+        segment line 2 mm, circle/square 1 mm, queue 24), cấu hình task, WiFi/AP/mDNS.
       </div>
     </details>
 
@@ -315,9 +315,8 @@ tr:hover td{background:#243247}
         <span class="tag">filter</span> EMA α=0.2 có xử lý wrap 360°; đồng thời delta raw (wrap-corrected) cộng vào
         <code>accumulated_angles</code> và đếm <code>turn_counts</code> — cho phép theo dõi góc vượt 1 vòng.<br>
         <span class="tag">CONF</span> hysteresis 2 LSB, slow filter 16x, analog output, PWM off.<br>
-        <span class="tag">health</span> đọc fail liên tiếp &gt; 20 (~100ms) → <code>sensor_error[i]</code>; AGC khoẻ trong [30;225];
-        chẩn đoán đầy đủ STATUS/AGC/MAG/RAW/ANGLE/ZPOS/MPOS/MANG/ZMCO.<br>
-        <span class="tag">snapshot</span> Getter ưu tiên <code>dataMutex</code> bounded 5ms; nếu timeout, trả snapshot atomic angle/accumulated/turn-count đã publish trong lần scan hoàn chỉnh gần nhất — không data race với task scan.<br>
+        <span class="tag">health</span> đọc fail liên tiếp &gt; 20 (~100ms) → <code>sensor_error[i]</code>.<br>
+        <span class="tag">snapshot</span> Getter ưu tiên <code>dataMutex</code> bounded 5ms; nếu timeout, trả snapshot atomic angle/accumulated đã publish trong lần scan hoàn chỉnh gần nhất — không data race với task scan.<br>
         <span class="tag">recovery</span> tất cả sensor lỗi → <code>recoverI2CBus()</code> (rate-limit 5s): 9 xung SCL + Wire re-init + re-config PCA9548A và AS5600.
       </div>
     </details>
@@ -339,10 +338,10 @@ tr:hover td{background:#243247}
         <code>AXIS_STEP_SIGN × absSteps / stepsPerDegree</code> (gốc tại home đã calib).<br>
         <span class="tag">Homing calibration + NVS</span> Sau cross-check hai cữ, <code>encSign</code> và <code>stepsPerDeg</code> đo được được áp dụng trực tiếp cho quy đổi runtime, đồng thời lưu NVS. Khi boot, chỉ dùng bản ghi NVS có dấu encoder ±1 và tỷ lệ steps/deg trong [0.5; 2.0] so với cấu hình; bản ghi thiếu, NaN/Inf hoặc ngoài dải sẽ bị bỏ qua và fallback về cấu hình gốc. Status JSON xuất <code>calibMeasured</code> và <code>stepsPerDeg</code> cho từng trục để commissioning xác nhận restore.<br>
         <span class="tag">setHomeHere</span> Chuẩn hóa 0°: đặt <code>absSteps = 0</code>, ghi nhận mốc <code>encZeroRef</code> bằng góc tích lũy hiện tại (đảm bảo angleFromSteps và angleFromEncoder đồng bộ 0° tại Home, không phát sinh drift fault). Lưu raw single-turn vào NVS và đọc-back xác nhận marker/payload; log serial in rõ <code>raw</code>, <code>zeroRef</code>, <code>NVS=OK/FAIL</code>; lúc restore in <code>rawSaved/rawNow</code> để kiểm tra đường lưu encoder.<br>
-        <span class="tag">Release J1–J4</span> Lệnh web đã xác nhận chỉ chạy khi IDLE, nhả mô-men từng TMC2209 qua UART để nắn tay, nhưng giữ nguyên home và NVS. Trong mode <code>release</code>, endstop không tạo FAULT. Lệnh Home/Jog/Cartesian/Draw kế tiếp kết thúc release, đồng bộ lại steps J1–J4 từ encoder rồi mới chạy.<br>
+        <span class="tag">Release / Enable J1–J4</span> Nút Release vẫn được phép dùng khi đang FAULT vì endstop bị giữ: nhả mô-men từng TMC2209 qua UART để operator nắn arm rời công tắc, giữ nguyên home/NVS, xóa E_STOP latch và vào mode <code>release</code>. Nút Enable đọc-back <code>version + TOFF</code> để xác nhận đủ bốn driver, rồi bắt buộc resync thành công steps J1–J4 từ encoder/home trước khi thoát <code>release</code>; UART, encoder hoặc home lỗi đều disable lại cả nhóm và giữ Release. Jog/Cartesian vẫn bị khóa trong lúc Release.<br>
         <span class="tag">encoder scaling</span> J1–J3/J5/J6 đọc trực tiếp trục khớp (1:1); riêng J4 encoder gắn trên trục motor 4:1 được tự động chia tỷ số truyền <code>GEAR_RATIO_J4 = 4.0</code> khi quy đổi sang góc khớp.<br>
-        <span class="tag">resyncFromEncoder</span> Đồng bộ bước theo góc encoder tương đối: <code>absSteps = AXIS_STEP_SIGN × degreesToSteps(relEncDeg)</code>.<br>
-        <span class="tag">restoreFromNVS</span> lúc boot: record raw home phải finite trong [0;360), nạp calibration hợp lệ trước, rồi tính <code>delta = encSign × wrap180(raw_now − raw_saved)</code>; từ chối nếu |delta| &gt; 30° (nam châm trôi); set <code>absSteps = AXIS_STEP_SIGN × degreesToSteps(delta)</code> và khôi phục mốc <code>encZeroRef</code>, đánh dấu <code>restored</code>. Giới hạn đúng ±180° của encoder (J6 chỉ mod 360 — vô hại vì roll).<br>
+        <span class="tag">resyncFromEncoder</span> Đồng bộ bước theo góc encoder tương đối: <code>absSteps = AXIS_STEP_SIGN × degreesToSteps(relEncDeg)</code>; trả <code>false</code> nếu axis/motor/sensor/home chưa sẵn sàng để caller fail closed.<br>
+        <span class="tag">restoreFromNVS</span> lúc boot: record raw home phải finite trong [0;360), nạp calibration hợp lệ trước, rồi tính <code>delta = encSign × wrap180(raw_now − raw_saved)</code>. Mọi delta hữu hạn trong miền single-turn ±180° đều được restore để operator có thể nắn arm khi mất điện; firmware set <code>absSteps = AXIS_STEP_SIGN × degreesToSteps(delta)</code>, khôi phục <code>encZeroRef</code> và đánh dấu <code>restored</code>. Validation record NVS, calibration và sensor health vẫn bắt buộc. J6 chỉ khôi phục được vị trí modulo 360° do AS5600 single-turn.<br>
         <span class="tag">drift watchdog</span> Đã vô hiệu hóa theo yêu cầu người dùng: vị trí bước máy (open-loop step counting) là nguồn chân lý vận hành, loại bỏ hoàn toàn các lỗi false-FAULT khóa cánh tay.
       </div>
     </details>
@@ -351,9 +350,10 @@ tr:hover td{background:#243247}
       <summary>differential_wrist.* — động học vi sai bánh răng côn 2-DOF (J5 & J6) <span class="file">src/differential_wrist.h/.cpp</span></summary>
       <div class="body">
         Giải mã động học vi sai 2-DOF Coupled Bevel Gear Differential Wrist:<br>
-        <span class="tag">forward</span> (Góc 2 Encoder $E_L, E_R \to$ Góc Khớp $J_5, J_6$): <code>θ_J5 = (θ_L + θ_R)/2</code> (Tilt), <code>θ_J6 = (θ_L − θ_R)/(2 × r_bevel)</code> (Roll).<br>
-        <span class="tag">inverse</span> (Mục tiêu Joint $J_5, J_6 \to$ Góc Động cơ $M_L, M_R$): <code>θ_L = θ_J5 + r_bevel × θ_J6</code>, <code>θ_R = θ_J5 − r_bevel × θ_J6</code>.<br>
-        <span class="tag">jogging</span> Jog J5 (Tilt) $\to$ cả 2 motor quay cùng chiều; Jog J6 (Roll) $\to$ 2 motor quay ngược chiều.<br>
+        <span class="tag">forward</span> (Góc 2 Encoder $E_L, E_R \to$ Góc Khớp $J_5, J_6$): <code>θ_J5 = (θ_L + θ_R)/2</code> (Tilt), <code>θ_J6 = (θ_L − θ_R)/2</code> (Roll).<br>
+        <span class="tag">inverse</span> (Mục tiêu Joint $J_5, J_6 \to$ Góc Động cơ $M_L, M_R$): <code>θ_L = −θ_J5 + θ_J6</code>, <code>θ_R = −θ_J5 − θ_J6</code>. Ratio cơ khí cố định 1:1 nên module là các hàm thuần, không có object/config runtime.<br>
+        <span class="tag">jogging</span> Jog J5 (Tilt) $\to$ cả 2 motor quay cùng chiều dương cho lệnh J5 dương; Jog J6 (Roll) $\to$ 2 motor quay ngược chiều như cũ.<br>
+        <span class="tag">encoder-anchored</span> A4988 vẫn phát bước feed-forward, nhưng J5/J6 là một cặp feedback: trước mỗi Jog wrist và mỗi Cartesian/Draw waypoint, firmware resync cả hai actuator từ AS5600 rồi mới tính delta kế tiếp. Sai số/mất bước không tích lũy qua các segment. Cartesian/Draw yêu cầu J5/J6 đã Set Home và cả hai encoder khỏe; thiếu một điều kiện thì hủy job thay vì fallback open-loop.<br>
         <span class="tag">advantages</span> Hai động cơ cố định trên cẳng tay (không cần slip-ring hay xoắn dây), chia đôi mô-men xoắn, 2 encoder AS5600 đọc trực tiếp bánh bên.
       </div>
     </details>
@@ -369,11 +369,17 @@ tr:hover td{background:#243247}
     </details>
 
     <details class="mod">
-      <summary>trajectory_validator.* — pre-flight IK lightweight B <span class="file">src/trajectory_validator.h/.cpp</span></summary>
+      <summary>trajectory_validator.* — hàm pre-flight IK lightweight B <span class="file">src/trajectory_validator.h/.cpp</span></summary>
       <div class="body">
         <span class="tag">Pure</span> Không Arduino, host-testable — chỉ <code>kin::ikPenDown</code> + <code>WorkPlane::toRobotXYZ</code>.<br>
-        <span class="tag">POINT</span> 1 IK target. <span class="tag">LINE</span> 3 IK (start, mid, end). <span class="tag">CIRCLE</span> 4 IK (quadrants). <span class="tag">SQUARE</span> 4 góc + 4 trung điểm cạnh. Không kiểm tra FK pose HOME/park vì đó không nhất thiết là pose pen-down; Planner stage tới điểm đầu đã biết IK-safe. Áp WorkPlane nếu enabled trước IK.<br>
-        <span class="tag">Planner hook</span> <code>Planner::submit()</code> gọi <code>validator.validate(job,curPose)</code> đầu tiên; fail → <code>lastError_</code> + <code>false</code> → <code>ArmController::execute()</code> map → HTTP 400 <code>{"error":"OUT_OF_REACH","segment":failIndex}</code>.<br>
+        <span class="tag">POINT</span> 1 IK target. <span class="tag">LINE</span> kiểm tra toàn bộ đường theo bước tối đa 2 mm cùng hai endpoint nâng bút; line dài bằng 0 trả <code>BAD_LINE</code>. <span class="tag">CIRCLE</span> 4 IK (quadrants). <span class="tag">SQUARE</span> 4 góc + 4 trung điểm cạnh. Không kiểm tra FK pose HOME/park vì đó không nhất thiết là pose pen-down; Planner stage tới điểm đầu đã biết IK-safe. Áp WorkPlane nếu enabled trước IK.<br>
+        <span class="tag">Arm hook</span> <code>ArmController::submit()</code> gọi free function <code>validateTrajectory(Planner::Job)</code> trước khi enqueue; fail → HTTP 400 <code>{"error":"OUT_OF_REACH","segment":failIndex}</code>. Không còn object validator hay kiểu Job trung gian; <code>startMoveTo()</code> vẫn kiểm tra IK từng segment.<br>
+        Giữ per-segment guard trong <code>startMoveTo()</code> như defense-in-depth nếu validator pass nhưng segment fail do sai số.
+      </div>
+    </details>
+
+    <details class="mod">
+      <summary>drawing_workspace.* — đề xuất mặt phẳng vẽ nhanh <span class="file">src/drawing_workspace.h/.cpp</span></summary>
         Giữ per-segment guard trong <code>startMoveTo()</code> như defense-in-depth nếu validator pass nhưng segment fail do sai số.
       </div>
     </details>
@@ -381,8 +387,8 @@ tr:hover td{background:#243247}
     <details class="mod">
       <summary>drawing_workspace.* — đề xuất mặt phẳng vẽ nhanh <span class="file">src/drawing_workspace.h/.cpp</span></summary>
       <div class="body">
-        <span class="tag">Pure C++</span> Quét lưới IK trong nửa không gian phía trước, với từng ô bắt buộc reachable cả tại mặt giấy lẫn <code>PEN_LIFT_MM</code> phía trên.<br>
-        <span class="tag">Z recommendation</span> Chọn 3 cao độ base-Z có ô vuông liên tục nội tiếp lớn nhất, mỗi cao độ cách nhau ít nhất 40 mm để operator có lựa chọn thực tế.<br>
+        <span class="tag">Preset cố định</span> Plane vẽ chính là <code>Z=-10 mm</code> (profile đầu tiên/mặc định); hai profile phụ <code>Z=70, 110 mm</code>; các vùng XY đã được tính lại cho tool 130 mm, không quét lưới IK lúc startup.<br>
+        <span class="tag">Validation</span> Mỗi line/circle/square vẫn được kiểm tra toàn bộ quỹ đạo theo bước 1 mm, gồm cả mặt giấy và <code>PEN_LIFT_MM</code> phía trên.<br>
         <span class="tag">Safe preset</span> Hình line/circle/square được inset 40% vào ô lớn nhất và được kiểm tra lại toàn bộ quỹ đạo 1 mm trước khi enqueue. Đây là đề xuất theo mô hình DH + soft limit; paper phải được đặt đúng cao độ base-Z đã chọn.
       </div>
     </details>
@@ -390,27 +396,20 @@ tr:hover td{background:#243247}
     <details class="mod">
       <summary>homing.* — FSM homing J1→J4, quét 2 cữ 2 tốc độ (non-blocking) <span class="file">src/homing.h/.cpp</span></summary>
       <div class="body">
-        Xem sơ đồ FSM ở tab "FSM & Luồng". Kiến trúc quét 2 cữ <b>2 tốc độ</b> áp dụng đồng nhất cho <b>J1, J2, J3, J4</b>:<br>
+        Xem sơ đồ FSM ở tab "FSM &amp; Luồng". Kiến trúc quét 2 cữ <b>2 tốc độ</b> áp dụng đồng nhất cho <b>J1, J2, J3, J4</b>:<br>
         WARMUP (dòng homing; J2 SpreadCycle, J1/J3/J4 StealthChop, chạy +3° đo <code>enc_dir_mult</code>) → <code>WARMUP_SETTLE_WAIT</code> (chờ EMA 200ms non-blocking) → SCAN_MIN <b>fast</b> (quét tới cữ MIN — J1..J3 chỉ nhận công tắc endstop vật lý, loại bỏ hoàn toàn StallGuard giả do tải trọng; J4 dùng StallGuard + step-lag) → SCAN_BACKOFF → <code>BACKOFF_SETTLE_WAIT</code> (settle 30ms non-blocking) → SCAN_<b>SLOW</b> (tiếp cận chậm cữ MIN lấy điểm chạm chính xác). <b>Khớp J3 cũng phải quét đủ hai cữ</b> trước khi chốt Home tại MIN + offset (2.5°); không chốt ở cữ đầu tiên, kể cả khi cữ đó mang nhãn MAX.<br>
         Cả J1, J2, J3, J4 tiếp tục quét cữ thứ hai (đảo chiều quét thực tế): <code>LEG1_BACKOFF</code> (lùi 5° dứt khoát khỏi cữ 1, chỉ mask ngắt cữ 1 trong đoạn lùi; đọc GPIO bằng <code>isPhysicallyPressed()</code>, còn nhấn thì hủy; đã nhả thì bật lại cả hai cữ trước SCAN_MAX) → SCAN_MAX fast → BACKOFF → SLOW (cữ thứ 2) → CROSSCHECK (đo steps/độ thực tế) → CENTERING (J1/J2/J4 về tâm span/2; J3 về MIN + offset) → <code>VERIFY_SETTLE_WAIT</code> (chờ EMA 350ms non-blocking) → <b>VERIFY</b> (đối chiếu encoder và chốt SETREF OK) → IDLE.<br>
         Non-blocking: mọi chờ đều dùng <code>millis()</code> + <code>settleStartMs_</code> trong tick 10ms, motion task không bị block, WDT không đói. Timeout mỗi khớp 30s, scan 60s, retry 2.<br>
         <b>J1/J2/J3:</b> FAST nhận contact vật lý không phụ thuộc ngưỡng 10° của sensorless. Lượt quét hai chạm lại cữ đầu hoặc SLOW chạm sai cữ → dừng/hủy. Log FAST in GPIO MIN/MAX và trạng thái enable. Endstop vật lý là nguồn sự thật duy nhất (khử nhiễu phần cứng cấp ISR bằng <code>gpio_get_level</code> + bắt buộc <code>isPressed</code> hoặc debounced <code>isLatched</code>, chống kích hoạt giả do nhiễu EMI; dọn sạch latch khi hoàn tất). J1, J2 home tại tâm cơ học; J3 home tại cữ MIN + offset (2.5°).<br>
-        <b>J4:</b> sensorless, encoder khỏe/hữu hạn là điều kiện bắt buộc trước và trong homing. WARMUP không dịch → probe ngược 3° một lần; cả hai chiều không dịch → hủy. FAST/SLOW chỉ nhận cữ khi StallGuard4 <b>và</b> step-lag cùng xác nhận; SG không khả dụng → hủy. Step-lag và BACKOFF dùng độ lớn biến thiên encoder, không phụ thuộc dấu WARMUP 3° dễ nhiễu do backlash/EMA; dấu encoder chỉ được chốt từ sweep đủ hai cữ. Mỗi xác nhận encoder phải cách đủ một cửa sổ bước và giữ mốc đầu nghi stall. Hai đoạn BACKOFF phải chạy đủ bước và encoder có dịch chuyển sau settle 350ms. Cữ đầu FAST/SLOW giới hạn 55° từ đầu SCAN_MIN, cữ hai giới hạn 55° từ mốc contact đầu; timeout vẫn giữ nguyên.<br>
-        J2 home dùng SpreadCycle, FAST 1800µs/step (~556 bước/s), SLOW 3000µs/step. Log WARMUP in cấu hình dòng/chopper/tốc độ yêu cầu. Dòng homing: J1=800/J2=1000/J3=1000/J4=450 mA, khôi phục đúng dòng định mức từng khớp (J1=1000, J2=1700, J3=1700, J4=600 mA) và chopper mode tương ứng khi xong. J4 sensorless yêu cầu contactSpan tối thiểu 15° (log commissioning lặp lại 19–20°) và encoder span/tỷ lệ bước–encoder hợp lệ; sweep lỗi bị hủy, không ghi NVS. J5/J6 bỏ qua — Set-Home thủ công.
-      </div>
-    </details>
-
-    <details class="mod">
-      <summary>planner.* — thực thi chuyển động Cartesian &amp; WorkPlane <span class="file">src/planner.h/.cpp</span></summary>
-      <div class="body">
-        Job: POINT (tới điểm, travel-only) / LINE (x1,y1 → x2,y2) / CIRCLE (tâm, r, quét CCW đủ vòng từ góc hiện tại) / SQUARE (tâm, cạnh, quét CCW liên tục 4 cạnh không nhấc bút).
-        Tích hợp <code>WorkPlane</code>: tự động chuyển đổi toạ độ nét vẽ UCS $(u, v, w) \to \text{Robot Base} (x, y, z)$ trước khi tính Inverse Kinematics.<br>
-        Sinh waypoint on-the-fly ~1 mm — không buffer lớn. Kiểm tra r &gt; 0 chống chia 0.<br>
+        <b>Glitch recovery (SCAN_MIN/MAX):</b> ISR bắn khi chân bounce (LOW rồi HIGH trước 50ms debounce) sẽ dừng motor nhưng không set latch. Tick phát hiện <code>isrPending=true &amp;&amp; isPressed=false</code> → xóa pending (<code>glitchCleared=true</code>). Nếu motor đã dừng do glitch và <code>glitchRestarts_ &lt; MAX_GLITCH_RESTARTS(3)</code> → <code>runContinuous()</code> lại thay vì fail. Sau 3 lần → fail như thường để tránh vòng lặp vô tận.<br>
+        <b>WARMUP ESCAPE:</b> Nếu một cữ đang bị nhấn khi bắt đầu WARMUP (ví dụ arm còn tựa vào cữ sau attempt fail trước) → chạy thoát ~5° ngược chiều, tắt ngắt phía nhấn, vào WARMUP bình thường. Hai cữ cùng nhấn → hủy ngay (short-circuit / kẹt cơ). <code>enterScanMin()</code> luôn tái bật cả 2 cữ sau escape.<br>
+        <b>J4:</b> sensorless, encoder khỏe/hữu hạn là điều kiện bắt buộc trước và trong homing. WARMUP chạy 5° (~178 bước) với deadzone 0.80° để vượt độ rơ hộp số/curoa; nếu delta < deadzone → probe ngược 1 lần; nếu cả 2 chiều delta vẫn nhỏ nhưng AS5600 I2C khỏe → fallback config encSign tiếp tục scan (bảo vệ kép bằng SG4 ∧ AS5600 step-lag và CROSSCHECK span ≥15°). FAST/SLOW chỉ nhận cữ khi StallGuard4 <b>và</b> step-lag cùng xác nhận; SG không khả dụng → hủy. Step-lag và BACKOFF dùng độ lớn biến thiên encoder, không phụ thuộc dấu WARMUP 3° dễ nhiễu do backlash/EMA; dấu encoder chỉ được chốt từ sweep đủ hai cữ và chiều step của sweep. Mỗi xác nhận encoder phải cách đủ một cửa sổ bước và giữ mốc đầu nghi stall. Hai đoạn BACKOFF phải chạy đủ bước và encoder có dịch chuyển sau settle 350ms. Cữ đầu FAST/SLOW giới hạn 150° từ đầu SCAN_MIN, cữ hai giới hạn 150° từ mốc contact đầu; timeout vẫn giữ nguyên.<br>
+        FAST homing J1–J6 dùng interval {1200, 1200, 1000, 1333, 1667, 1667}µs/step; SLOW dùng 2000µs/step (đều nhanh 1.5×). J2 dùng SpreadCycle; J1/J3/J4 dùng StealthChop. Dòng homing: J1=1000/J2=1000/J3=1000/J4=550 mA, khôi phục đúng dòng định mức từng khớp (J1=1000, J2=1700, J3=1700, J4=600 mA) và chopper mode tương ứng khi xong. J4 sensorless yêu cầu contactSpan tối thiểu 15° (log commissioning lặp lại 19–20°) và encoder span/tỷ lệ bước–encoder hợp lệ; sweep lỗi bị hủy, không ghi NVS. J5/J6 bỏ qua auto-home — Set-Home thủ công.
         <span class="tag">segment sync</span> IK pen-down → delta 6 trục; trục nhiều bước nhất (dominant) đặt
-        <code>interval = 1e6·segLen/(feed·steps_max)</code>; trục khác scale nghịch đảo để cùng kết thúc đúng lúc.<br>
+        <code>interval = 1e6·segLen/(feed·steps_max)</code>; trục khác scale nghịch đảo để cùng kết thúc đúng lúc. Segment ở state DRAWING được prepare toàn bộ rồi coordinated-start, không còn khởi động tuần tự/ramp độc lập từng trục; staging/nâng/hạ dài vẫn dùng S-curve. Line dùng segment 2 mm để giảm một nửa số lần stop/start; circle/square giữ 1 mm để bảo toàn độ mịn đường cong/góc. Feed vẽ mặc định 10 mm/s.<br>
         <span class="tag">safe z-lift</span> Chuỗi nét vẽ an toàn: LIFTING(stage thẳng tới điểm đầu tại <code>z + PEN_LIFT_MM</code>, không cố giải lại FK HOME/park) → DROPPING(hạ z giấy nếu drawNow=true) → DRAWING(segments) → FINISHED_LIFT → WAIT_FINAL_LIFT(chờ motor nhấc bút xong trước khi báo hoàn tất).
         Tránh hoàn toàn lỗi cọ quẹt bút trên mặt giấy khi travel.<br>
-        Gate bắt buộc: <code>allPositioningHomed()</code> (J1–J4 đã home); điểm ngoài vùng với → huỷ job + log.
+        Gate bắt buộc: <code>allPositioningHomed()</code> (J1–J4 đã home), J5/J6 đã Set Home và cả hai encoder wrist khỏe; điểm ngoài vùng với hoặc feedback wrist chưa sẵn sàng → huỷ job + log.
       </div>
     </details>
 
@@ -446,7 +445,7 @@ tr:hover td{background:#243247}
       <div class="body">
         Trang single-page nhúng PROGMEM (dark Mission Sky: nền <code>#090d16</code>, surface <code>#111827</code>, accent <code>#38bdf8</code>),
         4 tab: Dashboard | Jog &amp; Calib | Cartesian &amp; Draw Studio | Settings &amp; WiFi + nút E-STOP nổi.
-        Polling <code>/api/status</code> mỗi 300 ms.<br>
+        Polling <code>/api/status</code> mỗi 300 ms nhưng chỉ cho phép một request đang bay; khi operator gửi lệnh, frontend hủy status fetch hiện tại và tạm ngừng poll để POST Jog/Home/Move không phải chờ sau hàng đợi telemetry của <code>WebServer</code> đơn luồng.<br>
         <b>Quick Draw</b>: Workflow chính cho operator: web gọi <code>/api/draw/presets</code>, chọn một trong ba base-Z có vùng IK lớn nhất, chọn Square/Circle (hoặc Line tùy chọn), nhập điểm đầu, xem trước 3D rồi <code>POST /api/draw/preset</code>. Điểm đầu được hiểu là góc dưới-trái của Square, điểm bắt đầu trên chu vi Circle và đầu Line; Line có thêm độ dài. Server kiểm tra toàn bộ quỹ đạo theo profile đã chọn và chỉ enqueue lệnh. Preset bị chặn khi WorkPlane đang enabled vì UCS mới là nguồn mặt giấy khi đó.<br>
         <b>WorkPlane Studio</b>: Giao diện căn chỉnh 3 điểm $P_1, P_2, P_3$ trực tiếp qua web, bật/tắt vẽ trên mặt phẳng nghiêng, hiển thị vector pháp tuyến và gốc toạ độ UCS.<br>
         <b>Flash Write Isolation Guard</b>: Toàn bộ API ghi flash NVS/LittleFS (<code>/api/wifi</code>, <code>/api/clearcalib</code>) bị chặn (trả HTTP 409) nếu robot đang chuyển động (<code>arm->busy()</code>) nhằm ngăn CPU stall và xung STEP bị glitch.<br>
@@ -455,11 +454,11 @@ tr:hover td{background:#243247}
         <b>Dashboard</b> (Operate): canvas 3D pose thời gian thực (orbit/side/top viewports, link robot đa màu, TCP tip rose glow) + cột
         trạng thái glanceable — chế độ hoạt động (mode word + badge màu theo trạng thái), WiFi, số khớp đã
         home, trạng thái endstop (J#MIN/MAX đang nhấn), phase homing, và tiến độ J1→J4 theo chip highlight.<br>
-        <b>3D Simulation Studio</b>: Digital Clone tích hợp client-side JavaScript Craig MDH kinematics & closed-form IK pen-down.
+        <b>3D Simulation Studio</b>: Digital Clone tích hợp client-side JavaScript Craig MDH kinematics &amp; closed-form IK pen-down. Dashboard và nguồn <b>Live Robot</b> dùng trực tiếp dấu telemetry J3, chỉ đảo riêng J5 Tilt trước khi dựng canvas để khớp chiều quan sát trên arm thật; góc telemetry, manual Simulation/IK và lệnh điều khiển giữ nguyên quy ước firmware.
         Hỗ trợ điều khiển Cartesian target X/Y/Z, thanh trượt góc khớp J1–J6 hai chiều, 5 tư thế mẫu (Home 0°, Draw Ready, Reach ±X, Folded),
         Trajectory Animator (vẽ đường thẳng/tròn, thanh scrub quỹ đạo theo frame, nút play/pause), Telemetry HUD kiểm tra an toàn va chạm bàn/thân đế/kỳ dị,
         <b>Joints</b>: panel jog 6 khớp (readout độ lớn, encoder/flag trạng thái, jog ± theo bước 0.5/1/5/15°) và trạng thái NVS của mốc home.
-        <b>Homing</b>: home all/đơn lẻ + Set-Home / Clear-Calib cho từng khớp; UI xác nhận trước khi Set Home ghi đè mốc đã có hoặc Clear-Calib xoá NVS.<br>
+        <b>Homing</b>: home all/đơn lẻ + Set-Home / Clear-Calib cho từng khớp; cặp nút Release/Enable J1–J4 nhả và bật lại mô-men có phản hồi theo mode; UI xác nhận trước khi Set Home ghi đè mốc đã có hoặc Clear-Calib xoá NVS.<br>
         Front-end: nút hành động (home/move/draw/sethome/wifi) tự disable ngay khi request pending, và tiếp tục disable khi arm busy hoặc FAULT; toast phản hồi
         thành công/lỗi; cảnh báo "MẤT KẾT NỐI" khi poll lỗi ≥3 lần liên tiếp.<br>
         Validation đầu vào dùng parser strict (không để chuỗi lỗi tự thành 0): jog/home/sethome/clearcalib axis, move/draw/WorkPlane coordinate, radius và feed đều bắt buộc finite; WorkPlane toggle chỉ nhận <code>en=0|1</code>; feed chỉ hợp lệ trong (1;200) mm/s; ssid ≤ 32, pass ≤ 64 ký tự.<br>
@@ -523,7 +522,7 @@ tr:hover td{background:#243247}
       <span class="farrow">→</span>
       <div class="fbox green">BACKOFF_SETTLE_WAIT<br><span class="muted">settle 30ms<br>non-blocking</span></div>
       <span class="farrow">→</span>
-      <div class="fbox amber">SCAN_SLOW<br><span class="muted">tiếp cận lại 3000µs/step<br>mốc CHÍNH XÁC, enc #1</span></div>
+      <div class="fbox amber">SCAN_SLOW<br><span class="muted">tiếp cận lại 2000µs/step<br>mốc CHÍNH XÁC, enc #1</span></div>
     </div>
     <div class="flow">
       <div class="fbox">SCAN_MAX<br><span class="muted">quét FAST tới cữ 2<br>cả hai endstop enabled</span></div>
@@ -546,7 +545,7 @@ tr:hover td{background:#243247}
       <div class="fbox green">SETREF<br><span class="muted">setHomeHere + NVS</span></div>
     </div>
     <ul>
-      <li><b>2 tốc độ:</b> pha FAST (<code>DEFAULT_AXIS_HOMING_SPEEDS</code>) chỉ tìm cữ thô — glitch giữa đường tự hồi phục vì pha SLOW (<code>HOMING_SLOW_SCAN_INTERVAL_US=3000µs</code>) dò lại đúng cữ đó. Điểm chạm chậm là mốc chính xác: J1–J3 qua latch ISR (±1 bước); J4 qua StallGuard <b>và</b> step-lag AS5600, có bù độ trễ cửa sổ ở FAST và SLOW (contact = mốc đầu nghi stall ± Δenc quy đổi bước theo chiều step; bỏ phần bước đã phát khi rotor kẹt).</li>
+      <li><b>2 tốc độ:</b> pha FAST (<code>DEFAULT_AXIS_HOMING_SPEEDS</code>) chỉ tìm cữ thô — glitch giữa đường tự hồi phục vì pha SLOW (<code>HOMING_SLOW_SCAN_INTERVAL_US=2000µs</code>) dò lại đúng cữ đó. Điểm chạm chậm là mốc chính xác: J1–J3 qua latch ISR (±1 bước); J4 qua StallGuard <b>và</b> step-lag AS5600, có bù độ trễ cửa sổ ở FAST và SLOW (contact = mốc đầu nghi stall ± Δenc quy đổi bước theo chiều step; bỏ phần bước đã phát khi rotor kẹt).</li>
       <li><b>Stall Detection:</b> J4 không chấp nhận một tín hiệu đơn lẻ: StallGuard4 phải có <code>sg ≤ STALL_SG_LEVEL(70)</code> trong 2 poll liên tiếp <b>và</b> độ lớn biến thiên AS5600 phải &lt; <code>2.5°</code> trong cửa sổ <code>max(120 bước, 1.2°×spd)</code>. Không dùng dấu tức thời từ WARMUP để phán chuyển động, tránh nhận nhầm chuyển động tự do là stall khi backlash/EMA làm đảo dấu mẫu ngắn. Quy tắc này áp dụng ở cả FAST (sau ân hạn 600ms, leg 2 phải đi đủ 10°) và SLOW (sau ân hạn 400ms).</li>
       <li><b>VERIFY (mới):</b> sau CENTERING chờ 350ms cho EMA AS5600 ổn định. Với trục có endstop vật lý (J1–J3): vị trí <code>contactSpan/2</code> (hoặc <code>MIN+offset</code> J3) là <b>Ground Truth cơ khí tuyệt đối</b>, VERIFY xác nhận encoder còn sống (encOK) và chốt Home ngay tại tâm cơ khí mà không trim; với trục không endstop (J4): chuyển thật vào phase VERIFY, đối chiếu <code>rawEncoder()</code> vs <code>enc_center</code>, trim chậm tối đa 2 lần nếu lệch (guard chống trim chạy loạn: err tăng &gt; mốc+2° hoặc đi quá 5° → hủy).</li>
       <li><b>Phòng thủ encoder lỗi:</b> WARMUP encoder không phản hồi (delta &lt; deadzone per-axis {0.30°,0.30°,0.30°,0.30°} và J4 WARMUP riêng <code>HOMING_J4_WARMUP_DEADZONE_DEG=1.50°</code>; jump guard J4 <code>HOMING_J4_WARMUP_MAX_DELTA_DEG=40°</code> bao phủ delta thực đo đến 32.87°) → với trục không endstop (J4) probe ngược 3° một lần rồi hủy nếu vẫn không dịch; với trục có endstop vật lý (J1–J3) tự động fallback sang hướng encoder mặc định từ config và tiếp tục quét cữ vật lý. CROSSCHECK: span encoder &lt; <code>HOMING_MIN_ENC_SPAN_DEG</code> chỉ hủy trên J4 (chặn home ảo); J1–J3 giữ config steps/deg. Mỗi lần thử <code>resetHomingCalibration()</code> về config.</li>
@@ -565,15 +564,13 @@ tr:hover td{background:#243247}
     <div class="flow">
       <div class="fbox">LIFTING<br><span class="muted">Z += 5 mm</span></div>
       <span class="farrow">→</span>
-      <div class="fbox">TRAVELING<br><span class="muted">ngang tới điểm đầu nét</span></div>
-      <span class="farrow">→</span>
       <div class="fbox">DROPPING<br><span class="muted">Xuống z giấy</span></div>
       <span class="farrow">→</span>
-      <div class="fbox green">DRAWING<br><span class="muted">segments ~1 mm<br>IK mỗi segment</span></div>
+      <div class="fbox green">DRAWING<br><span class="muted">line 2 mm · curve 1 mm<br>IK mỗi segment</span></div>
       <span class="farrow">→</span>
       <div class="fbox">FINISHED_LIFT<br><span class="muted">Z += 5 mm</span></div>
     </div>
-    <p class="desc">POINT đi LIFTING → TRAVELING → DROPPING rồi kết thúc tại đích (không lift lại).
+    <p class="desc">LIFTING trực tiếp chạy tới điểm bắt đầu ở độ cao an toàn, sau đó → DROPPING; POINT kết thúc tại đích (không lift lại).
     Mỗi state chuyển khi mọi trục đã dừng. Segment sinh on-the-fly: LINE theo hướng đơn vị; CIRCLE theo góc
     <code>ang = startAng + prog/r</code> (CCW). Ngoài vùng với giữa chừng → <code>stop()</code> toàn bộ.</p>
   </div>
@@ -688,15 +685,15 @@ tr:hover td{background:#243247}
       <tr><td>3</td><td>138</td><td>0</td><td>0</td><td>0 ✅</td><td>Elbow pitch</td></tr>
       <tr><td>4</td><td>88</td><td>−90</td><td><b>126</b> (=16+110)</td><td>0 ⚠️ chưa xác nhận</td><td>Wrist pan</td></tr>
       <tr><td>5</td><td>0</td><td>+90</td><td>0</td><td>0 ⚠️</td><td>Wrist tilt</td></tr>
-      <tr><td>6</td><td>0</td><td>−90</td><td>0</td><td>0 ⚠️</td><td>Wrist roll (pen đồng trục, dài 20 mm)</td></tr>
+      <tr><td>6</td><td>0</td><td>−90</td><td>0</td><td>0 ⚠️</td><td>Wrist roll (pen đồng trục, dài 130 mm)</td></tr>
     </table>
-    <p class="desc">Chuyển đổi: <code>theta_DH(i) = theta_encoder(i) + OFFSET(i)</code>. Offset θ4/θ5/θ6 chưa đo thực nghiệm — ưu tiên calib trước khi tin độ chính xác nét vẽ (bút lệch tâm 20 mm khuếch đại sai số 1–2° thành vài mm).</p>
+    <p class="desc">Chuyển đổi: <code>theta_DH(i) = theta_encoder(i) + OFFSET(i)</code>. Offset θ4/θ5/θ6 chưa đo thực nghiệm — ưu tiên calib trước khi tin độ chính xác nét vẽ (bút lệch tâm 130 mm khuếch đại sai số góc thành sai số TCP).</p>
   </div>
 
   <div class="card">
     <h2>IK closed-form pen-down (kin::ikPenDown)</h2>
     <ol>
-      <li>Wrist center: <code>C = TCP + (0, 0, D_TOOL=20)</code> (bút thẳng đứng ⇒ tâm cổ tay cao hơn TCP đúng 20 mm)</li>
+      <li>Tâm J5: <code>Z_J5 = Z_TCP + D6 + D_TOOL = Z_TCP + 161</code> khi bút thẳng đứng; <code>D_TOOL=130 mm</code> tính từ J6 đến TCP.</li>
       <li>Base yaw: <code>t1 = atan2(Cy, Cx)</code></li>
       <li>Mặt phẳng 2 khâu: <code>(r,h)</code> polar của C quanh vai; kiểm tra reach:
           <code>|A2 − L_FORE| ≤ dist ≤ A2 + L_FORE</code> với A2=138, L_FORE=153.69</li>
@@ -709,7 +706,7 @@ tr:hover td{background:#243247}
     </ol>
     <div class="ok-box">Kiểm chứng: roundtrip IK→FK 2230/2230 pose random sai số ≤ 0.5 mm (test host
     <code>test/kinematics/test_kinematics.cpp</code>, runner <code>tools/run_kin_tests.sh</code>).
-    FK home tái tạo đúng wrist (126, 0, 365) và TCP (177, 0, 365). Từ chối đúng các điểm ngoài vùng với. <span class="muted">(2230 = reachable trong sweep toàn vùng; 3280 cũ là tổng số pose trước khi lọc unreachable)</span></div>
+    FK home tái tạo đúng wrist (126, 0, 365) và TCP (287, 0, 365). IK Pen-Down dùng chiều dài hiệu dụng J5→TCP 161 mm. Từ chối đúng các điểm ngoài vùng với.</div>
     <div class="warn-box"><b>Cảnh báo mô hình:</b> roundtrip chỉ chứng minh closed-form ≡ bảng DH — KHÔNG chứng minh
     bảng DH ≡ cơ khí thật nếu offset 16 mm không thẳng hàng với 110 mm. Biến thể "gắt L" sai tới ~155 mm.
     Thí nghiệm phân biệt 1 phép đo: home → jog J3 +30° → so displacement ngang bút thực vs "pose" firmware.
@@ -739,7 +736,8 @@ tr:hover td{background:#243247}
       <tr><td>POST</td><td><code>/api/home/all</code></td><td>—</td><td>HOME_ALL chuỗi J1→J4; busy → 409</td></tr>
       <tr><td>POST</td><td><code>/api/home/axis</code></td><td><code>axis</code> 0–3</td><td>HOME_AXIS 1 khớp (J5/J6 không hỗ trợ auto-home)</td></tr>
       <tr><td>POST</td><td><code>/api/sethome</code></td><td><code>axis</code> 0–5</td><td>SET_HOME tại chỗ + persist NVS (mọi khớp kể cả J5/J6)</td></tr>
-      <tr><td>POST</td><td><code>/api/release/j1-j4</code></td><td>—</td><td>Nhả mô-men TMC J1–J4 qua command queue, giữ home + NVS; chỉ khi release thì endstop không tạo FAULT. Lệnh Home/Jog/Cartesian/Draw kế tiếp resync encoder trước khi chạy</td></tr>
+      <tr><td>POST</td><td><code>/api/release/j1-j4</code></td><td>—</td><td>Nhả mô-men TMC J1–J4 qua command queue, kể cả khi FAULT/endstop còn nhấn; giữ home + NVS và bỏ qua endstop trong mode Release để operator nắn arm ra khỏi cữ</td></tr>
+      <tr><td>POST</td><td><code>/api/enable/j1-j4</code></td><td>—</td><td>Bật lại mô-men TMC J1–J4 qua command queue; read-back UART/TOFF và resync đủ 4 encoder/home rồi mới thoát Release, lỗi bất kỳ → disable cả nhóm và giữ Release</td></tr>
       <tr><td>POST</td><td><code>/api/clearcalib</code></td><td><code>axis</code> 0–5</td><td>forgetHome: xoá cờ home + NVS (chặn khi motor running → 409)</td></tr>
       <tr><td>POST</td><td><code>/api/wifi</code></td><td><code>ssid</code> ≤32, <code>pass</code> ≤64</td><td>Lưu NVS → delay 1 s → ESP.restart() (chặn khi motor running → 409)</td></tr>
       <tr><td>POST</td><td><code>/api/workplane/calib</code></td><td><code>p1x..p3z</code></td><td>Căn chỉnh mặt phẳng 3 điểm; từ chối suy biến (thẳng hàng / khoảng cách ngắn)</td></tr>
@@ -773,7 +771,7 @@ tr:hover td{background:#243247}
       <li><b>3.</b> FAULT/E_STOP là latch: endstop pressed + motor running ngoài homing ⇒ <code>E_STOP</code> (SafetyManager), drift vượt 25° ⇒ <code>FAULT</code>; endstop pressed at boot = OK. <code>CLEAR_FAULT</code> chỉ mở khoá khi <code>!anyPressed()</code>; nó acknowledge drift latch và resync theo encoder.</li>
       <li><b>4.</b> Cartesian (move/draw) bắt buộc <code>allPositioningHomed()</code> (J1–J4).</li>
       <li><b>5.</b> Jog clamp theo soft limit khi đã home; bỏ lệnh nếu trục đang chạy.</li>
-      <li><b>6.</b> Endstop: trước HOME cần cả hai công tắc nhả. Khi SCAN_MAX, log phải có <code>en=1/1</code>; chạm cữ đích phải dừng và chuyển BACKOFF, chạm lại cữ đầu phải hủy. Nếu công tắc đang bị giữ mà GPIO vẫn báo 0, kiểm tra pin/dây/tiếp điểm, không tăng timeout. J2: owner báo driver chưa có tản nhiệt, giữ dòng Home 1000mA; cần xác minh mã motor, dòng định mức và tản nhiệt trước khi tăng. Homing quét 2 cữ 2 tốc độ (non-blocking): FAST dòng theo khớp, SLOW 3000µs/step; J4 chỉ lưu calibration/Home sau VERIFY thành công và chặn encoder mất/NaN, SG không khả dụng, backoff không thoát sau bốn mức; chỉ nhận cữ khi StallGuard và AS5600 cùng xác nhận, CROSSCHECK yêu cầu contactSpan ≥15° cùng encoder span/tỷ lệ hợp lệ. Log contact nêu SG range/contact span để commissioning; settle non-blocking bằng <code>millis()</code>, VERIFY fail → retry tối đa 2 lần rồi hủy.</li>
+      <li><b>6.</b> Endstop: trước HOME cần cả hai công tắc nhả. Khi SCAN_MAX, log phải có <code>en=1/1</code>; chạm cữ đích phải dừng và chuyển BACKOFF, chạm lại cữ đầu phải hủy. Nếu công tắc đang bị giữ mà GPIO vẫn báo 0, kiểm tra pin/dây/tiếp điểm, không tăng timeout. J2: owner báo driver chưa có tản nhiệt, giữ dòng Home 1000mA; cần xác minh mã motor, dòng định mức và tản nhiệt trước khi tăng. Homing quét 2 cữ 2 tốc độ (non-blocking): FAST dòng theo khớp, SLOW 2000µs/step; J4 chỉ lưu calibration/Home sau VERIFY thành công và chặn encoder mất/NaN, SG không khả dụng, backoff không thoát sau bốn mức; chỉ nhận cữ khi StallGuard và AS5600 cùng xác nhận, CROSSCHECK yêu cầu contactSpan ≥15° cùng encoder span/tỷ lệ hợp lệ. Log contact nêu SG range/contact span để commissioning; settle non-blocking bằng <code>millis()</code>, VERIFY fail → retry tối đa 2 lần rồi hủy.</li>
       <li><b>7.</b> Drift watchdog khi idle: sau settle 300ms, kiểm tra mỗi 500ms. Lệch &gt;25° trong 3 lần liên tiếp → latch FAULT; không resync sai lệch lớn. Sai lệch nhỏ mới được encoder-first resync.</li>
       <li><b>8.</b> Restore NVS chỉ dùng calibration hợp lệ; từ chối delta &gt;30° (nam châm dịch chuyển).</li>
       <li><b>9.</b> Endstop ISR dừng ngay xung của trục vừa chạm, rồi ghi <code>pending+timestamp</code> — không <code>delay</code>/không <code>gpio_get_level</code>. <code>SafetyManager::pollEndstops()</code> @100Hz debounce 50 ms và chỉ latch E_STOP khi LOW ổn định; glitch dừng an toàn nhưng không fault latch. Clear latches at boot + sau homing; motion fault chỉ khi <code>!homing && E_STOP</code>.</li>
@@ -783,7 +781,7 @@ tr:hover td{background:#243247}
       <li><b>13.</b> <b>Flash Write Isolation Guard:</b> Cấm ghi/xoá NVS/LittleFS khi motor đang chạy (<code>arm->busy()</code>) để tránh <code>spi_flash_op_lock()</code> làm stall CPU và gây glitch phát xung STEP thời gian thực.</li>
       <li><b>14.</b> <b>Fail-fast E-Stop:</b> ISR endstop gọi <code>Motor::stopFromISR()</code> ngay tại cạnh FALLING, rồi chỉ publish pending+timestamp; <code>pollEndstops()</code> xác nhận LOW sau debounce ≤60 ms (50 ms + 10 ms poll) mới latch E_STOP. Glitch không thành FAULT nhưng vẫn là safe-stop; backup <code>movingAway</code> xử lý endstop đang bị đè.</li>
       <li><b>15.</b> <b>SafetyManager single owner:</b> Chỉ <code>SafetyManager</code> sở hữu <code>SafetyState</code> và latch — xóa <code>g_emergencyStop/g_homingActive</code>. <code>tryClearFault()</code> chỉ true khi <code>!anyPressed()</code>; drift được clear/resync trong cùng giao dịch acknowledge.</li>
-      <li><b>16.</b> <b>TrajectoryValidator pre-flight:</b> <code>Planner::submit()</code> gọi <code>validator.validate()</code> trước khi chạy — fail → HTTP 400 <code>OUT_OF_REACH</code> với failIndex, không dừng giữa quỹ đạo.</li>
+      <li><b>16.</b> <b>Trajectory pre-flight:</b> <code>ArmController::submit()</code> gọi <code>validateTrajectory()</code> trước khi enqueue — fail → HTTP 400 <code>OUT_OF_REACH</code> với failIndex, không bắt đầu chuyển động.</li>
     </ul>
   </div>
 
@@ -807,7 +805,6 @@ tr:hover td{background:#243247}
     <ul>
       <li>Build firmware: <code>pio run</code> — gate bắt buộc trước khi commit</li>
       <li>Test kinematics host: <code>tools/run_kin_tests.sh</code> (g++ trực tiếp — PIO native env bị lỗi Core 6.1.19 "Nothing to build")</li>
-      <li>Mô phỏng Digital Clone Pro: <code>py -3 digital_clone.py</code> (hoặc <code>--test</code> để kiểm toán tự động)</li>
       <li>Monitor serial: <code>pio device monitor</code> @115200 (filter esp32_exception_decoder bật sẵn)</li>
       <li>Web app: http://robot-arm.local hoặc IP hiển thị trong log setup</li>
     </ul>
@@ -815,6 +812,25 @@ tr:hover td{background:#243247}
 </div>
 
 <div class="footer">
+   Generated 2026-09-08 — Sửa lại hướng J3 Digital Twin theo quan sát mới: bỏ display inversion J3; giữ riêng inversion J5 Tilt, không đổi firmware motion/encoder/IK.<br>
+   Generated 2026-09-08 — Tối ưu vẽ line: segment thẳng 2 mm giảm một nửa stop/start; pre-flight kiểm tra toàn bộ line và hai endpoint nâng bút trước khi chạy; line zero-length trả BAD_LINE.<br>
+   Generated 2026-09-08 — Giữ travel guard J4 150° theo xác nhận cơ khí của owner; sửa Digital Twin live đảo riêng J5 Tilt; Enable J1–J4 fail closed bằng read-back UART/TOFF + resync encoder/home; timer start lỗi xóa busy; chặn nhận chồng command; đồng bộ test hướng J3.<br>
+   Generated 2026-09-08 — Tool TCP dài 130 mm từ J6 (J5→TCP 161 mm), plane vẽ chính Z=-10 mm; preset vùng vẽ được tính lại. Đảo chiều riêng J5 Tilt trong mapping vi sai, giữ J6 Roll.<br>
+   Generated 2026-09-08 — Recovery endstop: cho phép Release J1–J4 ngay trong FAULT, chuyển thẳng sang mode Release để operator nắn arm rời công tắc; Jog/Move vẫn khóa.<br>
+   Generated 2026-09-08 — Giảm độ trễ điều khiển Web: không cho status polling 300 ms chồng lấp và ưu tiên POST của operator bằng cách abort status fetch đang bay.<br>
+   Generated 2026-09-08 — Sửa hướng J3 trên canvas live: đảo dấu J3 chỉ trong mapping hiển thị Dashboard/Live Robot; không đổi chiều motor, telemetry, manual Simulation/IK hay kinematics firmware.<br>
+   Generated 2026-09-08 — Kiến trúc encoder-anchored J5/J6: resync cả cặp actuator từ AS5600 trước mỗi Jog wrist và mỗi waypoint Cartesian/Draw; sai số A4988 không còn tích lũy, feedback thiếu thì fail closed.<br>
+   Generated 2026-09-08 — Commissioning wrist: đảo dấu logic J5 Tilt trong forward/inverse/incremental differential mapping; giữ nguyên chiều J6 Roll.<br>
+   Generated 2026-09-08 — Quality of life NVS restore: bỏ rejection |delta|&gt;30°; chấp nhận arm được nắn khi tắt nguồn và restore vị trí hiện tại theo mốc encoder Home, trong miền single-turn ±180°.<br>
+   Generated 2026-09-08 — Giảm rung Draw: segment 1 mm dùng coordinated prepare/start cho mọi trục; staging/nâng/hạ giữ S-curve; feed mặc định giảm 20→10 mm/s.<br>
+   Generated 2026-09-08 — Tăng 1.5× tốc độ homing FAST/SLOW và tốc độ normal/Jog cho cả sáu khớp bằng cách giảm interval µs/step tương ứng; Cartesian vẫn theo feed được yêu cầu.<br>
+   Generated 2026-09-08 — Homing J4: nới tiếp travel guard tìm cữ từ 120° lên 150° theo commissioning; giữ nguyên timeout 60s, StallGuard ∧ encoder step-lag và CROSSCHECK.<br>
+   Generated 2026-09-08 — Homing J4: nới travel guard tìm cữ từ 55° lên 120° theo commissioning; giữ nguyên timeout 60s, StallGuard ∧ encoder step-lag và CROSSCHECK.<br>
+   Generated 2026-09-07 — Thêm nút/API Enable J1–J4 đối xứng Release: bật đủ bốn TMC, resync encoder rồi thoát Release; UART fail rollback về Release. Build SUCCESS RAM 15.2% Flash 27.9%.<br>
+   Generated 2026-09-07 — Ponytail audit cleanup: xóa prototype/README scaffold và API/config không có caller; bỏ chẩn đoán AS5600 không dùng; pre-flight dùng trực tiếp <code>Planner::Job</code> qua free function; firmware SafetyManager giữ pointer module trực tiếp thay callback type-erasure; rút gọn RAII mutex guard. Build SUCCESS RAM 15.2% Flash 27.9%; all host tests passed.<br>
+   Generated 2026-09-07 — Homing J4: khắc phục false-abort WARMUP (tăng hành trình lên 5° ~178 bước, deadzone 0.80°, dòng homing 550mA, fallback quét SCAN_MIN khi AS5600 I2C sống tốt thay vì hủy oan do rơ cơ khí). Build SUCCESS RAM 17.2% Flash 79.1%.<br>
+   Generated 2026-09-07 — Homing J3: glitch recovery SCAN_MIN/MAX (ISR bounce dừng motor → restart tối đa 3 lần thay vì fail); WARMUP ESCAPE (arm tựa cữ sau fail → thoát ~5° trước khi WARMUP, enterScanMin() tái bật 2 cữ). Build SUCCESS RAM 17.2% Flash 79.1%.<br>
+   Generated 2026-09-07 — Ponytail cleanup: preset vùng vẽ cố định thay scan startup; bỏ state TRAVELING không thể tới, pre-flight Cartesian trùng lặp, API chết, simulator Python và test contract đọc source; wrist vi sai dùng hàm thuần với ratio 1:1 cố định.<br>
    Generated 2026-09-06 — J4 homing: dùng độ lớn delta cho stall/backoff và chốt dấu từ sweep hai cữ; theo commissioning mới, span floor 15° (thực 19–20°), WARMUP jump guard 40° (thực đến 32.87°), backoff sensorless tự nới qua backlash trước khi hủy.<br>
    Generated 2026-09-05 — Cách ly GPIO JTAG/ROM matrix bằng gpio_reset_pin() cho toàn bộ chân STEP/DIR (Motor 5 GPIO 40 MTDO / GPIO 47); gán nhãn label riêng cho esp_timer từng trục và kiểm tra mã lỗi khởi tạo/kích hoạt; sửa Motor::enable() trả true cho non-TMC driver A4988.<br>
    Generated 2026-09-05 — J4 sensorless homing: WARMUP jump guard nâng lên 30° (chấp nhận delta 11°..23° thực tế của J4 khi motor bước 107 pulses); deadzone WARMUP riêng J4 đặt 1.50° để nhận diện đàn hồi kẹt cữ (0.53°) kích hoạt probe ngược 3° thoát cữ; CROSSCHECK J4 fallback về config steps/deg khi ratio lệch ngoài [0.5, 2.0] (tương tự J1-J3) thay vì hủy attempt.<br>

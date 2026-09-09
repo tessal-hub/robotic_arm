@@ -23,8 +23,6 @@ public:
     // --- WiFi ---
     [[nodiscard]] bool loadWifiCreds(String& ssid, String& pass) const;
     bool saveWifiCreds(const String& ssid, const String& pass);
-    void clearWifiCreds();
-
     // --- Joint home points ---
     struct JointHome {
         bool valid{false};

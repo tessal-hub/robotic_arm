@@ -17,10 +17,6 @@ struct Point3D {
     Point3D operator/(float s) const { return {x / s, y / s, z / s}; }
 
     [[nodiscard]] float length() const { return std::sqrt(x * x + y * y + z * z); }
-    [[nodiscard]] Point3D normalized() const {
-        const float l = length();
-        return (l > 1e-6f) ? (*this / l) : Point3D(0, 0, 0);
-    }
     [[nodiscard]] Point3D cross(const Point3D& b) const {
         return {
             y * b.z - z * b.y,
@@ -79,13 +75,4 @@ public:
     [[nodiscard]] Point3D getOrigin() const noexcept { return m_origin; }
     [[nodiscard]] Point3D getNormal() const noexcept { return m_normal; }
 
-    void resetToDefault() {
-        m_origin = Point3D(0.0f, 0.0f, 0.0f);
-        m_uAxis = Point3D(1.0f, 0.0f, 0.0f);
-        m_vAxis = Point3D(0.0f, 1.0f, 0.0f);
-        m_normal = Point3D(0.0f, 0.0f, 1.0f);
-        m_isCalibrated = false;
-        m_enabled.store(false, std::memory_order_release);
-        m_lastError = "";
-    }
 };

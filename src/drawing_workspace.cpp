@@ -7,104 +7,25 @@
 #include "kinematics.h"
 
 namespace {
-constexpr uint8_t X_CELLS = static_cast<uint8_t>(
-    (DRAW_WORKSPACE_SCAN_X_MAX_MM - DRAW_WORKSPACE_SCAN_X_MIN_MM) / DRAW_WORKSPACE_SCAN_STEP_MM + 1.0f);
-constexpr uint8_t Y_CELLS = static_cast<uint8_t>(
-    (DRAW_WORKSPACE_SCAN_Y_MAX_MM - DRAW_WORKSPACE_SCAN_Y_MIN_MM) / DRAW_WORKSPACE_SCAN_STEP_MM + 1.0f);
-constexpr uint8_t Z_SAMPLES = static_cast<uint8_t>(
-    (DRAW_WORKSPACE_SCAN_Z_MAX_MM - DRAW_WORKSPACE_SCAN_Z_MIN_MM) / DRAW_WORKSPACE_SCAN_Z_STEP_MM + 1.0f);
-
-static_assert(X_CELLS > 1 && Y_CELLS > 1, "Drawing workspace scan needs a 2D grid");
-
 bool poseReachable(float x, float y, float z) {
     float joints[NUM_MOTORS];
     return kin::ikPenDown({x, y, z}, joints);
 }
-
 } // namespace
 
 const std::array<DrawingWorkspace::Recommendation, DrawingWorkspace::kRecommendationCount>&
 DrawingWorkspace::recommendations() {
-    static const std::array<Recommendation, kRecommendationCount> values = analyze();
+    // Commissioned from the former exhaustive scan; -10 mm is the primary drawing plane.
+    static constexpr std::array<Recommendation, kRecommendationCount> values{{
+        {-10.0f, 165.0f, -15.0f, 160.0f, true},
+        { 70.0f, 115.0f, -15.0f, 200.0f, true},
+        {110.0f, 110.0f,   0.0f, 190.0f, true},
+    }};
     return values;
 }
 
 bool DrawingWorkspace::isReachableWithLift(float x, float y, float z) {
-    // Mỗi ô phải reachable cả lúc bút chạm giấy lẫn lúc planner nâng bút travel.
     return poseReachable(x, y, z) && poseReachable(x, y, z + PEN_LIFT_MM);
-}
-
-std::array<DrawingWorkspace::Recommendation, DrawingWorkspace::kRecommendationCount>
-DrawingWorkspace::analyze() {
-    std::array<Recommendation, kRecommendationCount> best{};
-    std::array<Recommendation, Z_SAMPLES> candidates{};
-    uint8_t candidateCount = 0;
-
-    for (float z = DRAW_WORKSPACE_SCAN_Z_MIN_MM;
-         z <= DRAW_WORKSPACE_SCAN_Z_MAX_MM + 0.001f;
-         z += DRAW_WORKSPACE_SCAN_Z_STEP_MM) {
-        uint8_t largest[Y_CELLS][X_CELLS]{};
-        uint8_t bestCells = 0;
-        uint8_t bestRow = 0;
-        uint8_t bestCol = 0;
-
-        for (uint8_t row = 0; row < Y_CELLS; ++row) {
-            const float y = DRAW_WORKSPACE_SCAN_Y_MIN_MM + row * DRAW_WORKSPACE_SCAN_STEP_MM;
-            for (uint8_t col = 0; col < X_CELLS; ++col) {
-                const float x = DRAW_WORKSPACE_SCAN_X_MIN_MM + col * DRAW_WORKSPACE_SCAN_STEP_MM;
-                if (!isReachableWithLift(x, y, z)) continue;
-
-                const uint8_t top = row == 0 ? 0 : largest[row - 1][col];
-                const uint8_t left = col == 0 ? 0 : largest[row][col - 1];
-                const uint8_t diagonal = (row == 0 || col == 0) ? 0 : largest[row - 1][col - 1];
-                largest[row][col] = static_cast<uint8_t>(1 + std::min({top, left, diagonal}));
-                if (largest[row][col] > bestCells) {
-                    bestCells = largest[row][col];
-                    bestRow = row;
-                    bestCol = col;
-                }
-            }
-        }
-
-        const float side = bestCells * DRAW_WORKSPACE_SCAN_STEP_MM;
-        if (side < DRAW_PRESET_MIN_SQUARE_SIDE_MM) continue;
-        const float firstX = DRAW_WORKSPACE_SCAN_X_MIN_MM +
-                             (bestCol - bestCells + 1) * DRAW_WORKSPACE_SCAN_STEP_MM;
-        const float firstY = DRAW_WORKSPACE_SCAN_Y_MIN_MM +
-                             (bestRow - bestCells + 1) * DRAW_WORKSPACE_SCAN_STEP_MM;
-        const Recommendation candidate{
-            z,
-            firstX + (bestCells - 1) * DRAW_WORKSPACE_SCAN_STEP_MM * 0.5f,
-            firstY + (bestCells - 1) * DRAW_WORKSPACE_SCAN_STEP_MM * 0.5f,
-            side,
-            true,
-        };
-
-        if (candidateCount < candidates.size()) candidates[candidateCount++] = candidate;
-    }
-
-    // Chọn global maximum trước, sau đó mới ép các lựa chọn còn lại cách nhau đủ xa theo Z.
-    for (uint8_t slot = 0; slot < best.size(); ++slot) {
-        int selected = -1;
-        for (uint8_t i = 0; i < candidateCount; ++i) {
-            if (!candidates[i].valid) continue;
-            bool distinctHeight = true;
-            for (uint8_t previous = 0; previous < slot; ++previous) {
-                if (fabsf(best[previous].z - candidates[i].z) < DRAW_PRESET_MIN_Z_SEPARATION_MM) {
-                    distinctHeight = false;
-                    break;
-                }
-            }
-            if (distinctHeight && (selected < 0 ||
-                candidates[i].maxSquareSide > candidates[static_cast<uint8_t>(selected)].maxSquareSide)) {
-                selected = i;
-            }
-        }
-        if (selected < 0) break;
-        best[slot] = candidates[static_cast<uint8_t>(selected)];
-        candidates[static_cast<uint8_t>(selected)].valid = false;
-    }
-    return best;
 }
 
 bool DrawingWorkspace::verifySuggestedJob(const SuggestedJob& job) {
@@ -152,20 +73,14 @@ bool DrawingWorkspace::makeSuggestedJob(uint8_t profile, Shape shape, SuggestedJ
     return verifySuggestedJob(out);
 }
 
-bool DrawingWorkspace::makeSuggestedLine(uint8_t profile, float startX, float startY,
-                                          float length, SuggestedJob& out) {
-    return makeSuggestedShape(profile, Shape::LINE, startX, startY, length, out);
-}
-
 bool DrawingWorkspace::makeSuggestedShape(uint8_t profile, Shape shape, float startX,
                                            float startY, float size, SuggestedJob& out) {
     const auto& profiles = recommendations();
     if (profile >= profiles.size() || !profiles[profile].valid ||
         !std::isfinite(startX) || !std::isfinite(startY) ||
         !std::isfinite(size) || size < DRAW_PRESET_MIN_SQUARE_SIDE_MM ||
-        size > (DRAW_WORKSPACE_SCAN_X_MAX_MM - DRAW_WORKSPACE_SCAN_X_MIN_MM)) {
-        return false;
-    }
+        size > DRAW_PRESET_MAX_SIZE_MM) return false;
+
     const Recommendation& recommendation = profiles[profile];
     const float half = size * 0.5f;
     if (shape == Shape::LINE) {

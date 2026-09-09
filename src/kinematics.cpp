@@ -72,7 +72,7 @@ FkResult forward(const float enc[6]) {
         T = T * rx(DH[i].alpha) * tx(DH[i].a) * rz(th) * tz(DH[i].d);
         if (i == 3) T4 = T;
     }
-    T = T * tz(D_TOOL); // bút gắn đồng trục J6, dài D_TOOL (20mm) dọc trục tool
+    T = T * tz(D_TOOL); // bút gắn đồng trục J6, dài D_TOOL (130mm) dọc trục tool
 
     FkResult out;
     out.wristCenter.x = T4.m[0][3];
@@ -85,7 +85,7 @@ FkResult forward(const float enc[6]) {
 }
 
 bool ikPenDown(const Pose& target, float outEnc[6]) {
-    // Wrist center (J5): bút chỉ xuống => tâm cổ tay cao hơn TCP đúng D_TOOL_EFFECTIVE (31 + 20 = 51mm)
+    // Wrist center (J5): bút chỉ xuống => tâm cổ tay cao hơn TCP đúng D_TOOL_EFFECTIVE (31 + 130 = 161mm)
     const float cx = target.x;
     const float cy = target.y;
     const float cz = target.z + D_TOOL_EFFECTIVE;

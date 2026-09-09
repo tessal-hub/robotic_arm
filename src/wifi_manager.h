@@ -22,9 +22,6 @@ public:
 
     // Lưu creds mới vào NVS. Trả false nếu tham số rác. Sau lời gọi này nên restart.
     [[nodiscard]] bool provision(const String& ssid, const String& pass);
-    [[nodiscard]] bool hasStoredCreds() const { return storedSsid_.length() > 0; }
-
-    [[nodiscard]] bool isSTA() const noexcept { return mode_ == Mode::STA; }
     [[nodiscard]] bool isAP() const noexcept { return mode_ == Mode::AP; }
     [[nodiscard]] IPAddress localIP() const;
     [[nodiscard]] String ipString() const;

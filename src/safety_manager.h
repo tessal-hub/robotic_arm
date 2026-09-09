@@ -2,7 +2,9 @@
 #include <cstdint>
 #include <atomic>
 #include <array>
+#ifndef ARDUINO
 #include <functional>
+#endif
 #include "config.h"
 
 #ifdef ARDUINO
@@ -15,7 +17,7 @@ enum class EndstopWhich : uint8_t { MIN = 0, MAX = 1 };
 // SafetyState single owner (Spec §3.3): NORMAL=idle/jog/cart, HOMING=homing active,
 // E_STOP=endstop latch (ISR debounce, 50ms+poll), FAULT=drift/power failure.
 // Both E_STOP and FAULT block motion (isMotionAllowed() false). CLEAR_FAULT clears both.
-// isEStop() is true only for E_STOP (fast ISR stop); FAULT is via isFault()/drift.
+// isEStop() is true only for E_STOP (fast ISR stop); state() distinguishes FAULT.
 enum class SafetyState { NORMAL = 0, E_STOP = 1, FAULT = 2, HOMING = 3 };
 
 class Endstops;
@@ -70,7 +72,6 @@ public:
   bool tryClearFault();
   bool isMotionAllowed() const;
   bool isEStop() const; // true only for E_STOP, not FAULT
-  bool isFault() const; // true for FAULT (drift)
   SafetyState state() const;
   bool anyLatched() const;
   bool isLatched(uint8_t axis, EndstopWhich which) const;
@@ -80,11 +81,16 @@ public:
   void forceClear() noexcept;
 
 private:
+#ifdef ARDUINO
+  Endstops* endstops_{nullptr};
+  JointModel* joints_{nullptr};
+#else
   std::function<bool(uint8_t, EndstopWhich)> isPressed_;
   std::function<bool()> anyPressed_;
   std::function<void()> clearLatches_;
   std::function<bool()> hasDrift_;
   std::function<void()> clearDrift_;
+#endif
   std::atomic<SafetyState> state_{SafetyState::NORMAL};
   bool homingActive_{false};
   bool manualReleaseActive_{false};

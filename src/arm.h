@@ -31,6 +31,7 @@ struct ArmCommand {
         HOME_AXIS,   // homing 1 khớp (axis)
         SET_HOME,    // đặt home thủ công tại vị trí hiện tại (axis)
         RELEASE_J1_J4,
+        ENABLE_J1_J4,
         CLEAR_FAULT, // thoát trạng thái FAULT
         MOVE_CART,   // p[0..2]=x,y,z — di chuyển TCP tới điểm (bút xuống)
         DRAW_LINE,   // p[0..4]=x1,y1,x2,y2,z ; p[5]=feed
@@ -73,7 +74,7 @@ private:
     void taskLoop();
     void execute(const ArmCommand& cmd);
     void stopAllAndDiscardQueuedMotion();
-    void resumeManualRelease();
+    [[nodiscard]] bool resumeManualRelease();
     void applyJog(uint8_t axis, float deltaDeg);
     [[nodiscard]] bool motionAllowed() const;
 

@@ -3417,3 +3417,360 @@ Khi người dùng bấm Jog $+30^\circ$:
 
 ### Việc còn lại
 - Nạp firmware và Home J4 thực tế. Sweep 679–716 bước nay phải qua CROSSCHECK; kỳ vọng tiếp theo `CENTERING` → `VERIFY OK` → `SETREF OK`. Entry ngay trước ghi kỳ vọng 1244 bước đã được sửa forward bằng entry này, không rewrite lịch sử.
+
+---
+
+## 2026-09-07 — Ponytail cleanup phần vẽ và hạ tầng test
+
+### Việc đã làm
+- What: thay runtime scan vùng vẽ trong `drawing_workspace.*` bằng đúng ba profile đã được scan/commissioning trước đó (`Z=-10/180/220 mm`), đồng thời giữ nguyên kiểm tra IK toàn quỹ đạo 1 mm và pen-lift trước khi enqueue.
+- What: bỏ nhánh FSM `TRAVELING` không thể tới; gom chuyển đổi `ArmCommand` → `Planner::Job` vào một hàm; pre-flight Cartesian chỉ chạy tại `ArmController::submit()`, còn planner vẫn giữ IK guard cho từng segment.
+- What: rút gọn wrist vi sai ratio 1:1 thành các hàm thuần trong namespace `wrist`; bỏ object global, ratio runtime và API velocity không dùng.
+- What: xóa `digital_clone.py`, các API chết của Motor/Sensor/Point3D, `drift_policy.h` không còn tác dụng, các test contract chỉ đọc source/mô phỏng lại implementation, cùng binary/ảnh sinh tạm đã bị track; thêm `tmp/` vào `.gitignore`.
+- Why: thực thi kết quả `ponytail-audit`: giảm code trùng, startup work, dead flexibility và test giòn mà không thay đổi chuỗi an toàn hoặc hình học robot.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 933,377 bytes (27.9%).
+- `tools/run_host_tests.sh` → **ALL HOST TESTS PASSED**, gồm kinematics 2230/2230 roundtrips, drawing workspace, trajectory validator, production J4 homing FSM, homing logic, safety manager và web validation.
+
+### Việc còn lại
+- Nạp firmware và commissioning trên robot thật; thay đổi này không tự upload firmware.
+
+---
+
+## 2026-09-07 — Homing J3: sửa 2 lỗi làm fail mọi lần (glitch ISR stop + warmup escape)
+
+### Phân tích lỗi từ log serial
+Log cho thấy J3 homing thất bại 2/2 lần liên tiếp với 2 root cause riêng biệt:
+
+**Lỗi 1 — SCAN_MIN "motor stopped early" (lần 1):**
+- Motor đang chạy `runContinuous` thì ISR endstop bắn → xác nhận `gpio_get_level == LOW` → gọi `stopFromISR()` + `pending=true`.
+- Chân công tắc bounced về HIGH trước khi SafetyManager debounce 50ms → latch KHÔNG được set.
+- `tickScan` poll: `isrPending=true`, `isPressed=false` → nhận dạng glitch đúng, gọi `clearLatch` (pending→false).
+- Tiếp theo: `hitAny=false`, `!m.isRunning()` → branch "motor stopped early" → `finishJoint(false)`.
+- **Bug**: code đã nhận dạng đúng glitch nhưng không phục hồi, thay vào đó failed ngay.
+
+**Lỗi 2 — "endstop da nhan truoc WARMUP" (lần 2):**
+- Sau lần 1 fail, arm J3 đang ở vị trí gần MAX endstop (encoder di chuyển ~90° về phía đó).
+- `retryOrFail()` → `beginScan()` → `enterWarmup()`: check `isPressed(MAX)=true` → abort ngay.
+- **Bug**: code không cố thoát khỏi endstop mà đang bị nhấn từ lần fail trước.
+
+### What: thay đổi ở `src/homing.cpp` và `src/homing.h`
+
+**Fix 1 — Glitch restart trong SCAN_MIN/MAX:**
+- Thêm `bool glitchCleared` local trong tick loop: set `true` khi `isrPending=true` nhưng `isPressed=false`.
+- Thêm `uint8_t glitchRestarts_` member field; reset trong `beginScan()`.
+- Thêm `constexpr uint8_t MAX_GLITCH_RESTARTS = 3`.
+- Trong "motor stopped early": nếu `glitchCleared && glitchRestarts_ < MAX_GLITCH_RESTARTS` → tăng counter, `clearLatch`, `runContinuous(cwApproach_)` → không fail.
+- Nếu `glitchRestarts_ >= MAX_GLITCH_RESTARTS` hoặc `!glitchCleared` → fail như cũ (log thêm `glitch=N`).
+
+**Fix 2 — WARMUP ESCAPE từ endstop đang nhấn:**
+- Trong `enterWarmup()`, khi `minP || maxP`: tách thành 2 nhánh.
+  - `minP && maxP`: vẫn abort ngay (short circuit / kẹt cơ).
+  - Chỉ 1 cữ nhấn: chạy `m.run(escapeCW, escapeSteps)` (~5°, đảo chiều so với cữ nhấn), tắt ngắt cữ đó, vào `HomePhase::WARMUP`. WARMUP bình thường sẽ chờ motor dừng → WARMUP_SETTLE_WAIT → đọc encoder delta → tiếp tục.
+- Trong `enterScanMin()`: thêm `setPinEnabled(MIN, true)` và `setPinEnabled(MAX, true)` để tái bật ngắt sau escape mode.
+
+### Why
+- J3 endstop GPIO 11/12 chịu nhiễu điện từ motor PWM (dây gần nhau). Bounce 50ms < debounce grace → công tắc ảo trong mỗi lần motor chạy nhanh.
+- Sau fail, arm chưa về vị trí an toàn. Chính sách cũ abort ngay = không bao giờ succeed lần 2.
+
+### How
+- Chọn phương án "glitch track + restart" thay vì "tăng DEBOUNCE_US" vì debounce dài hơn ảnh hưởng tất cả khớp và giảm responsiveness safety E_STOP.
+- Escape 5° được chọn = ≥ 2× backoff (`HOME_BACKOFF_DEG`=2°), đủ thoát mọi micro-switch hysteresis đã gặp.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 56,396 bytes (17.2%), Flash 1,038,781 bytes (79.1%).
+
+---
+
+## 2026-09-07 — Sửa Homing J4: Khắc phục false-abort WARMUP (deadzone, hành trình, dòng & fallback)
+
+### Việc đã làm
+- **What**:
+  1. `src/config.h`: Tăng `HOMING_CURRENT_J4` từ `450 mA` lên `550 mA` để cung cấp đủ mô-men xoắn thắng ma sát tĩnh hộp số 4:1 và bó dây cổ tay trong chế độ StealthChop, đồng thời cải thiện Back-EMF cho StallGuard4.
+  2. `src/homing.cpp`:
+     - Tăng hành trình WARMUP J4 từ `3.0°` (107 bước = ~6.6 full steps) lên `5.0°` (178 bước = ~11 full steps) để hành trình thực tế vượt hẳn độ rơ (backlash ~1–2°) của cụm giảm tốc/dây đai J4.
+     - Giảm `HOMING_J4_WARMUP_DEADZONE_DEG` từ `1.50°` xuống `0.80°`: mức 0.80° vẫn lớn hơn đàn hồi kẹt cữ cơ khí (0.53°) để kích hoạt probe ngược khi bắt đầu sát cữ, nhưng không loại nhầm chuyển động thật bị rơ rão.
+     - Bổ sung fallback an toàn: khi probe cả 2 chiều đều có `delta < deadzone` nhưng AS5600 qua I2C vẫn khỏe (`jm->encOK(3)`), FSM tự động fallback về `AXIS_ENC_SIGN` mặc định và tiến hành quét `SCAN_MIN`, thay vì hủy khớp tức thì. Quá trình quét thật sẽ được bảo vệ bởi StallGuard + step-lag và `CROSSCHECK` span ≥ 15°.
+     - Thêm log chi tiết Serial in rõ `delta`, `warmupDeadzone`, và góc `encAfter` để giám sát đo lường thực tế.
+- **Why**:
+  - J3 homing đã hoàn tất xuất sắc sau bản vá WARMUP ESCAPE + glitch recovery.
+  - Sang J4, WARMUP thất bại liên tiếp ở cả 2 chiều (`WARMUP khong dich` → `probe nguoc` → `HUY`) do hành trình 107 bước quá ngắn (~6.6 full steps) bị độ rơ cơ khí nuốt trọn khi đảo chiều, khiến delta đo được (~1.2–1.4°) rơi dưới ngưỡng deadzone cũ 1.50°, dẫn đến abort oan trước cả khi bắt đầu pha quét.
+- **How**:
+  - Nâng góc warmup lên 5° + hạ deadzone về 0.80° giúp độ dịch chuyển sau backlash đạt ~3.5–4.2° (> 0.80°).
+  - Giữ nguyên toàn bộ chuỗi an toàn: StallGuard4 ∧ AS5600 step-lag, 2 poll liên tiếp, travel cap 55°, span floor 15°, CROSSCHECK, CENTERING và VERIFY trim.
+
+### Build gate
+- `pio run` (via `python -m platformio run`) → **SUCCESS**; RAM 56,396 bytes (17.2%), Flash 1,038,845 bytes (79.1%).
+- `test_homing_fsm` (g++) → **ALL PASSED (production J4 homing FSM)**.
+- `test_kinematics` (g++) → **ALL KINEMATICS & DIFFERENTIAL WRIST TESTS PASSED** (2230/2230 roundtrips).
+
+### Việc còn lại
+- Nạp firmware và chạy lệnh Home J4 trên robot arm thật để quan sát log quét 2 cữ hoàn chỉnh.
+
+---
+
+## 2026-09-07 — Xóa phần thừa theo Ponytail audit
+
+### Việc đã làm
+- What: xóa prototype cũ `docs/standalone run good.cpp` và ba README scaffold mặc định trong `include/`, `lib/`, `test/`.
+- What: xóa API/config không có caller trong `config.h`, `nvs_store.*`, `wifi_manager.h`, `motor.h`, `safety_manager.*`, `work_plane.h` và `drawing_workspace.*`; test drawing gọi thẳng API shape chung.
+- What: xóa API chẩn đoán AS5600 không được sử dụng cùng struct/register chỉ phục vụ API đó; luồng scan, health flag, atomic snapshot và I2C recovery không đổi.
+- What: thay object `TrajectoryValidator` và kiểu `TrajectoryValidator::Job` trùng lặp bằng free function `validateTrajectory(const Planner::Job&, const WorkPlane*)`; giữ nguyên pre-flight POINT/LINE/CIRCLE/SQUARE và IK guard từng segment.
+- What: firmware `SafetyManager` giữ trực tiếp `Endstops*`/`JointModel*` thay cho năm `std::function`; host seam vẫn nằm sau `#ifndef ARDUINO` để giữ regression test. Rút `RtosLockGuard` còn constructor/destructor, non-copy và `operator bool`.
+- Why: thực thi kết quả `ponytail-audit`, giảm dead code, type trung gian, type-erasure runtime và artifact không thuộc firmware mà không thay đổi behavior vận hành.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 933,005 bytes (27.9%).
+- Host regression chạy trực tiếp bằng `g++` trên Windows (do `bash.exe` WindowsApps không khả dụng) → **ALL PASSED**: kinematics 2230/2230, drawing workspace, joint logic, work plane, trajectory validator, production J4 homing FSM, homing logic, safety manager và web validation.
+
+### Việc còn lại
+- Không có; thay đổi không tự upload firmware.
+
+---
+
+## 2026-09-07 — Thêm nút Enable đối xứng Release J1–J4
+
+### Việc đã làm
+- What: thêm `ArmCommand::ENABLE_J1_J4`, endpoint `POST /api/enable/j1-j4` và nút `🔒 Enable J1-J4` cạnh nút Release trong web UI.
+- What: nút Enable chỉ khả dụng khi status đang ở mode `release`; nút Release tự khóa trong mode này.
+- How: `resumeManualRelease()` bật lại đủ bốn TMC J1–J4, resync step counter từ encoder rồi mới bỏ manual-release/endstop bypass. Nếu bất kỳ UART enable nào fail, firmware disable lại cả nhóm và giữ Release; Home/Jog/Cartesian/Draw dùng chung đường này và không chạy nếu resume thất bại.
+- Why: cho operator chủ động bật lại mô-men sau khi nắn tay, không cần gửi một lệnh chuyển động để thoát Release.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 933,841 bytes (27.9%).
+- Không đụng `kinematics.*`; không cần chạy lại kinematics test.
+
+### Việc còn lại
+- Nạp firmware và xác nhận thực tế: Release → nắn J1–J4 → Enable → mode về IDLE, góc step được resync theo encoder.
+
+---
+
+## 2026-09-08 — Nới hành trình tìm cữ J4 lên 120°
+
+### Việc đã làm
+- What: đổi `HOMING_J4_MAX_MECHANICAL_SPAN_DEG` trong `src/config.h` từ 55° lên 120° và đồng bộ guard regression trong `test/host/test_homing_logic.cpp`.
+- Why: log commissioning cho thấy J4 đã vượt guard 55° trước khi tìm được cữ thứ hai, khiến cả hai lần homing bị hủy.
+- How: chỉ nới travel guard của hai lượt quét J4; giữ nguyên timeout 60 giây, điều kiện contact kép StallGuard + encoder step-lag, span floor, CROSSCHECK và VERIFY.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 933,837 bytes (27.9%).
+- `test_homing_logic` (g++ host) → **ALL PASSED**.
+
+### Việc còn lại
+- Nạp firmware và Home J4 thực tế; xác nhận cữ thứ hai xuất hiện trước 120° và chuỗi đi tiếp qua CROSSCHECK → CENTERING → VERIFY.
+
+---
+
+## 2026-09-08 — Nới tiếp hành trình tìm cữ J4 lên 150°
+
+### Việc đã làm
+- What: đổi `HOMING_J4_MAX_MECHANICAL_SPAN_DEG` trong `src/config.h` từ 120° lên 150° và đồng bộ regression/documentation.
+- Why: commissioning mới cho thấy J4 vẫn di chuyển tự do tới 115.8° và chạm travel guard 120° trước khi tìm thấy cữ thứ hai.
+- How: chỉ nới travel guard của hai lượt quét J4; giữ nguyên timeout 60 giây, StallGuard + encoder step-lag, span floor, CROSSCHECK và VERIFY.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 933,841 bytes (27.9%).
+- `test_homing_logic` (g++ host) → **ALL PASSED**.
+
+### Việc còn lại
+- Nạp firmware và Home J4 thực tế; xác nhận contact thứ hai xuất hiện trước 150°.
+
+---
+
+## 2026-09-08 — Tăng 1.5× tốc độ homing và di chuyển thường
+
+### Việc đã làm
+- What: giảm toàn bộ interval FAST homing J1–J6 theo hệ số 1.5: `{1800,1800,1500,2000,2500,2500}` → `{1200,1200,1000,1333,1667,1667}` µs/step; giảm SLOW homing `3000` → `2000` µs/step.
+- What: giảm `DEFAULT_STEP_INTERVAL_US` từ 1200 xuống 800 µs/step và `DEFAULT_AXIS_JOG_SPEEDS` từ `{1200,1800,1800,1500,2500,2500}` xuống `{800,1200,1200,1000,1667,1667}` µs/step.
+- Why: owner yêu cầu tăng 1.5× tốc độ homing và tốc độ di chuyển bình thường cho mọi khớp.
+- How: scale trực tiếp các calibration constant hiện hữu; không thay acceleration, current, safety guard hay Cartesian feed do API/job chỉ định.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 933,837 bytes (27.9%).
+- `test_homing_logic` (g++ host) → **ALL PASSED**.
+
+### Việc còn lại
+- Commissioning từng khớp để xác nhận không mất bước; đặc biệt J2/J3 chịu tải và contact SLOW của J4.
+
+---
+
+## 2026-09-08 — Giảm rung khi Draw bằng coordinated segment start
+
+### Việc đã làm
+- What: `Planner::startMoveTo()` nay prepare toàn bộ trục rồi gọi `startPreparedRun()` cho các segment trong state DRAWING, thay cho `setSpeed()+run()` tuần tự với ramp độc lập từng trục.
+- What: giảm `DRAW_FEED_MM_S` mặc định từ 20 xuống 10 mm/s. Staging, nâng và hạ bút vẫn dùng `Motor::run()` với S-curve hiện hữu.
+- Why: quỹ đạo 1 mm trước đây tạo chu kỳ stop/start lệch pha giữa các trục khoảng 20 lần/giây, gây rung cơ khí rõ khi vẽ.
+- How: tái sử dụng coordinated-run API đã có trong `Motor`; không thêm queue/lookahead hoặc motion engine mới.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 934,469 bytes (28.0%).
+- Không đụng `kinematics.*`; không cần chạy kinematics test.
+
+### Việc còn lại
+- Vẽ thử line/circle/square trên robot thật; nếu còn rung tại tần số waypoint thì bước tiếp theo là continuous segment lookahead thay vì tiếp tục giảm feed.
+
+---
+
+## 2026-09-08 — Cho phép restore Home sau khi nắn arm lúc mất điện
+
+### Việc đã làm
+- What: xóa guard `|delta| > 30°` trong `JointModel::restoreFromNVS()`; mọi joint có home/calibration NVS hợp lệ và encoder khỏe nay được restore bằng `encSign × wrap180(rawNow − rawSaved)`.
+- Why: thay đổi vị trí khi tắt nguồn là hành vi chủ ý và tiện dụng, không phải dấu hiệu calibration hỏng; guard cũ loại oan J2/J5/J6.
+- How: giữ nguyên validation payload NVS, calibration plausibility, sensor/motor readiness và wrap single-turn ±180°. Không tự ghi lại mốc Home khi boot.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 934,333 bytes (28.0%).
+- `test_joint_logic` → **FAIL 3 assertion J3 STEP_SIGN/cw/ccw đã lệch với config hiện tại**; không nằm trong đường NVS restore vừa sửa.
+
+### Việc còn lại
+- Power-cycle sau khi nắn từng khớp và xác nhận log `Restore xong: 6/6 khop`. Chuyển động quá một vòng khi mất điện vẫn không thể phân biệt bằng AS5600 single-turn.
+
+---
+
+## 2026-09-08 — Đảo chiều logic J5 Wrist Tilt
+
+### Việc đã làm
+- What: đảo dấu DOF J5 Tilt trong cả ba hàm `wrist::forward()`, `inverse()` và `computeIncrementalSteps()`; giữ nguyên mapping J6 Roll.
+- Why: commissioning thực tế xác nhận nút/lệnh J5 dương và âm đang chạy ngược quy ước mong muốn.
+- How: dùng mapping `J5=−(L+R)/2`, `J6=(L−R)/2`; inverse tương ứng `L=−J5+J6`, `R=−J5−J6`. Không đổi `AXIS_STEP_SIGN` riêng từng motor vì sẽ làm trộn hai DOF vi sai.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 934,345 bytes (28.0%).
+- Kinematics/differential host test (g++ trực tiếp; MSYS shell thiếu `dirname`) → **ALL PASSED**, IK roundtrip 2230/2230.
+
+### Việc còn lại
+- Jog J5 ± một góc nhỏ để xác nhận chiều Tilt; sau đó Jog J6 để xác nhận Roll không đổi.
+
+---
+
+## 2026-09-08 — Kiến trúc encoder-anchored cho cặp J5/J6
+
+### Việc đã làm
+- What: thêm `Planner::syncWristFeedback()` để resync đồng thời absSteps actuator J5/J6 từ AS5600 trước mỗi waypoint Cartesian/Draw; waypoint kế tiếp luôn tính từ vị trí thật thay vì số bước A4988 đã yêu cầu.
+- What: trước mỗi Jog J5/J6, `ArmController::applyJog()` resync cả cặp nếu hai joint đã Set Home và encoder khỏe.
+- What: Cartesian/Draw fail closed nếu J5/J6 chưa Set Home hoặc một trong hai encoder lỗi; không fallback open-loop cho wrist. Log `Planner::stop()` đổi thành lý do trung tính vì hàm được gọi từ cả user stop và lỗi nội bộ.
+- Why: hai A4988 có sai số/mất bước khác nhau dù nhận cùng số pulse, làm sai số Tilt/Roll vi sai tích lũy; encoder trước đây chủ yếu chỉ hiển thị mà chưa neo vòng điều khiển.
+- How: giữ feed-forward step generation hiện hữu và dùng feedback rời rạc tại biên waypoint 1 mm. Đây là outer-loop correction không thêm PID/task/heap và không can thiệp ISR motor.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 934,537 bytes (28.0%).
+- Kinematics/differential host test (g++ trực tiếp) → **ALL PASSED**, IK roundtrip 2230/2230.
+
+### Việc còn lại
+- Set Home J5+J6, vẽ line/circle/square và theo dõi sai số. Nếu sai số trong một segment vẫn thấy rõ, bước sau mới cần continuous closed-loop/DDA ở tần số cao hơn.
+
+---
+
+## 2026-09-08 — Sửa chiều J3 trên hình mô phỏng live
+
+### Việc đã làm
+- What: thêm mapping hiển thị `liveVisualizationKinematics()` trong `src/web_server.cpp`, đảo dấu J3 trước khi dựng canvas Dashboard và nguồn `Live Robot`.
+- Why: commissioning thực tế cho thấy khi J3 hạ xuống thì hình live lại nâng lên.
+- How: chỉ đổi lớp trình bày live; giữ nguyên telemetry, chiều motor, manual Simulation/IK, lệnh Cartesian và `kinematics.cpp`.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 934,761 bytes (28.0%).
+- Không đụng `kinematics.*`; không cần chạy kinematics test.
+
+### Việc còn lại
+- Nạp firmware, mở Dashboard hoặc chọn `Live Robot`, rồi Jog J3 một góc nhỏ để xác nhận hình và arm cùng hướng.
+
+---
+
+## 2026-09-08 — Ưu tiên lệnh Web trước status polling
+
+### Việc đã làm
+- What: frontend chỉ cho phép một `/api/status` request đang bay; `requestCommand()` hủy status fetch hiện tại trước khi gửi POST Jog/Home/Move/Draw.
+- Why: polling 300 ms trước đây có thể chồng nhiều request; ESP32 `WebServer` xử lý client nối tiếp nên lệnh operator phải chờ khoảng nửa giây trước khi được enqueue và in Serial.
+- How: dùng `AbortController` có sẵn trong browser; status bị hủy chủ động không bị tính là lỗi mất kết nối. Không thêm task, dependency hoặc thay đổi motion timing.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 935,113 bytes (28.0%).
+- Không đụng `kinematics.*`; không cần chạy kinematics test.
+
+### Việc còn lại
+- Nạp firmware và đo lại từ lúc bấm Jog đến dòng Serial; phần firmware sau enqueue vẫn có độ trễ thiết kế tối đa khoảng 10 ms của motion task.
+
+---
+
+## 2026-09-08 — Cho phép Release khi endstop đang giữ FAULT
+
+### Việc đã làm
+- What: nút Release J1–J4 không còn bị frontend disable chỉ vì mode FAULT; firmware chuyển trực tiếp sang `ArmMode::RELEASE` sau khi nhận lệnh.
+- Why: khi J3 tì công tắc, `CLEAR_FAULT` đúng thiết kế bị từ chối; operator cần nhả mô-men để nắn arm ra khỏi cữ.
+- How: giữ nguyên khóa Jog/Cartesian và điều kiện không Release khi motor còn chạy. Manual Release xóa E_STOP latch, tạm bỏ qua endstop, giữ home/NVS; sau khi nắn ra phải Enable lại.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 935,189 bytes (28.0%).
+- `test_safety_manager` (g++ host) → **ALL PASSED** (10 tests), gồm recovery từ E_STOP sang manual Release.
+
+### Việc còn lại
+- Nạp firmware; tại FAULT bấm Release J1–J4, nắn arm rời cữ, bấm Enable J1–J4 rồi tiếp tục vận hành.
+
+---
+
+## 2026-09-08 — Tool 130 mm, plane vẽ −10 mm và đảo chiều J5 Tilt
+
+### Việc đã làm
+- What: đổi chiều dài bút J6→TCP từ 20 mm thành 130 mm; đồng bộ chiều dài hiệu dụng J5→TCP thành 161 mm trong `config.h`, kinematics firmware, simulator Web, test và tài liệu hình học.
+- What: giữ Z=−10 mm làm profile vẽ chính/mặc định; tính lại preset an toàn cho tool mới thành Z={−10, 70, 110} mm và cập nhật test trajectory tương ứng.
+- What: đảo riêng chiều logic J5 Tilt trong `wrist::forward()`, `inverse()` và `computeIncrementalSteps()`; J6 Roll không đổi.
+- Why: owner thay đầu bút thực tế thành 130 mm, chọn mặt phẳng vẽ chính Z=−10 mm và yêu cầu đảo chiều Tilt.
+- How: cập nhật trực tiếp mapping vi sai dùng chung và các hằng số hiện hữu, không thêm abstraction hay state mới; UI vốn chọn profile index 0 nên Z=−10 mm tự là mặc định.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 935,181 bytes (28.0%).
+- Kinematics host → **ALL KINEMATICS & DIFFERENTIAL WRIST TESTS PASSED** (4,042 roundtrip, 0 fail).
+- Drawing workspace → **ALL PASSED** (3 profiles); trajectory validator → **ALL PASSED** (11 tests).
+
+### Việc còn lại
+- Nạp firmware và Jog J5 một góc nhỏ để xác nhận Tilt đã đảo đúng chiều cơ khí; kiểm tra J6 Roll vẫn giữ nguyên.
+---
+
+## 2026-09-08 — Sửa Digital Twin và harden đường Enable/motion
+
+### Việc đã làm
+- What: giữ nguyên travel guard J4 ở 150° theo xác nhận cơ khí của owner; không đổi logic homing J4.
+- What: đảo riêng dấu J5 Tilt trong `liveVisualizationKinematics()` để Dashboard/nguồn Live Robot khớp chiều quan sát thực tế; telemetry, Simulation thủ công, IK và firmware motion không đổi.
+- What: đổi `JointModel::resyncFromEncoder()` trả `bool`; Enable J1–J4 chỉ thoát Release sau khi cả bốn TMC read-back đúng `version + TOFF` và cả bốn encoder/home resync thành công. Lỗi bất kỳ rollback disable cả nhóm và giữ Release.
+- What: khi `esp_timer_start_once()` lỗi, `Motor::run()`/`runContinuous()` xóa trạng thái running/counter để không kẹt `busy`; `ArmController::submit()` từ chối command thường nếu queue đã có command chờ để tránh HTTP báo nhận rồi silently drop.
+- What: đồng bộ regression J3 với `AXIS_STEP_SIGN[2] = -1` đã commissioning.
+- Why: sửa các vấn đề được xác nhận sau whole-codebase review mà không thay đổi hành vi J4 đã được owner chấp thuận.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 935,473 bytes (28.0%).
+- Host regression chạy trực tiếp bằng `g++` trên Windows → **ALL PASSED**: kinematics/differential wrist, drawing workspace, joint logic, work plane, trajectory validator, production J4 homing FSM, homing logic, safety manager và web validation.
+
+### Việc còn lại (nếu có)
+- Nạp firmware và xác nhận trên phần cứng: J5 Tilt Digital Twin cùng chiều arm thật; Release → nắn J1–J4 → Enable chỉ về IDLE khi cả UART và encoder/home đều hợp lệ.
+---
+
+## 2026-09-08 — Tối ưu đường vẽ Line
+
+### Việc đã làm
+- What: thêm `DRAW_LINE_SEGMENT_MM=2.0`; riêng LINE dùng waypoint 2 mm thay vì 1 mm, circle/square giữ `DRAW_SEGMENT_MM=1.0`.
+- What: `validateTrajectory()` kiểm tra toàn bộ line theo bước tối đa 2 mm và cả hai endpoint ở độ cao nâng bút trước khi enqueue; line dài bằng 0 bị từ chối với `BAD_LINE`, Web trả HTTP 400 thay vì nhận lệnh rồi fail bất đồng bộ.
+- Why: waypoint line vẫn nằm đúng trên đường thẳng trong khi số biên stop/start giảm một nửa; giữ bước 2 mm nhỏ để giới hạn sai số nội suy joint-space, và giữ nguyên 1 mm cho đường cong/góc vuông.
+- How: tái sử dụng planner/IK/coordinated-run hiện có; không thêm buffer, lookahead hay motion engine mới.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 935,733 bytes (28.0%).
+- Host regression trực tiếp bằng `g++` → **ALL PASSED**; trajectory validator 12 tests gồm zero-length line, full path, pen lift và WorkPlane.
+
+### Việc còn lại (nếu có)
+- Vẽ thử line dài ở 10 mm/s trên robot thật; chỉ thêm continuous lookahead nếu vẫn thấy dwell/rung tại waypoint 2 mm.
+---
+
+## 2026-09-08 — Bỏ đảo dấu J3 trên Digital Twin
+
+### Việc đã làm
+- What: xóa `visualEnc[2] = -visualEnc[2]` khỏi `liveVisualizationKinematics()`; Dashboard và nguồn Live Robot nay dựng J3 trực tiếp từ telemetry. J5 Tilt vẫn giữ display inversion riêng.
+- Why: owner quan sát J3 trên twin đang ngược chiều; thay đổi chỉ thuộc lớp hiển thị.
+- How: không đổi `AXIS_STEP_SIGN`, `AXIS_ENC_SIGN`, motor, IK, homing hoặc planner.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 935,701 bytes (28.0%).
+
+### Việc còn lại (nếu có)
+- Refresh Web UI sau khi nạp firmware và Jog J3 góc nhỏ để xác nhận twin cùng chiều arm thật.

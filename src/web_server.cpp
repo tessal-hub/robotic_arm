@@ -456,7 +456,8 @@ body {
         <button class="btn btn-ghost need-idle" onclick="confirmSetHome(5)">Set Home J6</button>
         <button class="btn btn-ghost need-idle" onclick="confirmSetHome(255)">Set Home J5+J6</button>
         <button class="btn btn-primary need-idle" onclick="api('/api/home/all')">🚀 HOME ALL (J1-J4)</button>
-        <button class="btn btn-warning need-idle" onclick="confirmReleaseJ1J4()">🤲 Release J1-J4</button>
+        <button id="btnReleaseJ1J4" class="btn btn-warning need-idle" onclick="confirmReleaseJ1J4()">🤲 Release J1-J4</button>
+        <button class="btn btn-success need-release" onclick="api('/api/enable/j1-j4')" disabled>🔒 Enable J1-J4</button>
         <button class="btn btn-warning" onclick="clearFault()">🛡️ CLEAR FAULT</button>
         <button class="btn btn-danger" onclick="api('/api/stop')">⏹ STOP ALL</button>
       </div>
@@ -631,7 +632,7 @@ body {
         <div class="stat-row"><span class="k">D1 (Trụ đế)</span><span class="v">139.0 mm</span></div>
         <div class="stat-row"><span class="k">A2 (Cánh tay dưới)</span><span class="v">138.0 mm</span></div>
         <div class="stat-row"><span class="k">A3 + D4 (Cẳng tay)</span><span class="v">88.0 + 126.0 mm (L=153.7mm)</span></div>
-        <div class="stat-row"><span class="k">D6 + Tool (Bút vẽ)</span><span class="v">31.0 + 20.0 mm (D_eff=51.0mm)</span></div>
+        <div class="stat-row"><span class="k">D6 + Tool (Bút vẽ)</span><span class="v">31.0 + 130.0 mm (D_eff=161.0mm)</span></div>
         <div class="stat-row"><span class="k">Bộ truyền động</span><span class="v">J1-J4: TMC2209 | J5-J6: A4988</span></div>
         <div class="stat-row"><span class="k">Cảm biến vị trí</span><span class="v">AS5600 × 6 (PCA9548A I2C)</span></div>
       </section>
@@ -646,7 +647,7 @@ body {
 /* =============================================================================
    1. HARDWARE CONSTANTS & CRAIG MODIFIED DH PARAMETERS (src/config.h)
 ============================================================================= */
-const D1 = 139.0, A2 = 138.0, A3 = 88.0, D4 = 126.0, D6 = 31.0, D_TOOL = 20.0, D_TOOL_EFF = 51.0;
+const D1 = 139.0, A2 = 138.0, A3 = 88.0, D4 = 126.0, D6 = 31.0, D_TOOL = 130.0, D_TOOL_EFF = 161.0;
 const L_FORE = Math.hypot(A3, D4); 
 const DELTA_WRIST = Math.atan2(D4, A3) * 180.0 / Math.PI; 
 const DELTA_RAD = Math.atan2(D4, A3);
@@ -721,6 +722,12 @@ function forwardKinematics(enc){
   T = mat4Mul(T, craigMDH(0.0, -90.0, D6, th[5]));
   const p_tcp = [ T[2]*D_TOOL + T[3], T[6]*D_TOOL + T[7], T[10]*D_TOOL + T[11] ];
   return { base: [0, 0, 0], shoulder: p_sh, elbow: p_el, fore_bend: p_bend, wrist: p_wr, tcp: p_tcp };
+}
+
+function liveVisualizationKinematics(enc){
+  const visualEnc = [...enc];
+  visualEnc[4] = -visualEnc[4];
+  return forwardKinematics(visualEnc);
 }
 
 /* =============================================================================
@@ -938,7 +945,7 @@ let simWaypoints = [];
 let simPlayAnimId = null;
 let simLastAnimTime = 0;
 let simScrubIdx = 0;
-let stepSize = 1.0, pollTimer = null, failN = 0, toastTimer = null;
+let stepSize = 1.0, statusPollController = null, failN = 0, toastTimer = null;
 let latestStatus = null, pendingCommands = 0;
 let drawProfiles = [], selectedDrawProfile = 0;
 
@@ -948,8 +955,13 @@ function isPaneActive(id){
 }
 
 function syncCommandState(){
-  const busy = !!latestStatus && (latestStatus.busy || latestStatus.mode === 'fault');
-  document.querySelectorAll('.need-idle').forEach(b => { b.disabled = busy || pendingCommands > 0; });
+  const moving = !!latestStatus && latestStatus.busy;
+  const fault = !!latestStatus && latestStatus.mode === 'fault';
+  const released = !!latestStatus && latestStatus.mode === 'release';
+  document.querySelectorAll('.need-idle').forEach(b => { b.disabled = moving || fault || pendingCommands > 0; });
+  const releaseButton = document.getElementById('btnReleaseJ1J4');
+  if(releaseButton) releaseButton.disabled = moving || released || pendingCommands > 0;
+  document.querySelectorAll('.need-release').forEach(b => { b.disabled = !released || pendingCommands > 0; });
 }
 
 function pendingTrigger(){
@@ -1122,7 +1134,7 @@ function setSimSource(src){
 
 function updateSimFromAngles(angles){
   simAngles = [...angles];
-  const lm = forwardKinematics(simAngles);
+  const lm = simSource === 'live' ? liveVisualizationKinematics(simAngles) : forwardKinematics(simAngles);
 
   for(let i=0; i<6; i++){
     const slider = document.getElementById(`simJ${i}`);
@@ -1276,6 +1288,7 @@ function toast(msg, cls){
   toastTimer = setTimeout(() => { t.style.display = 'none'; }, 2600);
 }
 async function requestCommand(url, options, trigger){
+  if(statusPollController) statusPollController.abort();
   const control = trigger || pendingTrigger();
   if(control) { control.disabled = true; control.setAttribute('aria-busy', 'true'); }
   pendingCommands++;
@@ -1325,7 +1338,7 @@ function confirmSetHome(axis){
   }
 }
 function confirmReleaseJ1J4(){
-  if(confirm('Release torque J1-J4 for hand adjustment? Home marks and NVS are kept. The next Home, Jog, Cartesian, or Draw command re-enables and re-syncs these joints from their encoders.')){
+  if(confirm('Release torque J1-J4 for hand adjustment, including recovery from a pressed endstop? Home marks and NVS are kept. Move the arm clear by hand, then press Enable J1-J4 and Clear Fault if needed.')){
     api('/api/release/j1-j4');
   }
 }
@@ -1464,7 +1477,7 @@ function updateUI(d){
   window.lastRobotAngles = robotAngles;
 
   // Lưu scene mới, chỉ vẽ canvas tab đang xem để polling không tốn CPU vô ích.
-  const lmLive = forwardKinematics(robotAngles);
+  const lmLive = liveVisualizationKinematics(robotAngles);
   if(dashRenderer) {
     dashRenderer.lastLm = lmLive;
     dashRenderer.lastPath = null;
@@ -1521,12 +1534,16 @@ function setOnline(on){
 }
 
 function pollOnce(){
-  fetch('/api/status').then(r => {
+  if(statusPollController || pendingCommands > 0) return;
+  const controller = new AbortController();
+  statusPollController = controller;
+  fetch('/api/status', { signal: controller.signal }).then(r => {
     if(!r.ok) throw new Error(`status ${r.status}`);
     return r.json();
   })
     .then(d => { failN = 0; setOnline(true); updateUI(d); })
-    .catch(() => { if(++failN >= 3) setOnline(false); });
+    .catch(err => { if(err.name !== 'AbortError' && ++failN >= 3) setOnline(false); })
+    .finally(() => { if(statusPollController === controller) statusPollController = null; });
 }
 
 initStudio();
@@ -1624,7 +1641,7 @@ void handleMove() {
     const bool ok = armPtr->submit(c, 20);
     if (ok) { srv->send(200, "text/plain", "OK"); return; }
     String err = armPtr->lastPlannerError();
-    if (err == "OUT_OF_REACH" || err == "BAD_RADIUS") {
+    if (err == "OUT_OF_REACH" || err == "BAD_RADIUS" || err == "BAD_LINE") {
         char buf[96];
         snprintf(buf, sizeof(buf), "{\"error\":\"%s\",\"segment\":%d}", err.c_str(),
                  armPtr->lastPlannerFailIndex());
@@ -1681,7 +1698,7 @@ void handleDraw() {
     const bool ok = armPtr->submit(c, 20);
     if (ok) { srv->send(200, "text/plain", "OK"); return; }
     String err = armPtr->lastPlannerError();
-    if (err == "OUT_OF_REACH" || err == "BAD_RADIUS") {
+    if (err == "OUT_OF_REACH" || err == "BAD_RADIUS" || err == "BAD_LINE") {
         char buf[96];
         snprintf(buf, sizeof(buf), "{\"error\":\"%s\",\"segment\":%d}", err.c_str(),
                  armPtr->lastPlannerFailIndex());
@@ -1734,6 +1751,14 @@ void handleReleaseJ1J4() {
     if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
     ArmCommand c;
     c.type = ArmCommand::RELEASE_J1_J4;
+    const bool ok = armPtr->submit(c, 20);
+    srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
+}
+
+void handleEnableJ1J4() {
+    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    ArmCommand c;
+    c.type = ArmCommand::ENABLE_J1_J4;
     const bool ok = armPtr->submit(c, 20);
     srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
 }
@@ -1853,6 +1878,7 @@ void webBegin(WebServer& server, ArmController* arm, WifiManager* wifi,
     server.on("/api/home/axis", HTTP_POST, handleHomeAxis);
     server.on("/api/sethome", HTTP_POST, handleSetHome);
     server.on("/api/release/j1-j4", HTTP_POST, handleReleaseJ1J4);
+    server.on("/api/enable/j1-j4", HTTP_POST, handleEnableJ1J4);
     server.on("/api/clearcalib", HTTP_POST, handleClearCalib);
     server.on("/api/wifi", HTTP_POST, handleWifiSave);
     server.on("/api/workplane/calib", HTTP_POST, handleWorkPlaneCalib);
@@ -1953,7 +1979,7 @@ void handleDrawPreset() {
     const bool ok = armPtr->submit(command, 20);
     if (ok) { srv->send(200, "text/plain", "OK"); return; }
     const String err = armPtr->lastPlannerError();
-    if (err == "OUT_OF_REACH" || err == "BAD_RADIUS") {
+    if (err == "OUT_OF_REACH" || err == "BAD_RADIUS" || err == "BAD_LINE") {
         char body[96];
         snprintf(body, sizeof(body), "{\"error\":\"%s\",\"segment\":%d}", err.c_str(),
                  armPtr->lastPlannerFailIndex());

@@ -1,5 +1,4 @@
 #include "joint_model.h"
-#include "drift_policy.h"
 #include "differential_wrist.h"
 #include "joint_calibration.h"
 #include "motor.h"
@@ -77,7 +76,7 @@ float JointModel::angleFromSteps(uint8_t axis) const {
     // Khớp 5 & 6 qua cơ cấu Vi sai Bánh răng Côn (Bevel Gear Differential)
     const float th5 = actuatorAngleFromSteps(4);
     const float th6 = actuatorAngleFromSteps(5);
-    const DifferentialWrist::JointState j = g_diffWrist.forward(th5, th6);
+    const wrist::JointState j = wrist::forward(th5, th6);
     return (axis == 4) ? j.tiltDeg : j.rollDeg;
 }
 
@@ -88,7 +87,7 @@ float JointModel::angleFromEncoder(uint8_t axis) {
     // Đọc góc vi sai từ 2 encoder E_L (axis 4) và E_R (axis 5)
     const float e5 = actuatorAngleFromEncoder(4);
     const float e6 = actuatorAngleFromEncoder(5);
-    const DifferentialWrist::JointState j = g_diffWrist.forward(e5, e6);
+    const wrist::JointState j = wrist::forward(e5, e6);
     return (axis == 4) ? j.tiltDeg : j.rollDeg;
 }
 
@@ -129,11 +128,12 @@ void JointModel::clearHome(uint8_t axis) {
     lastRunningMs[axis] = millis();
 }
 
-void JointModel::resyncFromEncoder(uint8_t axis) {
-    if (axis >= NUM_MOTORS) return;
-    if (motors[axis] == nullptr || sensor == nullptr || !sensor->isSensorOK(axis) || !homed[axis]) return;
+bool JointModel::resyncFromEncoder(uint8_t axis) {
+    if (axis >= NUM_MOTORS) return false;
+    if (motors[axis] == nullptr || sensor == nullptr || !sensor->isSensorOK(axis) || !homed[axis]) return false;
     const float relEncDeg = (sensor->getAccumulatedAngle(axis) - encZeroRef[axis]) * s_encSign[axis];
     motors[axis]->setAbsoluteSteps(AXIS_STEP_SIGN[axis] * degreesToSteps(axis, relEncDeg));
+    return true;
 }
 
 void JointModel::forgetHome(uint8_t axis) {
@@ -206,14 +206,6 @@ uint8_t JointModel::restoreFromNVS() {
         const float now = sensor->getAngle(a);
         const float delta = s_encSign[a] * wrap180(now - h.rawDeg);
 
-        // Giới hạn an toàn: chỉ khôi phục khi độ lệch <= 30 độ quanh mốc home đã lưu
-        const float maxSpan = 30.0f;
-        if (fabsf(delta) > maxSpan) {
-            Serial.printf("[JM] J%u: restore lech %.1f deg > span %.1f => bo qua (can home lai)\n",
-                          a + 1, delta, maxSpan);
-            continue;
-        }
-
         motors[a]->setAbsoluteSteps(AXIS_STEP_SIGN[a] * degreesToSteps(a, delta));
         encZeroRef[a] = sensor->getAccumulatedAngle(a) - delta / s_encSign[a];
         driftFault[a] = false;
@@ -262,7 +254,7 @@ void JointModel::clearAllDriftFaults() noexcept {
         driftFailCount[i] = 0;
         lastRunningMs[i] = millis();
         if (homed[i] && encOK(i)) {
-            resyncFromEncoder(i);
+            (void)resyncFromEncoder(i);
         } else if (!homed[i] && motors[i] != nullptr) {
             motors[i]->setAbsoluteSteps(0);
         }

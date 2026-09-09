@@ -23,44 +23,17 @@ public:
     }
 
     ~RtosLockGuard() {
-        unlock();
+        if (locked_) xSemaphoreGive(mutex_);
     }
 
-    // Non-copyable, movable
+    // Non-copyable
     RtosLockGuard(const RtosLockGuard&) = delete;
     RtosLockGuard& operator=(const RtosLockGuard&) = delete;
-
-    RtosLockGuard(RtosLockGuard&& other) noexcept
-        : mutex_(other.mutex_), locked_(other.locked_) {
-        other.mutex_ = nullptr;
-        other.locked_ = false;
-    }
-
-    RtosLockGuard& operator=(RtosLockGuard&& other) noexcept {
-        if (this != &other) {
-            unlock();
-            mutex_ = other.mutex_;
-            locked_ = other.locked_;
-            other.mutex_ = nullptr;
-            other.locked_ = false;
-        }
-        return *this;
-    }
-
-    [[nodiscard]] bool isLocked() const noexcept {
-        return locked_;
-    }
 
     explicit operator bool() const noexcept {
         return locked_;
     }
 
-    void unlock() noexcept {
-        if (locked_ && mutex_ != nullptr) {
-            xSemaphoreGive(mutex_);
-            locked_ = false;
-        }
-    }
 };
 
 /**

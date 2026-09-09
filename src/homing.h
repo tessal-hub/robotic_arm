@@ -153,6 +153,10 @@ private:
     int64_t lastStallSampleSteps_{0};
     float lastCheckEnc_{0.0f};
     uint8_t encStallCount_{0};
+
+    // Glitch recovery: số lần motor bị dừng do nhiễu ISR trong SCAN_MIN/MAX
+    // và đã được khởi động lại. Giới hạn MAX_GLITCH_RESTARTS tránh vòng lặp vô tận.
+    uint8_t glitchRestarts_{0};
 };
 
 #endif // HOMING_H

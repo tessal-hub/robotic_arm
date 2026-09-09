@@ -91,8 +91,8 @@ static void testTwoSpeedArchitecture() {
         CHECK(HOMING_SLOW_SCAN_INTERVAL_US >= DEFAULT_AXIS_HOMING_SPEEDS[a],
               "Slow re-approach interval >= fast scan interval for TMC axis");
     }
-    CHECK(HOMING_SLOW_SCAN_INTERVAL_US >= 2500,
-          "Slow interval >= 2500us (gentle sensorless contact phase)");
+    CHECK(HOMING_SLOW_SCAN_INTERVAL_US >= 2000,
+          "Slow interval >= 2000us after the requested 1.5x speed increase");
 }
 
 // Retry: đủ để chống glitch, không vô hạn
@@ -162,8 +162,8 @@ static void testSpanIntegrityAndTrimBounds() {
     CHECK(HOMING_MIN_ENC_SPAN_DEG[3] < HOMING_MIN_ENC_SPAN_DEG[0],
           "J4 threshold lower (encoder ratio uncertainty)");
     CHECK(HOMING_J4_MAX_MECHANICAL_SPAN_DEG > HOMING_MIN_MECHANICAL_SPAN_DEG &&
-          HOMING_J4_MAX_MECHANICAL_SPAN_DEG <= 60.0f,
-          "J4 second-side travel cap is above valid span and remains conservative");
+          HOMING_J4_MAX_MECHANICAL_SPAN_DEG <= 150.0f,
+          "J4 second-side travel cap accepts the configured 150-degree sweep");
     CHECK(HOMING_MIN_MECHANICAL_SPAN_DEG <= 15.0f,
           "J4 accepts the commissioned 19-20 degree hard-stop span");
     CHECK(HOMING_TRIM_MAX_TRAVEL_DEG >= 2.0f && HOMING_TRIM_MAX_TRAVEL_DEG <= 15.0f,

@@ -3,7 +3,6 @@
 
 #include <Arduino.h>
 #include "config.h"
-#include "trajectory_validator.h"
 
 class Motor;
 class JointModel;
@@ -16,7 +15,7 @@ class JointModel;
  * - Mỗi segment: IK pen-down -> góc khớp -> di chuyển ĐỒNG THỜI mọi trục với
  *   thời gian bằng nhau (trục nhiều step nhất chạy tốc độ feed, các trục khác
  *   được scale interval tương ứng) => đầu cuối segment chính xác, lệch trong
- *   segment cỡ sub-mm với DRAW_SEGMENT_MM = 1mm.
+ *   segment có endpoint chính xác; line dùng 2 mm để giảm stop/start, circle/square giữ 1 mm.
  * - Nâng/hạ bút: dịch Z thêm PEN_LIFT_MM bằng chính cơ chế segment.
  */
 class Planner {
@@ -39,7 +38,6 @@ public:
     enum class State : uint8_t {
         IDLE = 0,
         LIFTING,       // stage tới đầu nét ở độ cao nâng bút (an toàn cả từ HOME/park)
-        TRAVELING,     // di chuyển tới điểm bắt đầu (bút đang nâng)
         DROPPING,      // hạ bút xuống z vẽ
         DRAWING,       // đang sinh + chạy các segment
         FINISHED_LIFT,  // bắt đầu nâng bút kết thúc
@@ -66,12 +64,11 @@ public:
     void tick();
 
     [[nodiscard]] uint32_t segmentsDone() const noexcept { return segDone_; }
-    void setWorkPlane(class WorkPlane* wp) noexcept { workPlane = wp; validator_.setWorkPlane(wp); }
+    void setWorkPlane(class WorkPlane* wp) noexcept { workPlane = wp; }
     [[nodiscard]] class WorkPlane* getWorkPlane() const noexcept { return workPlane; }
-    [[nodiscard]] const String& lastError() const noexcept { return lastError_; }
-    [[nodiscard]] int lastFailIndex() const noexcept { return lastFailIndex_; }
 
 private:
+    bool syncWristFeedback();
     bool startMoveTo(float x, float y, float z, float feedMmS); // 1 segment tới đích
     bool nextDrawSegment();
     void finishAll();
@@ -79,9 +76,6 @@ private:
     Motor* motors[NUM_MOTORS]{};
     JointModel* jm{nullptr};
     class WorkPlane* workPlane{nullptr};
-    TrajectoryValidator validator_{nullptr};
-    String lastError_{"OK"};
-    int lastFailIndex_{-1};
 
     Job job_{};
     bool hasJob_{false};

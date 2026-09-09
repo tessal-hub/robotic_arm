@@ -34,11 +34,7 @@ public:
     [[nodiscard]] static bool makeSuggestedJob(uint8_t profile, Shape shape, SuggestedJob& out);
     [[nodiscard]] static bool makeSuggestedShape(uint8_t profile, Shape shape, float startX,
                                                   float startY, float size, SuggestedJob& out);
-    [[nodiscard]] static bool makeSuggestedLine(uint8_t profile, float startX, float startY,
-                                                 float length, SuggestedJob& out);
-
 private:
-    static std::array<Recommendation, kRecommendationCount> analyze();
     static bool isReachableWithLift(float x, float y, float z);
     static bool verifySuggestedJob(const SuggestedJob& job);
 };

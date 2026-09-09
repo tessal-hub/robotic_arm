@@ -46,14 +46,6 @@ bool NvsStore::saveWifiCreds(const String& ssid, const String& pass) {
     return prefs_.putBool(WIFI_VALID_KEY, true) == 1;
 }
 
-void NvsStore::clearWifiCreds() {
-    if (ok_) {
-        if (prefs_.putBool(WIFI_VALID_KEY, false) != 1) return;
-        prefs_.remove(WIFI_SSID_KEY);
-        prefs_.remove(WIFI_PASS_KEY);
-    }
-}
-
 NvsStore::JointHome NvsStore::loadJointHome(uint8_t axis) const {
     JointHome h;
     if (!ok_ || axis >= NUM_MOTORS) return h;

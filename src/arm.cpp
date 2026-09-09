@@ -16,6 +16,25 @@
 
 namespace {
 WifiManager* g_wifi = nullptr; // inject để statusJson đọc wifi (tránh include vòng)
+
+Planner::Job plannerJobFor(const ArmCommand& cmd) {
+    Planner::Job job;
+    if (cmd.type == ArmCommand::MOVE_CART) {
+        job.shape = Planner::Shape::POINT;
+        job.x1 = cmd.p[0]; job.y1 = cmd.p[1]; job.z = cmd.p[2];
+        job.drawNow = false;
+    } else if (cmd.type == ArmCommand::DRAW_LINE) {
+        job.shape = Planner::Shape::LINE;
+        job.x1 = cmd.p[0]; job.y1 = cmd.p[1];
+        job.x2 = cmd.p[2]; job.y2 = cmd.p[3]; job.z = cmd.p[4];
+    } else {
+        job.shape = cmd.type == ArmCommand::DRAW_CIRCLE
+            ? Planner::Shape::CIRCLE : Planner::Shape::SQUARE;
+        job.x1 = cmd.p[0]; job.y1 = cmd.p[1]; job.z = cmd.p[2]; job.r = cmd.p[3];
+    }
+    if (cmd.p[5] > 1.0f && cmd.p[5] < 200.0f) job.feedMmS = cmd.p[5];
+    return job;
+}
 } // namespace
 
 void armSetWifiProvider(WifiManager* w) { g_wifi = w; }
@@ -71,60 +90,16 @@ bool ArmController::submit(const ArmCommand& cmd, uint32_t timeoutMs) {
         return true;
     }
 
+    if (uxQueueMessagesWaiting(queue) != 0) return false;
+
     // Synchronous pre-flight validation for Cartesian jobs (§3.4 lightweight B) — HTTP 400 before moving
     if ((cmd.type == ArmCommand::MOVE_CART || cmd.type == ArmCommand::DRAW_LINE ||
          cmd.type == ArmCommand::DRAW_CIRCLE || cmd.type == ArmCommand::DRAW_SQUARE) &&
         pl != nullptr && jm != nullptr) {
         if (!busy()) {
-            Planner::Job tjob;
-            if (cmd.type == ArmCommand::MOVE_CART) {
-                tjob.shape = Planner::Shape::POINT;
-                tjob.x1 = cmd.p[0];
-                tjob.y1 = cmd.p[1];
-                tjob.z = cmd.p[2];
-                if (cmd.p[5] > 1.0f && cmd.p[5] < 200.0f) tjob.feedMmS = cmd.p[5];
-            } else if (cmd.type == ArmCommand::DRAW_LINE) {
-                tjob.shape = Planner::Shape::LINE;
-                tjob.x1 = cmd.p[0];
-                tjob.y1 = cmd.p[1];
-                tjob.x2 = cmd.p[2];
-                tjob.y2 = cmd.p[3];
-                tjob.z = cmd.p[4];
-                if (cmd.p[5] > 1.0f && cmd.p[5] < 200.0f) tjob.feedMmS = cmd.p[5];
-            } else if (cmd.type == ArmCommand::DRAW_CIRCLE) {
-                tjob.shape = Planner::Shape::CIRCLE;
-                tjob.x1 = cmd.p[0];
-                tjob.y1 = cmd.p[1];
-                tjob.z = cmd.p[2];
-                tjob.r = cmd.p[3];
-                if (cmd.p[5] > 1.0f && cmd.p[5] < 200.0f) tjob.feedMmS = cmd.p[5];
-            } else {
-                tjob.shape = Planner::Shape::SQUARE;
-                tjob.x1 = cmd.p[0];
-                tjob.y1 = cmd.p[1];
-                tjob.z = cmd.p[2];
-                tjob.r = cmd.p[3];
-                if (cmd.p[5] > 1.0f && cmd.p[5] < 200.0f) tjob.feedMmS = cmd.p[5];
-            }
-            float enc[6];
-            for (uint8_t i = 0; i < NUM_MOTORS; ++i) enc[i] = jm->angleFromSteps(i);
-            const kin::FkResult fk = kin::forward(enc);
-            kin::Pose curPose{fk.tcp.x, fk.tcp.y, fk.tcp.z};
+            Planner::Job tjob = plannerJobFor(cmd);
             WorkPlane* wp = pl->getWorkPlane();
-            if (wp != nullptr && wp->isEnabled()) {
-                const Point3D ucs = wp->fromRobotXYZ({fk.tcp.x, fk.tcp.y, fk.tcp.z});
-                curPose = {ucs.x, ucs.y, ucs.z};
-            }
-            TrajectoryValidator::Job vj;
-            vj.type = static_cast<TrajectoryValidator::Job::Type>(tjob.shape);
-            vj.x1 = tjob.x1;
-            vj.y1 = tjob.y1;
-            vj.x2 = tjob.x2;
-            vj.y2 = tjob.y2;
-            vj.z = tjob.z;
-            vj.r = tjob.r;
-            TrajectoryValidator vv(wp);
-            ValidationResult vr = vv.validate(vj, curPose);
+            ValidationResult vr = validateTrajectory(tjob, wp);
             if (!vr.ok) {
                 lastPlannerError_ = vr.reason;
                 lastPlannerFailIndex_ = vr.failIndex;
@@ -307,7 +282,7 @@ void ArmController::execute(const ArmCommand& cmd) {
         }
 
         case ArmCommand::HOME_ALL:
-            resumeManualRelease();
+            if (!resumeManualRelease()) break;
             if (!motionAllowed()) break;
             if (busy()) break;
             mode_ = ArmMode::HOMING;
@@ -315,7 +290,7 @@ void ArmController::execute(const ArmCommand& cmd) {
             break;
 
         case ArmCommand::HOME_AXIS:
-            resumeManualRelease();
+            if (!resumeManualRelease()) break;
             if (!motionAllowed()) break;
             if (busy() || cmd.axis >= 4) break;
             mode_ = ArmMode::HOMING;
@@ -323,7 +298,7 @@ void ArmController::execute(const ArmCommand& cmd) {
             break;
 
         case ArmCommand::SET_HOME:
-            resumeManualRelease();
+            if (!resumeManualRelease()) break;
             if (busy()) break;
             if (jm != nullptr) {
                 if (cmd.axis == 255) {
@@ -345,6 +320,7 @@ void ArmController::execute(const ArmCommand& cmd) {
             }
             if (safety_ != nullptr) safety_->assertManualRelease(true);
             manualRelease_.store(true, std::memory_order_release);
+            mode_ = ArmMode::RELEASE;
             for (uint8_t axis = 0; axis < 4; ++axis) {
                 if (motors[axis] == nullptr || !motors[axis]->enable(false)) {
                     Serial.printf("[ARM] RELEASE J%u FAIL (UART)\n", axis + 1);
@@ -354,8 +330,12 @@ void ArmController::execute(const ArmCommand& cmd) {
             }
             break;
 
+        case ArmCommand::ENABLE_J1_J4:
+            if (!resumeManualRelease()) break;
+            break;
+
         case ArmCommand::JOG_REL:
-            resumeManualRelease();
+            if (!resumeManualRelease()) break;
             if (!motionAllowed()) {
                 Serial.printf("[ARM] TU CHOI JOG J%u: robot dang o mode=%u / FAULT (Bấm CLEAR FAULT để xóa lỗi)\n",
                               cmd.axis + 1, static_cast<unsigned>(mode_.load(std::memory_order_relaxed)));
@@ -374,45 +354,18 @@ void ArmController::execute(const ArmCommand& cmd) {
         case ArmCommand::DRAW_LINE:
         case ArmCommand::DRAW_CIRCLE:
         case ArmCommand::DRAW_SQUARE: {
-            resumeManualRelease();
+            if (!resumeManualRelease()) break;
             if (!motionAllowed() || pl == nullptr || jm == nullptr) break;
             if (busy()) break;
             if (!jm->allPositioningHomed()) {
                 Serial.println("[ARM] TU CHOI: phai HOME J1-J4 truoc khi dieu khien Cartesian");
                 break;
             }
-            Planner::Job job;
-            if (cmd.type == ArmCommand::MOVE_CART) {
-                job.shape = Planner::Shape::POINT;
-                job.x1 = cmd.p[0];
-                job.y1 = cmd.p[1];
-                job.z = cmd.p[2];
-                job.drawNow = false;
-            } else if (cmd.type == ArmCommand::DRAW_LINE) {
-                job.shape = Planner::Shape::LINE;
-                job.x1 = cmd.p[0];
-                job.y1 = cmd.p[1];
-                job.x2 = cmd.p[2];
-                job.y2 = cmd.p[3];
-                job.z = cmd.p[4];
-            } else if (cmd.type == ArmCommand::DRAW_CIRCLE) {
-                job.shape = Planner::Shape::CIRCLE;
-                job.x1 = cmd.p[0]; // cx
-                job.y1 = cmd.p[1]; // cy
-                job.z = cmd.p[2];
-                job.r = cmd.p[3];
-            } else {
-                job.shape = Planner::Shape::SQUARE;
-                job.x1 = cmd.p[0]; // cx
-                job.y1 = cmd.p[1]; // cy
-                job.z = cmd.p[2];
-                job.r = cmd.p[3];  // side
-            }
-            if (cmd.p[5] > 1.0f && cmd.p[5] < 200.0f) job.feedMmS = cmd.p[5];
+            Planner::Job job = plannerJobFor(cmd);
             mode_ = (cmd.type == ArmCommand::MOVE_CART) ? ArmMode::CART : ArmMode::DRAW;
             if (!pl->submit(job)) {
-                lastPlannerError_ = pl->lastError();
-                lastPlannerFailIndex_ = pl->lastFailIndex();
+                lastPlannerError_ = "INVALID_JOB";
+                lastPlannerFailIndex_ = -1;
                 Serial.printf("[ARM] REJECT job submit: %s at %d\n", lastPlannerError_.c_str(),
                               lastPlannerFailIndex_);
                 mode_ = ArmMode::IDLE;
@@ -439,16 +392,50 @@ void ArmController::stopAllAndDiscardQueuedMotion() {
     Serial.println("[ARM] STOP ALL: motion cancelled and queue cleared");
 }
 
-void ArmController::resumeManualRelease() {
-    if (!manualRelease_.exchange(false, std::memory_order_acq_rel)) return;
-    if (safety_ != nullptr) safety_->assertManualRelease(false);
-    if (jm != nullptr) {
-        for (uint8_t axis = 0; axis < 4; ++axis) jm->resyncFromEncoder(axis);
+bool ArmController::resumeManualRelease() {
+    if (!manualRelease_.load(std::memory_order_acquire)) return true;
+    bool ok = true;
+    for (uint8_t axis = 0; axis < 4; ++axis) {
+        if (motors[axis] == nullptr || !motors[axis]->enable(true)) {
+            Serial.printf("[ARM] ENABLE J%u FAIL (UART)\n", axis + 1);
+            ok = false;
+        }
     }
-    Serial.println("[ARM] RELEASE ket thuc — da resync J1-J4 tu encoder");
+    if (!ok) {
+        for (uint8_t axis = 0; axis < 4; ++axis) {
+            if (motors[axis] != nullptr) motors[axis]->enable(false);
+        }
+        Serial.println("[ARM] ENABLE J1-J4 that bai — giu RELEASE");
+        return false;
+    }
+    if (jm == nullptr) ok = false;
+    for (uint8_t axis = 0; ok && axis < 4; ++axis) {
+        if (!jm->resyncFromEncoder(axis)) {
+            Serial.printf("[ARM] ENABLE J%u FAIL (encoder/home)\n", axis + 1);
+            ok = false;
+        }
+    }
+    if (!ok) {
+        for (uint8_t axis = 0; axis < 4; ++axis) {
+            if (motors[axis] != nullptr) motors[axis]->enable(false);
+        }
+        Serial.println("[ARM] ENABLE J1-J4 that bai — giu RELEASE");
+        return false;
+    }
+    manualRelease_.store(false, std::memory_order_release);
+    if (safety_ != nullptr) safety_->assertManualRelease(false);
+    Serial.println("[ARM] ENABLE J1-J4 OK — da resync encoder va giu home/NVS");
+    return true;
 }
 
 void ArmController::applyJog(uint8_t axis, float deltaDeg) {
+    // Hai actuator là một cặp vi sai: trước mỗi Jog wrist, neo lại cả hai bộ đếm
+    // bước vào encoder thật để sai số A4988 không tích lũy giữa các lệnh.
+    if (axis >= 4 && jm->isHomed(4) && jm->isHomed(5) && jm->encOK(4) && jm->encOK(5)) {
+        (void)jm->resyncFromEncoder(4);
+        (void)jm->resyncFromEncoder(5);
+    }
+
     if (axis < 4) {
         // Khớp 1..4 dẫn động trực tiếp
         float delta = deltaDeg;
@@ -483,7 +470,7 @@ void ArmController::applyJog(uint8_t axis, float deltaDeg) {
                 delta = 0.0f;
             }
         }
-        const DifferentialWrist::ActuatorSteps steps = g_diffWrist.computeIncrementalSteps(
+        const wrist::ActuatorSteps steps = wrist::computeIncrementalSteps(
             delta, 0.0f, JointModel::stepsPerDegree(4), JointModel::stepsPerDegree(5));
         Serial.printf("[JOG] J5 (Tilt): delta=%.2f leftSteps=%lld rightSteps=%lld\n",
                       delta, static_cast<long long>(steps.leftSteps), static_cast<long long>(steps.rightSteps));
@@ -510,7 +497,7 @@ void ArmController::applyJog(uint8_t axis, float deltaDeg) {
                 delta = 0.0f;
             }
         }
-        const DifferentialWrist::ActuatorSteps steps = g_diffWrist.computeIncrementalSteps(
+        const wrist::ActuatorSteps steps = wrist::computeIncrementalSteps(
             0.0f, delta, JointModel::stepsPerDegree(4), JointModel::stepsPerDegree(5));
         Serial.printf("[JOG] J6 (Roll): delta=%.2f leftSteps=%lld rightSteps=%lld\n",
                       delta, static_cast<long long>(steps.leftSteps), static_cast<long long>(steps.rightSteps));
@@ -561,8 +548,8 @@ String ArmController::statusJson() {
     }
     if (pl != nullptr) {
         // Expose lastError/failIndex for pre-flight validator (§3.4) — HTTP 400 diagnostics via polling
-        const String& pe = (lastPlannerError_ != "OK" && lastPlannerError_.c_str()[0] != '\0') ? lastPlannerError_ : pl->lastError();
-        int pfi = (lastPlannerFailIndex_ != -1) ? lastPlannerFailIndex_ : pl->lastFailIndex();
+        const String& pe = lastPlannerError_;
+        const int pfi = lastPlannerFailIndex_;
         char pb[160];
         snprintf(pb, sizeof(pb),
                  "\"planner\":{\"active\":%s,\"state\":%u,\"segs\":%u,\"lastError\":\"%s\",\"failIndex\":%d},",

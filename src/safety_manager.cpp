@@ -8,25 +8,8 @@
 
 // Firmware explicit constructor
 SafetyManager::SafetyManager(Endstops* es, JointModel* jm) {
-  isPressed_ = [es](uint8_t axis, EndstopWhich w) -> bool {
-    return es->isPressed(axis, w);
-  };
-  anyPressed_ = [this]() -> bool {
-    for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
-      for (auto w : {EndstopWhich::MIN, EndstopWhich::MAX}) {
-        if (isPressed_(a, w)) return true;
-      }
-    }
-    return false;
-  };
-  clearLatches_ = [es]() { es->clearAllLatches(); };
-  hasDrift_ = [jm]() -> bool {
-    if (!jm) return false;
-    return jm->hasAnyDriftFault();
-  };
-  clearDrift_ = [jm]() {
-    if (jm) jm->clearAllDriftFaults();
-  };
+  endstops_ = es;
+  joints_ = jm;
   state_.store(SafetyState::NORMAL, std::memory_order_release);
   homingActive_ = false;
   for (auto &row : pending_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
@@ -66,7 +49,11 @@ void SafetyManager::pollEndstops(uint64_t nowUs) {
       if (delta < DEBOUNCE_US) continue; // not yet debounced, keep pending
       EndstopWhich w = (wi == 0) ? EndstopWhich::MIN : EndstopWhich::MAX;
       bool pressed = false;
+#ifdef ARDUINO
+      if (endstops_ != nullptr) pressed = endstops_->isPressed(a, w);
+#else
       if (isPressed_) pressed = isPressed_(a, w);
+#endif
       if (pressed) {
         latched_[a][wi].store(true, std::memory_order_relaxed);
         if (!homingActive_) {
@@ -89,9 +76,14 @@ void SafetyManager::pollEndstops(uint64_t nowUs) {
   }
   // Drift -> FAULT mapping (Spec §3.3 single owner): if drift latched and we are
   // in NORMAL/HOMING, promote to FAULT. Both E_STOP and FAULT block motion
-  // (isMotionAllowed false). isEStop() stays false for FAULT; use isFault().
+  // (isMotionAllowed false). isEStop() stays false for FAULT; inspect state().
   // FAULT covers drift/power, E_STOP covers endstop latch.
-  if (hasDrift_ && hasDrift_()) {
+#ifdef ARDUINO
+  const bool hasDrift = joints_ != nullptr && joints_->hasAnyDriftFault();
+#else
+  const bool hasDrift = hasDrift_ && hasDrift_();
+#endif
+  if (hasDrift) {
     SafetyState cur = state_.load(std::memory_order_acquire);
     if (cur == SafetyState::NORMAL || cur == SafetyState::HOMING) {
       state_.store(SafetyState::FAULT, std::memory_order_release);
@@ -142,7 +134,16 @@ void SafetyManager::notifyFault(const char* reason) {
 
 bool SafetyManager::tryClearFault() {
   bool pressed = false;
+#ifdef ARDUINO
+  if (endstops_ != nullptr) {
+    for (uint8_t a = 0; a < NUM_MOTORS && !pressed; ++a) {
+      pressed = endstops_->isPressed(a, EndstopWhich::MIN) ||
+                endstops_->isPressed(a, EndstopWhich::MAX);
+    }
+  }
+#else
   if (anyPressed_) pressed = anyPressed_();
+#endif
   // A drift latch is precisely what CLEAR_FAULT acknowledges. Rejecting it here
   // made the recovery path unreachable: clearDrift_() below could never run.
   // A physically pressed endstop remains a hard gate for restart.
@@ -151,8 +152,13 @@ bool SafetyManager::tryClearFault() {
   for (auto &row : pending_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
   // pendingTime not needed clear but for completeness
   for (auto &row : pendingTime_) for (auto &v : row) v.store(0, std::memory_order_relaxed);
+#ifdef ARDUINO
+  if (endstops_ != nullptr) endstops_->clearAllLatches();
+  if (joints_ != nullptr) joints_->clearAllDriftFaults();
+#else
   if (clearLatches_) clearLatches_();
   if (clearDrift_) clearDrift_();
+#endif
   state_.store(SafetyState::NORMAL, std::memory_order_release);
   homingActive_ = false;
   return true;
@@ -165,10 +171,6 @@ bool SafetyManager::isMotionAllowed() const {
 
 bool SafetyManager::isEStop() const {
   return state_.load(std::memory_order_acquire) == SafetyState::E_STOP;
-}
-
-bool SafetyManager::isFault() const {
-  return state_.load(std::memory_order_acquire) == SafetyState::FAULT;
 }
 
 SafetyState SafetyManager::state() const {
@@ -222,7 +224,11 @@ void SafetyManager::forceClear() noexcept {
   for (auto &row : latched_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
   // Do NOT call clearLatches_ — Endstops::clearAllLatches() already cleared local latched/pending
   // and then calls forceClear() to clear manager side. Calling back would recurse infinitely.
+#ifdef ARDUINO
+  if (joints_ != nullptr) joints_->clearAllDriftFaults();
+#else
   if (clearDrift_) clearDrift_();
+#endif
   state_.store(SafetyState::NORMAL, std::memory_order_release);
   homingActive_ = false;
 }

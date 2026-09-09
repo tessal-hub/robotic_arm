@@ -45,7 +45,7 @@ public:
     float encSignOf(uint8_t) const { return sign; }
     void resetHomingCalibration(uint8_t) {}
     void clearHome(uint8_t) {}
-    void resyncFromEncoder(uint8_t) {}
+    bool resyncFromEncoder(uint8_t) { return true; }
     void applyHomingCalibration(uint8_t, float s, float) { sign = s; ++calibrations; }
     void setHomeHere(uint8_t) { ++homes; }
 };
