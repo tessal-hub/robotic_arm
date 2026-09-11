@@ -94,23 +94,38 @@ body {
 .conn-pill.offline .conn-dot { background: var(--danger); }
 .conn-pill.offline { color: var(--danger-text); border-color: var(--danger); }
 
-/* ---- Main Navigation Tabs ---- */
+/* ---- Operator Console Navigation ---- */
+.mode-tabs {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
+  max-width: 360px; padding: 4px; margin-bottom: 8px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+}
+.mode-tab {
+  min-height: 42px; border: 0; border-radius: var(--radius-sm); cursor: pointer;
+  background: transparent; color: var(--text-muted); font: 600 0.9rem var(--font-sans);
+}
+.mode-tab:hover { color: var(--text-main); background: var(--surface-elevated); }
+.mode-tab.active { color: var(--bg); background: var(--primary); }
 .nav-tabs {
-  display: flex; gap: 6px; background: var(--surface);
-  padding: 5px; border-radius: var(--radius-md); margin-bottom: 16px;
-  border: 1px solid var(--border); flex-wrap: wrap; justify-content: center;
+  display: flex; gap: 20px; margin: 0 0 18px; padding: 0 4px;
+  border-bottom: 1px solid var(--border); flex-wrap: wrap;
 }
 .nav-tab {
   background: transparent; border: none; color: var(--text-muted);
-  padding: 8px 16px; border-radius: var(--radius-sm); font-size: 0.86rem;
+  padding: 9px 0; border-radius: 0; font-size: 0.82rem;
   font-weight: 600; cursor: pointer; min-height: 38px;
   display: inline-flex; align-items: center; gap: 6px;
   transition: background 150ms ease, color 150ms ease;
 }
-.nav-tab:hover { background: var(--surface-elevated); color: var(--text-main); }
-.nav-tab.active { background: var(--primary); color: var(--bg); font-weight: 700; }
+.nav-tab:hover { color: var(--text-main); }
+.nav-tab.active { color: var(--primary); box-shadow: inset 0 -2px var(--primary); font-weight: 700; }
 .tab-pane { display: none; }
 .tab-pane.active { display: block; }
+.setup-nav { display: none; }
+body.setup-mode .operate-nav { display: none; }
+body.setup-mode .setup-nav { display: inline-flex; }
+body:not(.setup-mode) .setup-only { display: none !important; }
+body.setup-mode .jog-controls { display: none; }
 
 /* ---- Layout Grids ---- */
 .grid-2col { display: grid; grid-template-columns: 1.25fr 0.75fr; gap: 14px; }
@@ -119,14 +134,14 @@ body {
 
 /* ---- Cards ---- */
 .card {
-  background: var(--surface); border-radius: var(--radius-lg);
+  background: var(--surface); border-radius: var(--radius-md);
   padding: 16px; border: 1px solid var(--border); margin-bottom: 14px;
 }
 .card-head {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
 }
-.card-head h2 { font-size: 0.95rem; font-weight: 600; color: var(--primary); display: flex; align-items: center; gap: 6px; }
+.card-head h2 { font-size: 0.95rem; font-weight: 650; color: var(--text-main); display: flex; align-items: center; gap: 6px; }
 .card-head .meta { font-size: 0.76rem; color: var(--text-muted); font-family: var(--font-mono); }
 
 /* ---- 3D Viewport Box ---- */
@@ -186,6 +201,11 @@ body {
 .b-run { background: var(--success-bg); color: var(--success-text); border: 1px solid rgba(16,185,129,0.3); }
 .b-fault { background: var(--danger-bg); color: var(--danger-text); border: 1px solid rgba(239,68,68,0.3); }
 .b-warn { background: var(--warning-bg); color: var(--warning-text); border: 1px solid rgba(245,158,11,0.3); }
+.b-showoff { background: linear-gradient(135deg, rgba(99,102,241,0.25), rgba(168,85,247,0.3)); color: #c084fc; border: 1px solid rgba(168,85,247,0.6); animation: pulse-glow 1.5s infinite alternate; }
+.mode-text.showoff { background: linear-gradient(135deg, #818cf8, #c084fc, #f472b6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.btn-showoff { background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%); color: #ffffff !important; font-weight: 700; border: none; box-shadow: 0 2px 10px rgba(168,85,247,0.35); transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease; }
+.btn-showoff:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(168,85,247,0.5); }
+@keyframes pulse-glow { 0% { box-shadow: 0 0 3px rgba(168,85,247,0.2); } 100% { box-shadow: 0 0 10px rgba(168,85,247,0.6); } }
 
 /* ---- Stat Rows ---- */
 .stat-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
@@ -312,7 +332,7 @@ body {
 #estop {
   position: fixed; bottom: 18px; right: 18px; z-index: var(--z-estop);
   padding: 14px 24px; font-size: 1.05rem; font-weight: 800; border-radius: var(--radius-pill);
-  box-shadow: 0 4px 20px rgba(239,68,68,0.5); letter-spacing: 0.04em;
+  box-shadow: 0 3px 8px rgba(239,68,68,0.38); letter-spacing: 0.02em;
 }
 #toast {
   position: fixed; bottom: 18px; left: 18px; z-index: var(--z-toast);
@@ -326,7 +346,7 @@ body {
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 @media (pointer: coarse) {
-  .nav-tab { min-height: 44px; padding: 10px 18px; font-size: 0.9rem; }
+  .mode-tab, .nav-tab { min-height: 44px; font-size: 0.9rem; }
   .btn, .tool-btn, .step-btn, .preset-pill, .mode-toggle-btn { min-height: 44px; }
   .jog-btn { min-height: 48px; }
   .jog-calib-row .btn { min-height: 44px; font-size: 0.78rem; padding: 8px; }
@@ -337,13 +357,12 @@ body {
 }
 </style>
 </head>
-<body>
+<body class="operate-mode">
 <main class="app" id="main-content">
   <!-- Header -->
   <header class="header">
     <div class="brand">
-      <h1>6-Axis <b>Arm Controller</b></h1>
-      <span class="ver">NEMA-6AXIS DIGITAL TWIN</span>
+      <h1>Arm <b>Console</b></h1>
     </div>
     <div class="conn-pill" id="connPill">
       <span class="conn-dot"></span>
@@ -351,12 +370,16 @@ body {
     </div>
   </header>
 
-  <!-- 4 Core Navigation Tabs -->
-  <nav class="nav-tabs" role="tablist" aria-label="Menu điều khiển cánh tay robot">
-    <button id="tab-dash" class="nav-tab active" data-t="pane-dash" role="tab" aria-selected="true" aria-controls="pane-dash" tabindex="0">📊 Dashboard</button>
-    <button id="tab-jog" class="nav-tab" data-t="pane-jog" role="tab" aria-selected="false" aria-controls="pane-jog" tabindex="-1">🕹️ Jog &amp; Calib</button>
-    <button id="tab-motion" class="nav-tab" data-t="pane-motion" role="tab" aria-selected="false" aria-controls="pane-motion" tabindex="-1">🎯 Cartesian &amp; Draw Studio</button>
-    <button id="tab-settings" class="nav-tab" data-t="pane-settings" role="tab" aria-selected="false" aria-controls="pane-settings" tabindex="-1">⚙️ Settings &amp; WiFi</button>
+  <nav class="mode-tabs" aria-label="Chế độ giao diện">
+    <button id="mode-operate" class="mode-tab active" data-mode="operate" aria-pressed="true">Operate</button>
+    <button id="mode-setup" class="mode-tab" data-mode="setup" aria-pressed="false">Setup</button>
+  </nav>
+  <nav class="nav-tabs" id="operateNav" role="tablist" aria-label="Công cụ vận hành">
+    <button id="tab-dash" class="nav-tab operate-nav active" data-t="pane-dash" role="tab" aria-selected="true" aria-controls="pane-dash" tabindex="0">Overview</button>
+    <button id="tab-jog" class="nav-tab operate-nav" data-t="pane-jog" role="tab" aria-selected="false" aria-controls="pane-jog" tabindex="-1">Joints</button>
+    <button id="tab-motion" class="nav-tab operate-nav" data-t="pane-motion" role="tab" aria-selected="false" aria-controls="pane-motion" tabindex="-1">Motion &amp; Draw</button>
+    <button id="tab-calib" class="nav-tab setup-nav" data-t="pane-jog" role="tab" aria-selected="false" aria-controls="pane-jog" tabindex="-1">Calibration</button>
+    <button id="tab-settings" class="nav-tab setup-nav" data-t="pane-settings" role="tab" aria-selected="false" aria-controls="pane-settings" tabindex="-1">WiFi &amp; Hardware</button>
   </nav>
 
   <!-- =========================================================================
@@ -367,7 +390,7 @@ body {
       <!-- Left Column: 3D Digital Twin -->
       <section class="card" aria-labelledby="headDashTwin">
         <div class="card-head">
-          <h2 id="headDashTwin">🦾 Mô hình 3D Digital Twin (Thời gian thực)</h2>
+          <h2 id="headDashTwin">Live robot</h2>
           <span class="meta" id="dashPoseLabel">TCP: (0.0, 0.0, 0.0)</span>
         </div>
         <div class="viewport-box">
@@ -395,8 +418,7 @@ body {
       <div>
         <section class="card" aria-labelledby="headSysState">
           <div class="card-head">
-            <h2 id="headSysState">⚡ Trạng thái hệ thống</h2>
-            <span class="meta">300 ms poll</span>
+            <h2 id="headSysState">System</h2>
           </div>
           <div class="status-hero">
             <div>
@@ -410,6 +432,7 @@ body {
           <div class="stat-row"><span class="k">Khớp đã Home</span><span class="v" id="dashHomedCount">-/6</span></div>
           <div class="stat-row"><span class="k">Công tắc Endstop</span><span class="v" id="dashEsInfo">Tất cả mở</span></div>
           <div class="stat-row"><span class="k">Tiến độ Homing</span><span class="v" id="dashHomingProg">Sẵn sàng</span></div>
+          <div class="stat-row"><span class="k">Command latency</span><span class="v" id="dashCommandLatency">-- ms</span></div>
 
           <div class="home-track" aria-label="Trạng thái Homing từng trục">
             <span class="hchip" id="hc0">J1</span>
@@ -422,15 +445,15 @@ body {
 
           <div class="btn-row">
             <button class="btn btn-primary need-idle" onclick="api('/api/home/all')">🚀 HOME ALL (J1-J4)</button>
-            <button class="btn btn-warning" onclick="api('/api/stop')">⏹ STOP ALL</button>
+            <button class="btn btn-showoff need-idle" onclick="startShowOff()">✨ SHOW OFF</button>
+            <button class="btn btn-warning" onclick="stopRobot()">⏹ STOP ALL</button>
             <button class="btn btn-ghost" onclick="clearFault()">CLEAR FAULT</button>
           </div>
         </section>
 
         <section class="card" aria-labelledby="headQuickJoints">
           <div class="card-head">
-            <h2 id="headQuickJoints">📐 Góc khớp tức thời</h2>
-            <span class="meta">Step vs Enc</span>
+            <h2 id="headQuickJoints">Joint positions</h2>
           </div>
           <div id="dashJointRows"></div>
         </section>
@@ -443,11 +466,11 @@ body {
   ========================================================================== -->
   <div id="pane-jog" class="tab-pane" role="tabpanel" aria-labelledby="tab-jog" tabindex="0">
     <div class="jog-header-bar">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <div class="operate-only" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span style="font-size:0.82rem;font-weight:600;color:var(--text-muted)">Bước Jog:</span>
         <div class="step-selector" id="stepSelector"></div>
       </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <div class="setup-only" style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-ghost need-idle" onclick="api('/api/home/axis?axis=0')">Home J1</button>
         <button class="btn btn-ghost need-idle" onclick="api('/api/home/axis?axis=1')">Home J2</button>
         <button class="btn btn-ghost need-idle" onclick="api('/api/home/axis?axis=2')">Home J3</button>
@@ -456,10 +479,11 @@ body {
         <button class="btn btn-ghost need-idle" onclick="confirmSetHome(5)">Set Home J6</button>
         <button class="btn btn-ghost need-idle" onclick="confirmSetHome(255)">Set Home J5+J6</button>
         <button class="btn btn-primary need-idle" onclick="api('/api/home/all')">🚀 HOME ALL (J1-J4)</button>
+        <button class="btn btn-showoff need-idle" onclick="startShowOff()">✨ Show Off</button>
         <button id="btnReleaseJ1J4" class="btn btn-warning need-idle" onclick="confirmReleaseJ1J4()">🤲 Release J1-J4</button>
         <button class="btn btn-success need-release" onclick="api('/api/enable/j1-j4')" disabled>🔒 Enable J1-J4</button>
         <button class="btn btn-warning" onclick="clearFault()">🛡️ CLEAR FAULT</button>
-        <button class="btn btn-danger" onclick="api('/api/stop')">⏹ STOP ALL</button>
+        <button class="btn btn-danger" onclick="stopRobot()">⏹ STOP ALL</button>
       </div>
     </div>
 
@@ -474,7 +498,7 @@ body {
       <!-- Left Column: Interactive Simulation Twin -->
       <section class="card" aria-labelledby="headSimTwin">
         <div class="card-head">
-          <h2 id="headSimTwin">🎮 3D Trajectory &amp; IK Simulation Twin</h2>
+          <h2 id="headSimTwin">Motion preview</h2>
           <span class="badge b-run" id="simIkStatusBadge">IK OK</span>
         </div>
         <div class="viewport-box">
@@ -517,7 +541,7 @@ body {
         <!-- Panel A: Direct Cartesian Move -->
         <section class="card" id="panelCartMove" aria-labelledby="headCartMove">
           <div class="card-head">
-            <h2 id="headCartMove">📍 Di chuyển Cartesian TCP</h2>
+            <h2 id="headCartMove">Move TCP</h2>
             <span class="meta">Bút vuông góc mặt bàn</span>
           </div>
           <div class="preset-pills" role="group" aria-label="Preset mô phỏng Cartesian">
@@ -526,6 +550,7 @@ body {
             <button type="button" class="preset-pill" onclick="applySimPreset('reach_fwd', this)" aria-pressed="false">Reach +X</button>
             <button type="button" class="preset-pill" onclick="applySimPreset('reach_back', this)" aria-pressed="false">Reach -X</button>
             <button type="button" class="preset-pill" onclick="applySimPreset('fold', this)" aria-pressed="false">Folded</button>
+            <button type="button" class="preset-pill btn-showoff" onclick="startShowOff()" aria-pressed="false" style="color:#fff">✨ Show Off</button>
           </div>
 
           <div class="slider-row">
@@ -556,11 +581,11 @@ body {
         <!-- Panel B: Shape Drawing Studio -->
         <section class="card" id="panelCartDraw" style="display:none" aria-labelledby="headCartDraw">
           <div class="card-head">
-            <h2 id="headCartDraw">✏️ Vẽ hình trên mặt giấy</h2>
+            <h2 id="headCartDraw">Quick Draw</h2>
             <span class="meta">Line Planner</span>
           </div>
           <div class="draw-guided" aria-labelledby="drawGuidedTitle">
-            <p id="drawGuidedTitle"><b>Quick draw:</b> choose a recommended base-Z plane and a shape, then start. The proposed size is inset inside the reachable workspace and checked again at every 1 mm segment.</p>
+            <p id="drawGuidedTitle">Choose a safe plane and shape. The full path is checked before motion.</p>
             <div class="draw-profile-list" id="drawZProfiles" role="radiogroup" aria-label="Recommended drawing heights">
               <span class="meta">Calculating reachable planes...</span>
             </div>
@@ -580,8 +605,9 @@ body {
             <p id="drawQuickMeta">HOME J1-J4 before starting. Place the paper at the selected base-Z height.</p>
             <div class="btn-row">
               <button class="btn btn-success need-idle" id="btnQuickDraw" onclick="startQuickDraw()" style="flex:1">START QUICK DRAW</button>
+              <button class="btn btn-primary need-idle" id="btnHello" onclick="startHello()" style="flex:1">WRITE HELLO</button>
               <button class="btn btn-ghost" onclick="previewQuickDraw()">Preview 3D</button>
-              <button class="btn btn-danger" onclick="api('/api/stop')">ABORT</button>
+              <button class="btn btn-danger" onclick="stopRobot()">ABORT</button>
             </div>
           </div>
         </section>
@@ -589,9 +615,28 @@ body {
         <!-- Panel C: Fine Joint Sliders Fold -->
         <section class="card" aria-labelledby="headSimJointSliders">
           <div class="card-head">
-            <h2 id="headSimJointSliders">🎛️ Tinh chỉnh từng khớp (Sim Angles)</h2>
+            <h2 id="headSimJointSliders">Simulation joints</h2>
           </div>
           <div id="simJointSliders"></div>
+        </section>
+
+        <section class="card" aria-labelledby="headTwinConfig">
+          <div class="card-head">
+            <h2 id="headTwinConfig">Twin geometry &amp; limits</h2>
+            <span class="meta">SIMULATION ONLY</span>
+          </div>
+          <p class="meta" style="margin-bottom:12px">Changes affect this browser preview only. They never write firmware, NVS, or motor limits.</p>
+          <div class="input-grid" id="twinGeometryInputs"></div>
+          <div id="twinLimitInputs" style="margin-top:12px"></div>
+          <div class="btn-row" style="margin-top:12px">
+            <button class="btn btn-primary" onclick="applyTwinConfig()">APPLY TO TWIN</button>
+            <button class="btn btn-ghost" onclick="resetTwinConfig()">RESET CURRENT ARM</button>
+          </div>
+          <div id="twinDerived" style="margin-top:12px"></div>
+          <div class="stat-row"><span class="k">Gear ratios J1-J6</span><span class="v">6 : 20 : 20 : 4 : 3 : 1</span></div>
+          <div class="stat-row"><span class="k">Step signs J1-J6</span><span class="v">+ + - - + +</span></div>
+          <div class="stat-row"><span class="k">Encoder signs J1-J6</span><span class="v">- - + - + -</span></div>
+          <div class="stat-row"><span class="k">Drivers</span><span class="v">TMC2209 x4 | A4988 x2</span></div>
         </section>
       </div>
     </div>
@@ -604,7 +649,7 @@ body {
     <div class="grid-2col">
       <section class="card" aria-labelledby="headWifiCfg">
         <div class="card-head">
-          <h2 id="headWifiCfg">📶 Cấu hình Mạng WiFi (NVS)</h2>
+          <h2 id="headWifiCfg">WiFi</h2>
         </div>
         <div class="stat-row"><span class="k">Trạng thái kết nối</span><span class="v" id="wfModeText">STA OK</span></div>
         <div class="stat-row"><span class="k">Địa chỉ IP hiện tại</span><span class="v" id="wfIpText">192.168.1.2</span></div>
@@ -626,13 +671,13 @@ body {
 
       <section class="card" aria-labelledby="headHardwareRef">
         <div class="card-head">
-          <h2 id="headHardwareRef">⚙️ Thông số Động học &amp; Phần cứng</h2>
+          <h2 id="headHardwareRef">Hardware reference</h2>
           <span class="meta">Craig MDH</span>
         </div>
         <div class="stat-row"><span class="k">D1 (Trụ đế)</span><span class="v">139.0 mm</span></div>
         <div class="stat-row"><span class="k">A2 (Cánh tay dưới)</span><span class="v">138.0 mm</span></div>
-        <div class="stat-row"><span class="k">A3 + D4 (Cẳng tay)</span><span class="v">88.0 + 126.0 mm (L=153.7mm)</span></div>
-        <div class="stat-row"><span class="k">D6 + Tool (Bút vẽ)</span><span class="v">31.0 + 130.0 mm (D_eff=161.0mm)</span></div>
+        <div class="stat-row"><span class="k">A3 + D4 (Cẳng tay)</span><span class="v">88.0 + 125.0 mm (L=152.87mm)</span></div>
+        <div class="stat-row"><span class="k">D6 + Tool (Bút vẽ)</span><span class="v">45.0 + 30.0 mm (D_eff=75.0mm)</span></div>
         <div class="stat-row"><span class="k">Bộ truyền động</span><span class="v">J1-J4: TMC2209 | J5-J6: A4988</span></div>
         <div class="stat-row"><span class="k">Cảm biến vị trí</span><span class="v">AS5600 × 6 (PCA9548A I2C)</span></div>
       </section>
@@ -640,27 +685,35 @@ body {
   </div>
 </main>
 
-<button id="estop" class="btn btn-danger" onclick="api('/api/stop')" aria-label="Dừng khẩn cấp toàn bộ cánh tay robot">⚠️ E-STOP</button>
+<button id="estop" class="btn btn-danger" onclick="stopRobot()" aria-label="Dừng khẩn cấp toàn bộ cánh tay robot">⚠️ E-STOP</button>
 <div id="toast" role="status" aria-live="assertive"></div>
 
 <script>
 /* =============================================================================
    1. HARDWARE CONSTANTS & CRAIG MODIFIED DH PARAMETERS (src/config.h)
 ============================================================================= */
-const D1 = 139.0, A2 = 138.0, A3 = 88.0, D4 = 126.0, D6 = 31.0, D_TOOL = 130.0, D_TOOL_EFF = 161.0;
-const L_FORE = Math.hypot(A3, D4); 
-const DELTA_WRIST = Math.atan2(D4, A3) * 180.0 / Math.PI; 
-const DELTA_RAD = Math.atan2(D4, A3);
+const CURRENT_TWIN = {
+  geometry: [139.0, 138.0, 88.0, 125.0, 45.0, 30.0],
+  offsets: [-90.0, 0.0],
+  limits: [[-90,90],[-90,90],[0,90],[-75,75],[-90,90],[-360,360]]
+};
+let D1, A2, A3, D4, D6, D_TOOL, D_TOOL_EFF, L_FORE, DELTA_WRIST, DELTA_RAD;
+let THETA2_OFFSET, THETA5_OFFSET;
+const PEN_LIFT = 5.0, LINE_SEGMENT = 2.0;
+const DRAW_PLANE_Z = 20.0;
+let JOINT_LIMITS;
+const AXES = ["J1 Base Yaw", "J2 Shoulder", "J3 Elbow", "J4 Wrist Pan", "J5 Revolute", "J6 Revolute"];
 
-const JOINT_LIMITS = [
-  [-90.0, 90.0],
-  [-90.0, 90.0],
-  [0.0, 90.0],
-  [-180.0, 180.0],
-  [-120.0, 120.0],
-  [-360.0, 360.0]
-];
-const AXES = ["J1 Base Yaw", "J2 Shoulder", "J3 Elbow", "J4 Wrist Pan", "J5 Wrist Tilt", "J6 Tool Roll"];
+function setTwinConfig(geometry, offsets, limits){
+  [D1, A2, A3, D4, D6, D_TOOL] = geometry;
+  [THETA2_OFFSET, THETA5_OFFSET] = offsets;
+  D_TOOL_EFF = D6 + D_TOOL;
+  L_FORE = Math.hypot(A3, D4);
+  DELTA_RAD = Math.atan2(D4, A3);
+  DELTA_WRIST = rad2deg(DELTA_RAD);
+  JOINT_LIMITS = limits.map(pair => [...pair]);
+}
+setTwinConfig(CURRENT_TWIN.geometry, CURRENT_TWIN.offsets, CURRENT_TWIN.limits);
 
 const THEME_PALETTE = {
   grid: '#1f2937',
@@ -708,7 +761,7 @@ function craigMDH(a, alphaDeg, d, thetaDeg){
 }
 
 function forwardKinematics(enc){
-  const th = [ enc[0], enc[1] - 90.0, enc[2], enc[3], enc[4], enc[5] ];
+  const th = [ enc[0], enc[1] + THETA2_OFFSET, enc[2], enc[3], enc[4] + THETA5_OFFSET, enc[5] ];
   let T = mat4Id();
   T = mat4Mul(T, craigMDH(0.0, 0.0, D1, th[0]));
   const p_sh = [T[3], T[7], T[11]];
@@ -726,7 +779,6 @@ function forwardKinematics(enc){
 
 function liveVisualizationKinematics(enc){
   const visualEnc = [...enc];
-  visualEnc[4] = -visualEnc[4];
   return forwardKinematics(visualEnc);
 }
 
@@ -760,9 +812,9 @@ function ikPenDown(tx, ty, tz){
     const t3 = q23 - t2;
 
     const e1 = rad2deg(t1);
-    const e2 = rad2deg(t2) + 90.0;
+    const e2 = rad2deg(t2) - THETA2_OFFSET;
     const e3 = rad2deg(t3);
-    const e5 = -rad2deg(q23);
+    const e5 = -rad2deg(q23) - THETA5_OFFSET;
 
     if(e1 < JOINT_LIMITS[0][0] || e1 > JOINT_LIMITS[0][1]) continue;
     if(e2 < JOINT_LIMITS[1][0] || e2 > JOINT_LIMITS[1][1]) continue;
@@ -948,6 +1000,7 @@ let simScrubIdx = 0;
 let stepSize = 1.0, statusPollController = null, failN = 0, toastTimer = null;
 let latestStatus = null, pendingCommands = 0;
 let drawProfiles = [], selectedDrawProfile = 0;
+let helloRunId = 0;
 
 function isPaneActive(id){
   const pane = document.getElementById(id);
@@ -988,9 +1041,56 @@ function initStudio() {
     }
   }
 
+  renderTwinConfig();
+
   generateSimPath();
   updateSimFromAngles(simAngles);
   loadQuickDrawProfiles();
+}
+
+function renderTwinConfig(){
+  const geometry = [
+    ['D1', D1], ['A2', A2], ['A3', A3], ['D4', D4], ['D6', D6], ['Tool', D_TOOL],
+    ['J2 offset', THETA2_OFFSET], ['J5 offset', THETA5_OFFSET]
+  ];
+  const box = document.getElementById('twinGeometryInputs');
+  if(box) box.innerHTML = geometry.map((item, i) => `<div class="input-field"><label for="twinG${i}">${item[0]} (${i < 6 ? 'mm' : 'deg'})</label><input id="twinG${i}" type="number" step="0.1" value="${item[1]}"></div>`).join('');
+
+  const limits = document.getElementById('twinLimitInputs');
+  if(limits) limits.innerHTML = JOINT_LIMITS.map((lim, i) => `<div class="input-grid"><div class="input-field"><label for="twinMin${i}">J${i+1} min (deg)</label><input id="twinMin${i}" type="number" step="0.5" value="${lim[0]}"></div><div class="input-field"><label for="twinMax${i}">J${i+1} max (deg)</label><input id="twinMax${i}" type="number" step="0.5" value="${lim[1]}"></div></div>`).join('');
+  updateTwinDerived();
+}
+
+function applyTwinConfig(){
+  const geometry = Array.from({length: 6}, (_, i) => Number(document.getElementById(`twinG${i}`).value));
+  const offsets = [Number(document.getElementById('twinG6').value), Number(document.getElementById('twinG7').value)];
+  const limits = Array.from({length: 6}, (_, i) => [Number(document.getElementById(`twinMin${i}`).value), Number(document.getElementById(`twinMax${i}`).value)]);
+  if(geometry.some(v => !Number.isFinite(v) || v <= 0) || offsets.some(v => !Number.isFinite(v)) || limits.some(l => !Number.isFinite(l[0]) || !Number.isFinite(l[1]) || l[0] >= l[1])){
+    toast('Twin config invalid: lengths must be positive and every min must be below max.', 'error');
+    return;
+  }
+  setTwinConfig(geometry, offsets, limits);
+  setSimSource('sim');
+  simAngles = simAngles.map((v, i) => Math.max(JOINT_LIMITS[i][0], Math.min(JOINT_LIMITS[i][1], v)));
+  for(let i=0; i<6; i++){
+    const slider = document.getElementById(`simJ${i}`);
+    if(slider){ slider.min = JOINT_LIMITS[i][0]; slider.max = JOINT_LIMITS[i][1]; }
+  }
+  updateTwinDerived();
+  generateSimPath();
+  updateSimFromAngles(simAngles);
+  toast('Digital Twin updated. Robot firmware is unchanged.', 'info');
+}
+
+function resetTwinConfig(){
+  setTwinConfig(CURRENT_TWIN.geometry, CURRENT_TWIN.offsets, CURRENT_TWIN.limits);
+  renderTwinConfig();
+  applyTwinConfig();
+}
+
+function updateTwinDerived(){
+  const el = document.getElementById('twinDerived');
+  if(el) el.innerHTML = `<div class="stat-row"><span class="k">Forearm resultant</span><span class="v">${L_FORE.toFixed(2)} mm @ ${DELTA_WRIST.toFixed(2)} deg</span></div><div class="stat-row"><span class="k">J5 to TCP</span><span class="v">${D_TOOL_EFF.toFixed(1)} mm</span></div>`;
 }
 
 async function loadQuickDrawProfiles(){
@@ -1092,6 +1192,84 @@ function startQuickDraw(){
   post('/api/draw/preset', `shape=${shape}&profile=${selectedDrawProfile}&sx=${sx}&sy=${sy}${lineLength}`);
 }
 
+function helloSegments(x, y, totalWidth){
+  const w = totalWidth / 6.4, h = w * 1.6, gap = w * 0.35;
+  const strokes = [], line = (ox, a, b, c, d) => strokes.push([x + ox + a*w, y + b*h, x + ox + c*w, y + d*h]);
+  let ox = 0;
+  line(ox,0,0,0,1); line(ox,1,0,1,1); line(ox,0,.5,1,.5); ox += w + gap; // H
+  line(ox,0,0,0,1); line(ox,0,1,1,1); line(ox,0,.5,.8,.5); line(ox,0,0,1,0); ox += w + gap; // E
+  line(ox,0,1,0,0); line(ox,0,0,1,0); ox += w + gap; // L
+  line(ox,0,1,0,0); line(ox,0,0,1,0); ox += w + gap; // L
+  line(ox,0,0,0,1); line(ox,0,1,1,1); line(ox,1,1,1,0); line(ox,1,0,0,0); // O
+  return strokes;
+}
+
+function helloPreflight(strokes, z){
+  return strokes.every(s => {
+    const count = Math.max(1, Math.ceil(Math.hypot(s[2] - s[0], s[3] - s[1]) / LINE_SEGMENT));
+    for(let i = 0; i <= count; i++){
+      const t = i / count;
+      if(!ikPenDown(s[0] + (s[2] - s[0]) * t, s[1] + (s[3] - s[1]) * t, z).ok) return false;
+    }
+    return ikPenDown(s[0], s[1], z + PEN_LIFT).ok && ikPenDown(s[2], s[3], z + PEN_LIFT).ok;
+  });
+}
+
+async function waitForHelloStroke(runId){
+  let seenBusy = false;
+  const deadline = Date.now() + 60000;
+  while(runId === helloRunId && Date.now() < deadline){
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const response = await fetch('/api/status');
+    if(!response.ok) throw new Error(`status ${response.status}`);
+    const status = await response.json();
+    latestStatus = status;
+    updateUI(status);
+    if(status.mode === 'fault' || status.mode === 'release') throw new Error(`robot ${status.mode}`);
+    if(status.busy) seenBusy = true;
+    else if(seenBusy) return;
+  }
+  if(runId === helloRunId) throw new Error('stroke timeout');
+}
+
+async function startHello(){
+  const profile = drawProfiles[selectedDrawProfile];
+  const sx = parseFloat(document.getElementById('dwQuickStartX').value);
+  const sy = parseFloat(document.getElementById('dwQuickStartY').value);
+  const width = parseFloat(document.getElementById('dwQuickLength').value);
+  if(!profile || !Number.isFinite(sx) || !Number.isFinite(sy) || !Number.isFinite(width) || width < 40){
+    toast('HELLO cần Start X, Start Y và chiều rộng ít nhất 40 mm', 'err');
+    return;
+  }
+  const strokes = helloSegments(sx, sy, width);
+  if(!helloPreflight(strokes, profile.z)){
+    toast('HELLO nằm ngoài vùng IK an toàn; đổi Start X/Y, width hoặc plane', 'err');
+    return;
+  }
+  const runId = ++helloRunId;
+  if(statusPollController) statusPollController.abort();
+  pendingCommands++;
+  syncCommandState();
+  try {
+    for(let i = 0; i < strokes.length && runId === helloRunId; i++){
+      const s = strokes[i];
+      toast(`Writing HELLO · stroke ${i + 1}/${strokes.length}`, 'info');
+      const body = `shape=line&base_profile=1&x1=${s[0]}&y1=${s[1]}&x2=${s[2]}&y2=${s[3]}&z=${profile.z}&feed=10`;
+      const response = await fetch('/api/draw', {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body
+      });
+      if(!response.ok) throw new Error((await response.text()) || `draw ${response.status}`);
+      await waitForHelloStroke(runId);
+    }
+    if(runId === helloRunId) toast('✓ HELLO complete', 'ok');
+  } catch(err) {
+    if(runId === helloRunId) toast(`HELLO stopped: ${err.message}`, 'err');
+  } finally {
+    pendingCommands = Math.max(0, pendingCommands - 1);
+    syncCommandState();
+  }
+}
+
 function setDashView(v, btn){
   dashRenderer.viewMode = v;
   if(btn){
@@ -1187,6 +1365,11 @@ function onSimCartChange(){
   }
 }
 
+function startShowOff(){
+  post('/api/showoff', '');
+  toast('Đang khởi động điệu múa Show Off 6 trục đồng bộ!', 'info');
+}
+
 function applySimPreset(type, btn){
   setSimSource('sim');
   if(btn){
@@ -1194,7 +1377,7 @@ function applySimPreset(type, btn){
     btn.setAttribute('aria-pressed', 'true');
   }
   if(type === 'home') updateSimFromAngles([0, 0, 0, 0, 0, 0]);
-  else if(type === 'draw'){ const ik = ikPenDown(160, 0, 10); if(ik.ok) updateSimFromAngles(ik.angles); }
+  else if(type === 'draw'){ const ik = ikPenDown(160, 0, DRAW_PLANE_Z); if(ik.ok) updateSimFromAngles(ik.angles); }
   else if(type === 'reach_fwd') updateSimFromAngles([0, 90, 0, 0, -DELTA_WRIST, 0]);
   else if(type === 'reach_back') updateSimFromAngles([0, -90, 0, 0, -DELTA_WRIST, 0]);
   else if(type === 'fold') updateSimFromAngles([0, 45, 90, 0, -45, 0]);
@@ -1203,12 +1386,12 @@ function applySimPreset(type, btn){
 function generateSimPath(){
   simWaypoints = [];
   if(simPathType === 'circle'){
-    const cx = 140, cy = 0, r = 45, z = 10;
+    const cx = 140, cy = 0, r = 45, z = DRAW_PLANE_Z;
     for(let a=0; a<=Math.PI*2; a+=0.15){
       simWaypoints.push({ x: cx + r*Math.cos(a), y: cy + r*Math.sin(a), z: z, drawing: true });
     }
   } else {
-    const x1 = 100, y1 = -70, x2 = 180, y2 = 70, z = 10;
+    const x1 = 100, y1 = -70, x2 = 180, y2 = 70, z = DRAW_PLANE_Z;
     for(let s=0; s<=1.0; s+=0.04){
       simWaypoints.push({ x: x1 + s*(x2-x1), y: y1 + s*(y2-y1), z: z, drawing: true });
     }
@@ -1310,10 +1493,15 @@ async function requestCommand(url, options, trigger){
     if(control) control.removeAttribute('aria-busy');
     if(control && !control.classList.contains('need-idle')) control.disabled = false;
     syncCommandState();
+    pollOnce();
   }
 }
 function api(url, trigger){
   return requestCommand(url, {method:'POST'}, trigger);
+}
+function stopRobot(){
+  helloRunId++;
+  return api('/api/stop');
 }
 function post(url, body, trigger){
   return requestCommand(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body }, trigger);
@@ -1354,8 +1542,10 @@ function saveWifi(){
     .then(t => { if(t) toast('Đã lưu WiFi! Robot đang khởi động lại...', 'ok'); });
 }
 
-// Navigation Tabs
+// Operator Console modes + contextual tabs
 const navTabs = Array.from(document.querySelectorAll('.nav-tab[data-t]'));
+const modeTabs = Array.from(document.querySelectorAll('.mode-tab[data-mode]'));
+let lastOperateTab = document.getElementById('tab-dash');
 function activateTab(tab, moveFocus = false){
   navTabs.forEach(x => {
     const active = x === tab;
@@ -1363,27 +1553,45 @@ function activateTab(tab, moveFocus = false){
     x.setAttribute('aria-selected', String(active));
     x.tabIndex = active ? 0 : -1;
   });
-  document.querySelectorAll('.tab-pane').forEach(x => x.classList.toggle('active', x.id === tab.dataset.t));
+  document.querySelectorAll('.tab-pane').forEach(x => {
+    const active = x.id === tab.dataset.t;
+    x.classList.toggle('active', active);
+    if(active) x.setAttribute('aria-labelledby', tab.id);
+  });
   if(moveFocus) tab.focus();
   if(tab.dataset.t === 'pane-dash' && dashRenderer) dashRenderer.renderCurrent();
   if(tab.dataset.t === 'pane-motion' && simRenderer) {
     if(simSource === 'live' && window.lastRobotAngles) updateSimFromAngles(window.lastRobotAngles);
     else simRenderer.renderCurrent();
   }
+  if(tab.classList.contains('operate-nav')) lastOperateTab = tab;
 }
 navTabs.forEach((tab, index) => {
   tab.addEventListener('click', () => activateTab(tab));
   tab.addEventListener('keydown', e => {
-    let next = index;
-    if(e.key === 'ArrowRight') next = (index + 1) % navTabs.length;
-    else if(e.key === 'ArrowLeft') next = (index - 1 + navTabs.length) % navTabs.length;
+    const visibleTabs = navTabs.filter(x => getComputedStyle(x).display !== 'none');
+    const current = visibleTabs.indexOf(tab);
+    let next = current;
+    if(e.key === 'ArrowRight') next = (current + 1) % visibleTabs.length;
+    else if(e.key === 'ArrowLeft') next = (current - 1 + visibleTabs.length) % visibleTabs.length;
     else if(e.key === 'Home') next = 0;
-    else if(e.key === 'End') next = navTabs.length - 1;
+    else if(e.key === 'End') next = visibleTabs.length - 1;
     else return;
     e.preventDefault();
-    activateTab(navTabs[next], true);
+    activateTab(visibleTabs[next], true);
   });
 });
+modeTabs.forEach(tab => tab.addEventListener('click', () => {
+  const setup = tab.dataset.mode === 'setup';
+  document.body.classList.toggle('setup-mode', setup);
+  document.body.classList.toggle('operate-mode', !setup);
+  modeTabs.forEach(x => {
+    const active = x === tab;
+    x.classList.toggle('active', active);
+    x.setAttribute('aria-pressed', String(active));
+  });
+  activateTab(setup ? document.getElementById('tab-calib') : lastOperateTab);
+}));
 
 // Step selector
 [0.5, 1, 5, 15, 30, 45].forEach(s => {
@@ -1448,8 +1656,8 @@ function updateUI(d){
   const m = d.mode || 'idle';
   const modeText = document.getElementById('dashModeText');
   const modeBadge = document.getElementById('dashModeBadge');
-  const map = { idle: 'b-idle', release: 'b-run', homing: 'b-run', jog: 'b-run', cart: 'b-run', draw: 'b-run', fault: 'b-fault' };
-  if(modeText) { modeText.textContent = m.toUpperCase(); modeText.className = 'mode-text ' + (m === 'fault' ? 'fault' : (m !== 'idle' ? 'run' : '')); }
+  const map = { idle: 'b-idle', release: 'b-run', homing: 'b-run', jog: 'b-run', cart: 'b-run', draw: 'b-run', show_off: 'b-showoff', fault: 'b-fault' };
+  if(modeText) { modeText.textContent = m.toUpperCase(); modeText.className = 'mode-text ' + (m === 'fault' ? 'fault' : (m === 'show_off' ? 'showoff' : (m !== 'idle' ? 'run' : ''))); }
   if(modeBadge) { modeBadge.textContent = m; modeBadge.className = 'badge ' + (map[m] || 'b-idle'); }
 
   const connLabel = document.getElementById('connLabel');
@@ -1461,6 +1669,8 @@ function updateUI(d){
 
   const wifiInfo = document.getElementById('dashWifiInfo');
   if(wifiInfo) wifiInfo.textContent = `${(d.wifi.mode||'').toUpperCase()} · RSSI ${d.wifi.rssi || 0} dBm`;
+  const commandLatency = document.getElementById('dashCommandLatency');
+  if(commandLatency) commandLatency.textContent = `${((d.commandLatencyUs || 0) / 1000).toFixed(1)} ms`;
 
   const wfModeText = document.getElementById('wfModeText');
   if(wfModeText) wfModeText.textContent = (d.wifi.mode||'').toUpperCase();
@@ -1653,6 +1863,10 @@ void handleMove() {
 
 void handleDraw() {
     if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    if (workPlanePtr != nullptr && workPlanePtr->isEnabled()) {
+        sendJson(409, "{\"error\":\"WORKPLANE_ENABLED\"}");
+        return;
+    }
     const String shape = srv->arg("shape");
     ArmCommand c;
     if (shape == "line") {
@@ -1664,8 +1878,8 @@ void handleDraw() {
             !webval::parseFiniteFloat(srv->arg("z").c_str(), c.p[4])) {
             srv->send(400, "text/plain", "bad line coordinates"); return;
         }
-        if (c.p[4] < -15.0f || c.p[4] > 435.0f) {
-            srv->send(400, "text/plain", "z out of range");
+        if (fabsf(c.p[4] - DRAW_PLANE_Z_MM) > 0.01f) {
+            sendJson(400, "{\"error\":\"WRONG_DRAW_PLANE\"}");
             return;
         }
     } else if (shape == "circle" || shape == "square") {
@@ -1677,8 +1891,8 @@ void handleDraw() {
             !webval::parseFiniteFloat(srv->arg("r").c_str(), c.p[3])) {
             srv->send(400, "text/plain", square ? "bad square coordinates" : "bad circle coordinates"); return;
         }
-        if (c.p[2] < -15.0f || c.p[2] > 435.0f) {
-            srv->send(400, "text/plain", "z out of range");
+        if (fabsf(c.p[2] - DRAW_PLANE_Z_MM) > 0.01f) {
+            sendJson(400, "{\"error\":\"WRONG_DRAW_PLANE\"}");
             return;
         }
         if (c.p[3] < 5.0f || c.p[3] > 250.0f) {
@@ -1759,6 +1973,15 @@ void handleEnableJ1J4() {
     if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
     ArmCommand c;
     c.type = ArmCommand::ENABLE_J1_J4;
+    const bool ok = armPtr->submit(c, 20);
+    srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
+}
+
+void handleShowOff() {
+    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
+    ArmCommand c;
+    c.type = ArmCommand::SHOW_OFF;
     const bool ok = armPtr->submit(c, 20);
     srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
 }
@@ -1879,6 +2102,8 @@ void webBegin(WebServer& server, ArmController* arm, WifiManager* wifi,
     server.on("/api/sethome", HTTP_POST, handleSetHome);
     server.on("/api/release/j1-j4", HTTP_POST, handleReleaseJ1J4);
     server.on("/api/enable/j1-j4", HTTP_POST, handleEnableJ1J4);
+    server.on("/api/showoff", HTTP_POST, handleShowOff);
+    server.on("/api/showoff", HTTP_GET, handleShowOff);
     server.on("/api/clearcalib", HTTP_POST, handleClearCalib);
     server.on("/api/wifi", HTTP_POST, handleWifiSave);
     server.on("/api/workplane/calib", HTTP_POST, handleWorkPlaneCalib);
@@ -1923,7 +2148,7 @@ void handleDrawPreset() {
     int profile = 0;
     if (!webval::parseInt(srv->arg("profile").c_str(), profile) ||
         profile < 0 || profile >= DrawingWorkspace::kRecommendationCount) {
-        srv->send(400, "text/plain", "profile 0..2 required"); return;
+        srv->send(400, "text/plain", "profile 0 required"); return;
     }
     const String shapeText = srv->arg("shape");
     DrawingWorkspace::Shape shape;

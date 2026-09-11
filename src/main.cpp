@@ -22,7 +22,7 @@ static Motor g_motors[NUM_MOTORS] = {
     {&SERIAL_PORT_1, R_SENSE, UART_ADDR_J2, STEP_PIN_1, PIN_UNSET, "J2-Shoulder"},
     {&SERIAL_PORT_1, R_SENSE, UART_ADDR_J3, STEP_PIN_2, PIN_UNSET, "J3-Elbow"},
     {&SERIAL_PORT_1, R_SENSE, UART_ADDR_J4, STEP_PIN_3, PIN_UNSET, "J4-WristPan"},
-    {nullptr,        R_SENSE, 0,            STEP_PIN_4, DIR_PIN_4,  "J5-Tilt"},
+    {nullptr,        R_SENSE, 0,            STEP_PIN_4, DIR_PIN_4,  "J5-Revolute"},
     {nullptr,        R_SENSE, 0,            STEP_PIN_5, DIR_PIN_5,  "J6-Roll"},
 };
 

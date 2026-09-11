@@ -123,7 +123,7 @@ static void test_line_from_home_park_pose_pass() {
     // otherwise reachable line; Planner stages to the line start at lift height.
     Planner::Job job;
     job.shape = Planner::Shape::LINE;
-    job.x1 = 120; job.y1 = -15; job.x2 = 210; job.y2 = -15; job.z = -10;
+    job.x1 = 120; job.y1 = -15; job.x2 = 210; job.y2 = -15; job.z = DRAW_PLANE_Z_MM;
     const auto r = validateTrajectory(job);
     if (r.ok) PASS("line_from_home_park_pose_pass");
     else { CHECK(false, "line_from_home_park_pose_pass should be ok"); }
@@ -141,10 +141,40 @@ static void test_square_reachable_pass() {
 static void test_square_bad_side_reject() {
     Planner::Job job;
     job.shape = Planner::Shape::SQUARE;
+    job.z = DRAW_PLANE_Z_MM;
     job.r = 0;
     const auto r = validateTrajectory(job);
     if (!r.ok && std::strcmp(r.reason.c_str(), "BAD_RADIUS") == 0) PASS("square_bad_side_reject");
     else { CHECK(false, "square_bad_side_reject should fail"); }
+}
+
+static void test_fixed_draw_plane() {
+    Planner::Job job;
+    job.shape = Planner::Shape::LINE;
+    job.x1 = 100; job.y1 = 0; job.x2 = 150; job.y2 = 0;
+    job.z = DRAW_PLANE_Z_MM + 2.0f;
+    const auto wrongZ = validateTrajectory(job);
+    CHECK(!wrongZ.ok && std::strcmp(wrongZ.reason.c_str(), "WRONG_DRAW_PLANE") == 0,
+          "draw rejects every base Z except the fixed plane");
+
+    WorkPlane wp;
+    CHECK(wp.setThreePointCalibration({0, 0, DRAW_PLANE_Z_MM}, {100, 0, DRAW_PLANE_Z_MM},
+                                      {0, 100, DRAW_PLANE_Z_MM}), "workplane setup");
+    job.z = DRAW_PLANE_Z_MM;
+    const auto transformed = validateTrajectory(job, &wp);
+    CHECK(!transformed.ok && std::strcmp(transformed.reason.c_str(), "WORKPLANE_ENABLED") == 0,
+          "draw rejects UCS so only the fixed base plane remains");
+    if (g_fail == 0) PASS("fixed_draw_plane");
+}
+
+static void test_runtime_segment_spacing() {
+    CHECK(Planner::segmentLengthFor(Planner::Shape::LINE) == DRAW_LINE_SEGMENT_MM,
+          "line must use the reduced-stop/start spacing");
+    CHECK(Planner::segmentLengthFor(Planner::Shape::CIRCLE) == DRAW_SEGMENT_MM,
+          "circle must keep fine spacing");
+    CHECK(Planner::segmentLengthFor(Planner::Shape::SQUARE) == DRAW_SEGMENT_MM,
+          "square must keep fine spacing");
+    if (g_fail == 0) PASS("runtime_segment_spacing");
 }
 
 static void test_workplane_target_uses_plane_not_legacy_z() {
@@ -171,6 +201,8 @@ int main() {
     test_circle_outside();
     test_square_reachable_pass();
     test_square_bad_side_reject();
+    test_runtime_segment_spacing();
+    test_fixed_draw_plane();
     test_workplane_transform();
     test_workplane_target_uses_plane_not_legacy_z();
     if (g_fail==0) {

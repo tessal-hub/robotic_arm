@@ -42,19 +42,21 @@ constexpr uint8_t STEP_PIN_1                    = 2;   // Motor 1 (Joint 2 - Sho
 constexpr uint8_t STEP_PIN_2                    = 41;  // Motor 2 (Joint 3 - Elbow Pitch)    TMC2209 addr 0b10
 constexpr uint8_t STEP_PIN_3                    = 42;  // Motor 3 (Joint 4 - Wrist Pan)      TMC2209 addr 0b11
 
-constexpr uint8_t STEP_PIN_4                    = 38;  // Motor 4 (Joint 5 - Wrist Tilt) - A4988
+constexpr uint8_t STEP_PIN_4                    = 38;  // Motor 4 (Joint 5 - independent revolute) - A4988
 constexpr uint8_t DIR_PIN_4                     = 39;
 
-constexpr uint8_t STEP_PIN_5                    = 40;  // Motor 5 (Joint 6 - Flange Roll) - A4988
+constexpr uint8_t STEP_PIN_5                    = 40;  // Motor 5 (Joint 6 - independent revolute) - A4988
 constexpr uint8_t DIR_PIN_5                     = 47;
 
 constexpr uint8_t NUM_MOTORS                    = 6;
+constexpr uint8_t CARTESIAN_AXIS_COUNT          = 5;    // J1..J5; J6 roll không đổi TCP khi vẽ
 
 // Chiều quay logic: +1 nếu step CW ứng với góc khớp tăng dương (hiệu chỉnh lúc lắp).
 // J2 và J3: góc dương là hướng vươn ra ngoài.
 constexpr int8_t AXIS_STEP_SIGN[NUM_MOTORS]     = { +1, +1, -1, -1, +1, +1 };
-// Chiều đo AS5600: J1-J5 dùng raw âm; J6 vẫn raw âm theo xác nhận commissioning.
-constexpr int8_t AXIS_ENC_SIGN[NUM_MOTORS]      = { -1, -1, 1, -1, -1, -1 };
+// Chiều đo AS5600: +1 nếu raw encoder tăng khi góc khớp tăng dương (đo thực tế).
+// J5: encoder cùng chiều chuyển động motor (step CW / góc tăng) → +1 (xác nhận người dùng 2026-09-09).
+constexpr int8_t AXIS_ENC_SIGN[NUM_MOTORS]      = { -1, -1, 1, -1, 1, -1 };
 
 // ==============================================================================
 // 3. I2C SENSOR BUS (PCA9548A Multiplexer + AS5600 Magnetic Encoders)
@@ -100,8 +102,8 @@ constexpr float GEAR_RATIO_J1                   = 6.0f;   // Joint 1 (Base Yaw) 
 constexpr float GEAR_RATIO_J2                   = 20.0f;  // Joint 2 (Shoulder Pitch) - 20:1
 constexpr float GEAR_RATIO_J3                   = 20.0f;  // Joint 3 (Elbow Pitch) - 20:1
 constexpr float GEAR_RATIO_J4                   = 4.0f;   // Joint 4 (Wrist Roll) - 4:1
-constexpr float GEAR_RATIO_J5                   = 3.0f;   // Joint 5 (Wrist Pitch) - 3:1
-constexpr float GEAR_RATIO_J6                   = 3.0f;   // Joint 6 (Flange Roll) - 3:1
+constexpr float GEAR_RATIO_J5                   = 3.0f;   // Joint 5 - 3:1
+constexpr float GEAR_RATIO_J6                   = 1.0f;   // Joint 6 - direct drive 1:1
 
 constexpr float DEFAULT_AXIS_GEAR_RATIOS[NUM_MOTORS] = {
     GEAR_RATIO_J1,
@@ -149,12 +151,12 @@ constexpr uint16_t DEFAULT_AXIS_HOMING_CURRENTS[NUM_MOTORS] = {
     HOMING_CURRENT_J6
 };
 
-constexpr uint32_t HOMING_STEP_INTERVAL_J1      = 1200;   // 833 steps/s (1.5x)
-constexpr uint32_t HOMING_STEP_INTERVAL_J2      = 1200;   // 833 steps/s (1.5x)
-constexpr uint32_t HOMING_STEP_INTERVAL_J3      = 1000;   // 1000 steps/s (1.5x)
-constexpr uint32_t HOMING_STEP_INTERVAL_J4      = 1333;   // ~750 steps/s (1.5x)
-constexpr uint32_t HOMING_STEP_INTERVAL_J5      = 1667;   // ~600 steps/s (1.5x)
-constexpr uint32_t HOMING_STEP_INTERVAL_J6      = 1667;   // ~600 steps/s (1.5x)
+constexpr uint32_t HOMING_STEP_INTERVAL_J1      = 1100;   // 909 steps/s
+constexpr uint32_t HOMING_STEP_INTERVAL_J2      = 1200;   // 833 steps/s; giảm riêng J2 để giữ torque/giảm EMI
+constexpr uint32_t HOMING_STEP_INTERVAL_J3      = 900;    // 1111 steps/s
+constexpr uint32_t HOMING_STEP_INTERVAL_J4      = 1200;   // 833 steps/s
+constexpr uint32_t HOMING_STEP_INTERVAL_J5      = 1500;   // 667 steps/s
+constexpr uint32_t HOMING_STEP_INTERVAL_J6      = 1500;   // 667 steps/s
 
 constexpr uint32_t DEFAULT_AXIS_HOMING_SPEEDS[NUM_MOTORS] = {
     HOMING_STEP_INTERVAL_J1,
@@ -177,7 +179,7 @@ constexpr uint32_t HOMING_POLL_MS               = 20;     // Chu kỳ giám sát
 
 // Homing 2 tốc độ (quét 2 cữ J1..J4): FAST tìm cữ thô, SLOW tiếp cận lại lấy mốc chính xác.
 // Glitch ở pha FAST tự hồi phục vì pha SLOW dò lại đúng cữ đó; VERIFY đối chiếu encoder độc lập.
-constexpr uint32_t HOMING_SLOW_SCAN_INTERVAL_US = 2000;   // 500 steps/s (1.5x), vẫn chậm hơn FAST
+constexpr uint32_t HOMING_SLOW_SCAN_INTERVAL_US = 1800;   // 556 steps/s, vẫn chậm hơn FAST
 constexpr uint8_t  HOMING_MAX_ATTEMPTS          = 2;      // Số lần thử tối đa mỗi khớp trước khi hủy chuỗi
 constexpr float    HOMING_VERIFY_TOL_BASE_DEG   = 0.5f;   // Verify tại home: dung sai gốc (độ raw encoder)
 constexpr float    HOMING_VERIFY_TOL_SPAN_PCT   = 1.0f;   // Verify: + % của nửa span (chịu sai số steps/deg đo được)
@@ -197,19 +199,19 @@ constexpr uint8_t  HOMING_BACKOFF_MAX_EXTEND    = 3;      // Số lần nới r�
 constexpr uint32_t HOMING_BACKOFF_SETTLE_MS    = 30;     // Settle cơ khí & tiếp điểm sau khi dừng đột ngột từ pha quét (non-blocking)
 
 // Speed & Acceleration Timing (microseconds per step pulse)
-constexpr uint32_t DEFAULT_STEP_INTERVAL_US     = 800;    // Target step interval -> 1250 steps/sec (1.5x)
+constexpr uint32_t DEFAULT_STEP_INTERVAL_US     = 720;    // Target step interval -> 1389 steps/sec
 constexpr uint32_t MIN_STEP_INTERVAL_US         = 120;    // Max speed limit -> ~8333 steps/sec
 constexpr uint32_t MAX_STEP_INTERVAL_US         = 3500;   // Starting speed interval (~285 steps/sec, max static torque)
 constexpr uint32_t DEFAULT_ACCEL_RATE           = 12;
 
 // Tốc độ Jog độc lập từng khớp (us/step) — tối ưu mô-men xoắn cao tuyệt đối, không trượt bước:
 constexpr uint32_t DEFAULT_AXIS_JOG_SPEEDS[NUM_MOTORS] = {
-    800,   // J1 (6:1):  1250 steps/s -> 23.44 deg/s
-    1200,  // J2 (20:1): 833 steps/s  -> 4.69 deg/s
-    1200,  // J3 (20:1): 833 steps/s  -> 4.69 deg/s
-    1000,  // J4 (4:1):  1000 steps/s -> 28.13 deg/s
-    1667,  // J5 (3:1):  ~600 steps/s -> 22.50 deg/s
-    1667   // J6 (3:1):  ~600 steps/s -> 22.50 deg/s
+    720,   // J1 (6:1):  1389 steps/s -> 26.04 deg/s
+    1100,  // J2 (20:1): 909 steps/s  -> 5.11 deg/s
+    1100,  // J3 (20:1): 909 steps/s  -> 5.11 deg/s
+    900,   // J4 (4:1):  1111 steps/s -> 31.25 deg/s
+    1500,  // J5 (3:1):  667 steps/s  -> 25.00 deg/s
+    1500   // J6 (1:1):  667 steps/s  -> 75.00 deg/s
 };
 
 // Schmitt-Trigger Deadband for closed-loop holding
@@ -224,24 +226,16 @@ constexpr uint8_t DRIFT_FAULT_CONSECUTIVE_CHECKS = 3;     // Persistent runaway 
 // Drawing (Cartesian trajectory, pen = tool coaxial J6)
 constexpr float PEN_LIFT_MM                     = 5.0f;   // Độ nâng bút giữa các nét (Z-raise)
 constexpr float DRAW_FEED_MM_S                  = 10.0f;  // Feed mặc định êm hơn; giảm rung tại biên segment
+constexpr float DRAW_PLANE_Z_MM                 = 20.0f;  // Mặt phẳng vẽ base-Z duy nhất
 constexpr float DRAW_SEGMENT_MM                 = 1.0f;   // Bước rời rạc hóa quỹ đạo
 constexpr float DRAW_LINE_SEGMENT_MM            = 2.0f;   // Line thẳng: ít stop/start hơn, circle/square giữ 1 mm
 constexpr uint8_t PLANNER_QUEUE_DEPTH           = 24;     // Số segment tối đa trong hàng đợi
 
 // Preset "vẽ nhanh": quét IK trong nửa không gian phía trước để đề xuất các cao độ Z
 // có ô vuông liên tục lớn nhất. Tất cả ô được kiểm tra cả lúc chạm giấy và nâng bút.
-constexpr float DRAW_WORKSPACE_SCAN_X_MIN_MM    = 20.0f;
-constexpr float DRAW_WORKSPACE_SCAN_X_MAX_MM    = 280.0f;
-constexpr float DRAW_WORKSPACE_SCAN_Y_MIN_MM    = -200.0f;
-constexpr float DRAW_WORKSPACE_SCAN_Y_MAX_MM    = 200.0f;
-constexpr float DRAW_WORKSPACE_SCAN_Z_MIN_MM    = -10.0f;
-constexpr float DRAW_WORKSPACE_SCAN_Z_MAX_MM    = 330.0f;
-constexpr float DRAW_WORKSPACE_SCAN_STEP_MM     = 10.0f;
-constexpr float DRAW_WORKSPACE_SCAN_Z_STEP_MM   = 10.0f;
 constexpr float DRAW_PRESET_SAFE_SCALE_MM       = 0.60f; // inset 40% vào ô max để chịu sai số cơ khí
 constexpr float DRAW_PRESET_MIN_SQUARE_SIDE_MM  = 40.0f;
 constexpr float DRAW_PRESET_MAX_SIZE_MM         = 260.0f;
-constexpr float DRAW_PRESET_MIN_Z_SEPARATION_MM = 40.0f;
 
 // Motion Control Task configuration (Core 1, 100Hz)
 constexpr uint32_t MOTION_TASK_PERIOD_MS        = 10;
@@ -252,10 +246,10 @@ constexpr BaseType_t MOTION_TASK_CORE           = 1;
 constexpr float DH_D1_MM                        = 139.0f; // J1 -> J2: Chiều cao đế lên vai (Base height)
 constexpr float DH_A2_MM                        = 138.0f; // J2 -> J3: Cánh tay trên (Upper arm length)
 constexpr float DH_A3_MM                        = 88.0f;  // J3 -> Điểm gập (Elbow longitudinal offset)
-constexpr float DH_D4_MM                        = 126.0f; // Điểm gập -> Tâm trục nghiêng J5 (16mm + 110mm = 126mm)
-constexpr float DH_D6_MM                        = 31.0f;  // J5 -> J6: Khoảng cách dọc trục công cụ (Tool Roll offset)
-constexpr float DH_D_TOOL_MM                    = 130.0f; // Bút (tool), gắn đồng trục với J6 (130mm từ J6)
-constexpr float DH_TOOL_EFFECTIVE_MM            = 161.0f; // Tổng chiều dài khâu công cụ hiệu dụng (J5 -> TCP = 31 + 130)
+constexpr float DH_D4_MM                        = 125.0f; // J4 -> J5
+constexpr float DH_D6_MM                        = 45.0f;  // J5 -> J6
+constexpr float DH_D_TOOL_MM                    = 30.0f;  // Bút (tool), gắn đồng trục với J6 (30mm từ J6)
+constexpr float DH_TOOL_EFFECTIVE_MM            = 75.0f;  // J5 -> TCP = 45 + 30
 constexpr float DH_D6_TOOL_MM                   = DH_TOOL_EFFECTIVE_MM; // Alias tương thích ngược
 
 // Angle Offsets: theta_DH = theta_encoder + OFFSET
@@ -263,7 +257,7 @@ constexpr float DH_THETA1_OFFSET_DEG            = 0.0f;
 constexpr float DH_THETA2_OFFSET_DEG            = -90.0f; // Khớp vai lệch -90 độ khi encoder = 0
 constexpr float DH_THETA3_OFFSET_DEG            = 0.0f;   // Khớp khuỷu thẳng đứng khi encoder = 0
 constexpr float DH_THETA4_OFFSET_DEG            = 0.0f;
-constexpr float DH_THETA5_OFFSET_DEG            = 0.0f;
+constexpr float DH_THETA5_OFFSET_DEG            = 0.0f;   // J5: offset = 0 per ARM_GEOMETRY §4; enc=0 → bút thẳng xuống qua cơ học
 constexpr float DH_THETA6_OFFSET_DEG            = 0.0f;
 
 // Joint Soft Angle Limits (Degrees relative to Calibrated Home)
@@ -275,10 +269,10 @@ constexpr float J2_MAX_LIMIT                    = +90.0f;
 // negative elbow motion is not permitted. Keep this aligned with kin::J3_MIN/MAX.
 constexpr float J3_MIN_LIMIT                    = 0.0f;
 constexpr float J3_MAX_LIMIT                    = +90.0f;  // 90 deg total stroke (0..+90)
-constexpr float J4_MIN_LIMIT                    = -180.0f;
-constexpr float J4_MAX_LIMIT                    = +180.0f;
-constexpr float J5_MIN_LIMIT                    = -120.0f;
-constexpr float J5_MAX_LIMIT                    = +120.0f;
+constexpr float J4_MIN_LIMIT                    = -75.0f;  // 150 deg total stroke
+constexpr float J4_MAX_LIMIT                    = +75.0f;
+constexpr float J5_MIN_LIMIT                    = -90.0f;
+constexpr float J5_MAX_LIMIT                    = +90.0f;
 constexpr float J6_MIN_LIMIT                    = -360.0f;
 constexpr float J6_MAX_LIMIT                    = +360.0f;
 

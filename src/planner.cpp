@@ -1,6 +1,5 @@
 #include "planner.h"
 #include <cmath>
-#include "differential_wrist.h"
 #include "joint_model.h"
 #include "kinematics.h"
 #include "motor.h"
@@ -26,7 +25,7 @@ void Planner::begin(Motor** motors_, JointModel* joints_) {
 bool Planner::submit(const Job& job) {
     if (isActive()) return false;
     if (job.shape == Shape::NONE) return false;
-    if (!syncWristFeedback()) return false;
+    if (!syncJ5Feedback()) return false;
 
     // Vị trí Cartesian xuất phát = TCP hiện tại theo FK (hoặc UCS nếu WorkPlane bật)
     float enc[6];
@@ -101,13 +100,13 @@ void Planner::stop() {
     Serial.println("[PLAN] STOP");
 }
 
-bool Planner::syncWristFeedback() {
-    if (!jm->isHomed(4) || !jm->isHomed(5) || !jm->encOK(4) || !jm->encOK(5)) {
-        Serial.println("[PLAN] LOI: J5/J6 can Set Home va 2 encoder khoe de chay Cartesian/Draw");
+bool Planner::syncJ5Feedback() {
+    if (!jm->isHomed(4) || !jm->encOK(4)) {
+        Serial.println("[PLAN] LOI: J5 can Set Home va encoder khoe de chay Cartesian/Draw");
         stop();
         return false;
     }
-    return jm->resyncFromEncoder(4) && jm->resyncFromEncoder(5);
+    return jm->resyncFromEncoder(4);
 }
 
 bool Planner::startMoveTo(float x, float y, float z, float feedMmS) {
@@ -132,19 +131,20 @@ bool Planner::startMoveTo(float x, float y, float z, float feedMmS) {
         stop();
         return false;
     }
+    targetJ5Deg_ = target[4];
 
     // Encoder-anchored wrist: mọi waypoint bắt đầu từ vị trí actuator AS5600
     // thực tế, nên sai số/mất bước A4988 được bù ở segment kế tiếp thay vì tích lũy.
-    if (!syncWristFeedback()) return false;
+    if (!syncJ5Feedback()) return false;
 
     // Bước step từng trục + trục chủ đạo (nhiều step nhất)
-    int64_t steps[NUM_MOTORS];
-    float deltaAct[NUM_MOTORS];
+    int64_t steps[NUM_MOTORS]{};
+    float deltaAct[NUM_MOTORS]{};
     uint32_t maxSteps = 1;
     bool anyMove = false;
 
-    // Khớp J1..J4 (dẫn động trực tiếp)
-    for (uint8_t i = 0; i < 4; ++i) {
+    // J6 chỉ roll quanh trục tool nên không tham gia Cartesian/Draw.
+    for (uint8_t i = 0; i < CARTESIAN_AXIS_COUNT; ++i) {
         if (!jm->isHomed(i)) { stop(); return false; }
         const float curDeg = jm->actuatorAngleFromSteps(i);
         deltaAct[i] = target[i] - curDeg;
@@ -152,22 +152,6 @@ bool Planner::startMoveTo(float x, float y, float z, float feedMmS) {
         if (steps[i] > 0) anyMove = true;
         if (steps[i] > 0 && static_cast<uint32_t>(steps[i]) > maxSteps)
             maxSteps = static_cast<uint32_t>(steps[i]);
-    }
-
-    // Khớp J5, J6 qua cơ cấu Vi sai Bánh răng Côn (Differential Wrist)
-    {
-        const wrist::ActuatorState actTarget = wrist::inverse(target[4], target[5]);
-        const float curM5 = jm->actuatorAngleFromSteps(4);
-        const float curM6 = jm->actuatorAngleFromSteps(5);
-        deltaAct[4] = actTarget.leftDeg - curM5;
-        deltaAct[5] = actTarget.rightDeg - curM6;
-
-        for (uint8_t i = 4; i < 6; ++i) {
-            steps[i] = JointModel::degreesToSteps(i, fabsf(deltaAct[i]));
-            if (steps[i] > 0) anyMove = true;
-            if (steps[i] > 0 && static_cast<uint32_t>(steps[i]) > maxSteps)
-                maxSteps = static_cast<uint32_t>(steps[i]);
-        }
     }
 
     if (!anyMove) return true; // đã ở đúng vị trí
@@ -233,14 +217,15 @@ bool Planner::startMoveTo(float x, float y, float z, float feedMmS) {
 }
 
 bool Planner::nextDrawSegment() {
-    // Sinh điểm kế tiếp cách DRAW_SEGMENT_MM
+    // Line dùng segment dài hơn để giảm stop/start; circle/square giữ độ mịn 1 mm.
     float nx = curX_, ny = curY_;
     float remain = totalLen_ - prog_;
 
     if (job_.shape == Shape::LINE) {
         const float ux = (job_.x2 - job_.x1) / totalLen_;
         const float uy = (job_.y2 - job_.y1) / totalLen_;
-        const float step = (remain < DRAW_SEGMENT_MM) ? remain : DRAW_SEGMENT_MM;
+        const float segmentMm = segmentLengthFor(job_.shape);
+        const float step = (remain < segmentMm) ? remain : segmentMm;
         nx += ux * step;
         ny += uy * step;
         prog_ += step;
@@ -254,7 +239,8 @@ bool Planner::nextDrawSegment() {
     } else { // SQUARE: bắt đầu ở góc dưới-trái, quét CCW bốn cạnh
         const float side = job_.r;
         const float half = side * 0.5f;
-        const float step = (remain < DRAW_LINE_SEGMENT_MM) ? remain : DRAW_LINE_SEGMENT_MM;
+        const float segmentMm = segmentLengthFor(job_.shape);
+        const float step = (remain < segmentMm) ? remain : segmentMm;
         prog_ += step;
         const float p = prog_;
         if (p <= side) {

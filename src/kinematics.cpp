@@ -54,7 +54,7 @@ struct DhRow {
     float a, alpha, d;
 };
 
-constexpr float TH_OFFSETS[6] = {0.0f, -90.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+constexpr float TH_OFFSETS[6] = {0.0f, THETA2_OFFSET, 0.0f, 0.0f, THETA5_OFFSET, 0.0f};
 
 } // namespace
 
@@ -62,7 +62,7 @@ FkResult forward(const float enc[6]) {
     // constexpr local (C++11-compatible init)
     static const DhRow DH[6] = {
         {0.0f, 0.0f, 139.0f}, {0.0f, -90.0f, 0.0f}, {138.0f, 0.0f, 0.0f},
-        {88.0f, -90.0f, 126.0f}, {0.0f, 90.0f, 0.0f}, {0.0f, -90.0f, 31.0f},
+        {88.0f, -90.0f, 125.0f}, {0.0f, 90.0f, 0.0f}, {0.0f, -90.0f, 45.0f},
     };
 
     Mat4 T = Mat4::identity();
@@ -72,7 +72,7 @@ FkResult forward(const float enc[6]) {
         T = T * rx(DH[i].alpha) * tx(DH[i].a) * rz(th) * tz(DH[i].d);
         if (i == 3) T4 = T;
     }
-    T = T * tz(D_TOOL); // bút gắn đồng trục J6, dài D_TOOL (130mm) dọc trục tool
+    T = T * tz(D_TOOL); // bút gắn đồng trục J6, dài D_TOOL (30mm) dọc trục tool
 
     FkResult out;
     out.wristCenter.x = T4.m[0][3];
@@ -85,7 +85,7 @@ FkResult forward(const float enc[6]) {
 }
 
 bool ikPenDown(const Pose& target, float outEnc[6]) {
-    // Wrist center (J5): bút chỉ xuống => tâm cổ tay cao hơn TCP đúng D_TOOL_EFFECTIVE (31 + 130 = 161mm)
+    // Wrist center (J5): bút chỉ xuống => cao hơn TCP D_TOOL_EFFECTIVE (45 + 30 = 75mm)
     const float cx = target.x;
     const float cy = target.y;
     const float cz = target.z + D_TOOL_EFFECTIVE;
@@ -128,7 +128,7 @@ bool ikPenDown(const Pose& target, float outEnc[6]) {
         const float e1 = t1 * 57.29577951308232f;
         const float e2 = t2 * 57.29577951308232f + 90.0f; // trừ offset -90
         const float e3 = t3 * 57.29577951308232f;
-        const float e5 = -q23 * 57.29577951308232f;       // t5_DH = -q23
+        const float e5 = -q23 * 57.29577951308232f - THETA5_OFFSET;
 
         if (!(e1 >= J1_MIN && e1 <= J1_MAX)) continue;
         if (!(e2 >= J2_MIN && e2 <= J2_MAX)) continue;

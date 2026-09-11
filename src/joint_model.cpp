@@ -1,5 +1,4 @@
 #include "joint_model.h"
-#include "differential_wrist.h"
 #include "joint_calibration.h"
 #include "motor.h"
 #include "nvs_store.h"
@@ -70,25 +69,11 @@ float JointModel::actuatorAngleFromEncoder(uint8_t axis) {
 }
 
 float JointModel::angleFromSteps(uint8_t axis) const {
-    if (axis < 4) {
-        return actuatorAngleFromSteps(axis);
-    }
-    // Khớp 5 & 6 qua cơ cấu Vi sai Bánh răng Côn (Bevel Gear Differential)
-    const float th5 = actuatorAngleFromSteps(4);
-    const float th6 = actuatorAngleFromSteps(5);
-    const wrist::JointState j = wrist::forward(th5, th6);
-    return (axis == 4) ? j.tiltDeg : j.rollDeg;
+    return actuatorAngleFromSteps(axis);
 }
 
 float JointModel::angleFromEncoder(uint8_t axis) {
-    if (axis < 4) {
-        return actuatorAngleFromEncoder(axis);
-    }
-    // Đọc góc vi sai từ 2 encoder E_L (axis 4) và E_R (axis 5)
-    const float e5 = actuatorAngleFromEncoder(4);
-    const float e6 = actuatorAngleFromEncoder(5);
-    const wrist::JointState j = wrist::forward(e5, e6);
-    return (axis == 4) ? j.tiltDeg : j.rollDeg;
+    return actuatorAngleFromEncoder(axis);
 }
 
 float JointModel::rawEncoder(uint8_t axis) {

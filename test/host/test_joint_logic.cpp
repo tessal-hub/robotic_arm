@@ -51,6 +51,12 @@ static void testStepsPerDegreePositive() {
     }
 }
 
+static void testIndependentWristRatios() {
+    CHECK(GEAR_RATIO_J5 == 3.0f, "J5 gear ratio is 3:1");
+    CHECK(GEAR_RATIO_J6 == 1.0f, "J6 gear ratio is 1:1");
+    CHECK(CARTESIAN_AXIS_COUNT == 5, "Cartesian/Draw controls J1-J5 only");
+}
+
 static void testJ3SoftLimitContract() {
     CHECK(J3_MIN_LIMIT == 0.0f, "J3 minimum limit is zero degrees");
     CHECK(J3_MAX_LIMIT == 90.0f, "J3 maximum limit is positive 90 degrees");
@@ -60,6 +66,17 @@ static void testJ3SoftLimitContract() {
           "J3 maximum in shared soft-limit table");
     CHECK(DEFAULT_AXIS_CALIB_RANGE[2] == 90.0f,
           "J3 calibration range is 90 degrees");
+}
+
+static void testJ4SoftLimitContract() {
+    CHECK(J4_MIN_LIMIT == -75.0f, "J4 minimum limit is negative 75 degrees");
+    CHECK(J4_MAX_LIMIT == 75.0f, "J4 maximum limit is positive 75 degrees");
+    CHECK(DEFAULT_AXIS_LIMIT_MIN[3] == J4_MIN_LIMIT,
+          "J4 minimum in shared soft-limit table");
+    CHECK(DEFAULT_AXIS_LIMIT_MAX[3] == J4_MAX_LIMIT,
+          "J4 maximum in shared soft-limit table");
+    CHECK(DEFAULT_AXIS_CALIB_RANGE[3] == 150.0f,
+          "J4 calibration range is 150 degrees total");
 }
 
 static void testMeasuredCalibrationAcceptance() {
@@ -82,7 +99,10 @@ static void testMeasuredCalibrationAcceptance() {
 }
 
 static void testJ5EncoderDirection() {
-    CHECK(AXIS_ENC_SIGN[4] == -1, "J5 encoder direction is reversed");
+    // AXIS_ENC_SIGN[J5] = +1: encoder cùng chiều chuyển động motor (step CW / góc tăng).
+    CHECK(AXIS_ENC_SIGN[4] == 1, "J5 encoder follows Jog sign (increases when angle increases)");
+    // THETA5 offset = 0: encoder 0° = thẳng trục cẳng tay (ARM_GEOMETRY §4).
+    CHECK(DH_THETA5_OFFSET_DEG == 0.0f, "J5 DH offset is zero per ARM_GEOMETRY");
 }
 
 int main() {
@@ -90,7 +110,9 @@ int main() {
     testCwForDeltaJ2NegativeSign();
     testCwForDeltaJ3NegativeSign();
     testStepsPerDegreePositive();
+    testIndependentWristRatios();
     testJ3SoftLimitContract();
+    testJ4SoftLimitContract();
     testMeasuredCalibrationAcceptance();
     testJ5EncoderDirection();
     if (g_fail == 0) {

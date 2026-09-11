@@ -17,7 +17,7 @@ class JointModel;
 class HomingController;
 class Planner;
 
-enum class ArmMode : uint8_t { IDLE = 0, RELEASE, HOMING, JOG, CART, DRAW, FAULT };
+enum class ArmMode : uint8_t { IDLE = 0, RELEASE, HOMING, JOG, CART, DRAW, SHOW_OFF, FAULT };
 
 class WifiManager;
 void armSetWifiProvider(WifiManager* w); // inject provider cho statusJson (tránh vòng include)
@@ -36,12 +36,14 @@ struct ArmCommand {
         MOVE_CART,   // p[0..2]=x,y,z — di chuyển TCP tới điểm (bút xuống)
         DRAW_LINE,   // p[0..4]=x1,y1,x2,y2,z ; p[5]=feed
         DRAW_CIRCLE, // p[0..2]=cx,cy,z ; p[3]=r ; p[5]=feed
-        DRAW_SQUARE  // p[0..2]=cx,cy,z ; p[3]=side ; p[5]=feed
+        DRAW_SQUARE, // p[0..2]=cx,cy,z ; p[3]=side ; p[5]=feed
+        SHOW_OFF     // trình diễn đồng bộ 6 khớp múa nhẹ nhàng trong khoảng an toàn
     };
     Type type{Type::NONE};
     uint8_t axis{0};
     float value{0.0f};
     float p[8]{0, 0, 0, 0, 0, 0, 0, 0};
+    uint32_t submittedAtUs{0};
 };
 
 /**
@@ -78,6 +80,12 @@ private:
     void applyJog(uint8_t axis, float deltaDeg);
     [[nodiscard]] bool motionAllowed() const;
 
+    // Show Off — múa đồng bộ 6 khớp
+    void startShowOff();
+    void updateShowOff();
+    void stopShowOff();
+    void executeShowOffStep(uint8_t step);
+
     Motor* motors[NUM_MOTORS]{};
     Sensor* sensor{nullptr};
     Endstops* es{nullptr};
@@ -91,9 +99,17 @@ private:
     std::atomic<ArmMode> mode_{ArmMode::IDLE};
     std::atomic<bool> stopRequested_{false};
     std::atomic<bool> manualRelease_{false};
+    std::atomic<uint32_t> lastCommandLatencyUs_{0};
+    uint8_t recoveryJogAxis_{NUM_MOTORS};
+    EndstopWhich recoveryJogSide_{EndstopWhich::MIN};
     uint32_t driftTickCounter{0};
     String lastPlannerError_{"OK"};
     int lastPlannerFailIndex_{-1};
+
+    // Trạng thái Show Off
+    bool showOffActive_{false};
+    uint8_t showOffStep_{0};
+    float showOffBaseAngles_[NUM_MOTORS]{};
 };
 
 #endif // ARM_H

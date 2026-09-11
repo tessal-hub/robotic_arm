@@ -16,7 +16,16 @@ struct Rig {
     float position = 0, encoderSign = 1;
     bool jam = false, badSg = false, missingStop = false;
     int forcedSg = -1;
-    Rig() { fakeNow = 1000; motors[3] = &motor; home.begin(motors, &endstops, &joints); }
+    Rig() {
+        fakeNow = 1000;
+        for (uint8_t a = 0; a < NUM_MOTORS; ++a) for (uint8_t w = 0; w < 2; ++w) {
+            fakeHasEndstop[a][w] = false;
+            fakeEndstopPressed[a][w] = false;
+            fakeEndstopEnabled[a][w] = true;
+        }
+        motors[3] = &motor;
+        home.begin(motors, &endstops, &joints);
+    }
     void tick() {
         fakeNow += 10;
         if (motor.running) {
@@ -39,6 +48,45 @@ struct Rig {
 };
 
 int main() {
+    { // Contact-release bounce must not let the ISR stop the initial backoff.
+        Rig r;
+        r.motors[0] = &r.motor;
+        r.home.motors[0] = &r.motor;
+        fakeHasEndstop[0][0] = true;
+        fakeEndstopPressed[0][0] = true;
+        r.home.curAxis_ = 0;
+        r.home.active_ = true;
+        r.home.approachSide_ = EndstopWhich::MIN;
+        r.home.cwApproach_ = false;
+        r.home.enterScanBackoff();
+        assert(!fakeEndstopEnabled[0][0]);
+        fakeEndstopPressed[0][0] = false;
+        fakeNow += HOMING_BACKOFF_SETTLE_MS + 1;
+        r.home.tick();
+        r.motor.running = false;
+        r.home.tick();
+        assert(fakeEndstopEnabled[0][0] && r.home.phase() == HomePhase::SCAN_SLOW);
+    }
+    { // The second switch stays masked while centering away, then is re-armed.
+        Rig r;
+        r.home.motors[0] = &r.motor;
+        fakeHasEndstop[0][1] = true;
+        fakeEndstopPressed[0][1] = true;
+        r.home.curAxis_ = 0;
+        r.home.active_ = true;
+        r.home.approachSide_ = EndstopWhich::MAX;
+        r.home.cwApproach_ = true;
+        r.home.contactSpan_ = 1000;
+        r.home.encFirstRaw_ = -10.0f;
+        r.home.encSecondRaw_ = 10.0f;
+        r.home.enterCenteringScan();
+        assert(!fakeEndstopEnabled[0][1] && r.home.phase() == HomePhase::CENTERING);
+        fakeEndstopPressed[0][1] = false;
+        r.motor.steps = r.home.centeringTargetSteps_;
+        r.motor.running = false;
+        r.home.tick();
+        assert(fakeEndstopEnabled[0][1] && r.home.phase() == HomePhase::VERIFY_SETTLE_WAIT);
+    }
     { // No movement when UART is unavailable; a later request rechecks the bus.
         Rig r; r.motor.uartAvailable = false;
         assert(r.home.startAxis(3));

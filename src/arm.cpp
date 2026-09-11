@@ -1,5 +1,4 @@
 #include "arm.h"
-#include "differential_wrist.h"
 #include "endstop.h"
 #include "homing.h"
 #include "joint_model.h"
@@ -35,6 +34,23 @@ Planner::Job plannerJobFor(const ArmCommand& cmd) {
     if (cmd.p[5] > 1.0f && cmd.p[5] < 200.0f) job.feedMmS = cmd.p[5];
     return job;
 }
+
+struct ShowOffPose {
+    float dj[NUM_MOTORS];
+    uint32_t durationMs;
+};
+
+constexpr uint8_t SHOW_OFF_STEP_COUNT = 8;
+constexpr ShowOffPose SHOW_OFF_STEPS[SHOW_OFF_STEP_COUNT] = {
+    { { +12.0f, +5.0f, -6.0f, +25.0f, +12.0f, +35.0f}, 1200 },
+    { { +15.0f, -4.0f, +6.0f, -15.0f, -10.0f, -20.0f}, 1100 },
+    { {   0.0f, -6.0f, +8.0f, -30.0f, -14.0f, -40.0f}, 1300 },
+    { { -12.0f, -4.0f, +6.0f, -15.0f,  -8.0f, -20.0f}, 1100 },
+    { { -15.0f, +6.0f, -6.0f, +20.0f, +12.0f, +30.0f}, 1200 },
+    { {   0.0f, +7.0f, -8.0f, +30.0f, +15.0f, +45.0f}, 1300 },
+    { {  +6.0f, -2.0f, +3.0f, -10.0f,  -6.0f, -15.0f}, 1000 },
+    { {   0.0f,  0.0f,  0.0f,   0.0f,   0.0f,   0.0f}, 1200 }
+};
 } // namespace
 
 void armSetWifiProvider(WifiManager* w) { g_wifi = w; }
@@ -91,6 +107,8 @@ bool ArmController::submit(const ArmCommand& cmd, uint32_t timeoutMs) {
     }
 
     if (uxQueueMessagesWaiting(queue) != 0) return false;
+    ArmCommand queued = cmd;
+    queued.submittedAtUs = micros();
 
     // Synchronous pre-flight validation for Cartesian jobs (§3.4 lightweight B) — HTTP 400 before moving
     if ((cmd.type == ArmCommand::MOVE_CART || cmd.type == ArmCommand::DRAW_LINE ||
@@ -115,12 +133,14 @@ bool ArmController::submit(const ArmCommand& cmd, uint32_t timeoutMs) {
             lastPlannerFailIndex_ = -1;
         }
     }
-    return xQueueSend(queue, &cmd, pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
+    return xQueueSend(queue, &queued, pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
 }
 
 bool ArmController::busy() const {
+    if (queue != nullptr && uxQueueMessagesWaiting(queue) != 0) return true;
     if (hc != nullptr && hc->isActive()) return true;
     if (pl != nullptr && pl->isActive()) return true;
+    if (showOffActive_) return true;
     for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
         if (motors[i] != nullptr && motors[i]->isRunning()) return true;
     }
@@ -162,9 +182,26 @@ void ArmController::taskLoop() {
         // Safety poll: debounce ISR pending → latch/E_STOP (50ms)
         if (safety_ != nullptr) safety_->pollEndstops();
 
+        // Recovery Jog masks the held switch until that finite jog finishes. Then
+        // re-arm it; if the switch is still held, restore FAULT for the next command.
+        if (recoveryJogAxis_ < NUM_MOTORS && es != nullptr &&
+            (motors[recoveryJogAxis_] == nullptr || !motors[recoveryJogAxis_]->isRunning())) {
+            const bool stillPressed = es->isPhysicallyPressed(recoveryJogAxis_, recoveryJogSide_);
+            es->setPinEnabled(recoveryJogAxis_, recoveryJogSide_, true);
+            es->clearLatch(recoveryJogAxis_, recoveryJogSide_);
+            if (stillPressed) {
+                if (safety_ != nullptr) safety_->assertEStop("recovery jog incomplete");
+                mode_ = ArmMode::FAULT;
+                Serial.printf("[ARM] RECOVERY JOG J%u chua roi endstop — giu FAULT\n",
+                              recoveryJogAxis_ + 1);
+            }
+            recoveryJogAxis_ = NUM_MOTORS;
+        }
+
         // 1) Homing FSM trước (ưu tiên an toàn), rồi planner
         if (hc != nullptr) hc->tick();
         if (pl != nullptr) pl->tick();
+        updateShowOff();
 
         // Sau khi homing hoàn tất: endstop vẫn nhấn do backoff là bình thường → clear latch
         if (hc != nullptr && wasHoming && !hc->isActive()) {
@@ -179,6 +216,7 @@ void ArmController::taskLoop() {
             const bool latchPending = safety_ ? safety_->anyLatched() : es->anyLatched();
 
             if (estopPending || latchPending) {
+                stopShowOff();
                 if (pl != nullptr) pl->stop();
                 for (uint8_t j = 0; j < NUM_MOTORS; ++j) {
                     if (motors[j] != nullptr) motors[j]->stop();
@@ -237,6 +275,8 @@ void ArmController::taskLoop() {
                 mode_ = ArmMode::HOMING;
             } else if (pl != nullptr && pl->isActive()) {
                 mode_ = pl->isDrawing() ? ArmMode::DRAW : ArmMode::CART;
+            } else if (showOffActive_) {
+                mode_ = ArmMode::SHOW_OFF;
             } else if (busy()) {
                 mode_ = ArmMode::JOG;
             } else {
@@ -259,6 +299,9 @@ bool ArmController::motionAllowed() const {
 }
 
 void ArmController::execute(const ArmCommand& cmd) {
+    if (cmd.submittedAtUs != 0) {
+        lastCommandLatencyUs_.store(micros() - cmd.submittedAtUs, std::memory_order_relaxed);
+    }
     switch (cmd.type) {
         case ArmCommand::STOP_ALL:
             stopAllAndDiscardQueuedMotion();
@@ -302,7 +345,7 @@ void ArmController::execute(const ArmCommand& cmd) {
             if (busy()) break;
             if (jm != nullptr) {
                 if (cmd.axis == 255) {
-                    // Set home toàn bộ cổ tay vi sai (J5 + J6)
+                    // Set home đồng thời hai khớp cổ tay độc lập (J5 + J6)
                     jm->setHomeHere(4);
                     jm->setHomeHere(5);
                     Serial.println("[ARM] Set-Home Wrist (J5 + J6) tai vi tri hien tai");
@@ -336,18 +379,51 @@ void ArmController::execute(const ArmCommand& cmd) {
 
         case ArmCommand::JOG_REL:
             if (!resumeManualRelease()) break;
+            if (cmd.axis >= NUM_MOTORS || hc == nullptr || jm == nullptr) break;
+            {
+                EndstopWhich pressedSide = EndstopWhich::MIN;
+                const bool minPressed = es != nullptr && es->hasPin(cmd.axis, EndstopWhich::MIN) &&
+                                        es->isPressed(cmd.axis, EndstopWhich::MIN);
+                const bool maxPressed = es != nullptr && es->hasPin(cmd.axis, EndstopWhich::MAX) &&
+                                        es->isPressed(cmd.axis, EndstopWhich::MAX);
+                if (maxPressed) pressedSide = EndstopWhich::MAX;
+            if (mode_ == ArmMode::FAULT &&
+                (!safety_ || !safety_->tryBeginRecoveryJog(cmd.axis, cmd.value > 0.0f))) {
+                Serial.printf("[ARM] TU CHOI RECOVERY JOG J%u %+.2f deg: chi duoc roi khoi endstop dang nhan\n",
+                              cmd.axis + 1, cmd.value);
+                break;
+            }
+            if (mode_ == ArmMode::FAULT) {
+                if ((minPressed || maxPressed) && es != nullptr) {
+                    recoveryJogAxis_ = cmd.axis;
+                    recoveryJogSide_ = pressedSide;
+                    es->setPinEnabled(cmd.axis, pressedSide, false);
+                }
+                mode_ = ArmMode::IDLE;
+                Serial.printf("[ARM] FAULT auto-clear cho Recovery Jog J%u\n", cmd.axis + 1);
+            }
+            }
             if (!motionAllowed()) {
                 Serial.printf("[ARM] TU CHOI JOG J%u: robot dang o mode=%u / FAULT (Bấm CLEAR FAULT để xóa lỗi)\n",
                               cmd.axis + 1, static_cast<unsigned>(mode_.load(std::memory_order_relaxed)));
                 break;
             }
-            if (cmd.axis >= NUM_MOTORS || hc == nullptr || jm == nullptr) break;
             if (motors[cmd.axis]->isRunning()) {
                 Serial.printf("[ARM] JOG J%u bo qua: motor dang chay\n", cmd.axis + 1);
                 break;
             }
             Serial.printf("[ARM] JOG J%u %+.2f deg\n", cmd.axis + 1, cmd.value);
             applyJog(cmd.axis, cmd.value);
+            break;
+
+        case ArmCommand::SHOW_OFF:
+            if (!resumeManualRelease()) break;
+            if (!motionAllowed() || jm == nullptr) break;
+            if (busy()) {
+                Serial.println("[ARM] SHOW_OFF bi bo qua: he thong dang ban");
+                break;
+            }
+            startShowOff();
             break;
 
         case ArmCommand::MOVE_CART:
@@ -382,6 +458,7 @@ void ArmController::execute(const ArmCommand& cmd) {
 }
 
 void ArmController::stopAllAndDiscardQueuedMotion() {
+    stopShowOff();
     if (hc != nullptr) hc->cancel();
     if (pl != nullptr) pl->stop();
     for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
@@ -429,15 +506,12 @@ bool ArmController::resumeManualRelease() {
 }
 
 void ArmController::applyJog(uint8_t axis, float deltaDeg) {
-    // Hai actuator là một cặp vi sai: trước mỗi Jog wrist, neo lại cả hai bộ đếm
-    // bước vào encoder thật để sai số A4988 không tích lũy giữa các lệnh.
-    if (axis >= 4 && jm->isHomed(4) && jm->isHomed(5) && jm->encOK(4) && jm->encOK(5)) {
-        (void)jm->resyncFromEncoder(4);
-        (void)jm->resyncFromEncoder(5);
+    // Neo bộ đếm A4988 của khớp đang jog vào encoder thật.
+    if (axis >= 4 && jm->isHomed(axis) && jm->encOK(axis)) {
+        (void)jm->resyncFromEncoder(axis);
     }
 
-    if (axis < 4) {
-        // Khớp 1..4 dẫn động trực tiếp
+    if (axis < NUM_MOTORS) {
         float delta = deltaDeg;
         if (jm->isHomed(axis)) {
             const float cur = (jm->encOK(axis)) ? jm->angleFromEncoder(axis) : jm->angleFromSteps(axis);
@@ -457,60 +531,6 @@ void ArmController::applyJog(uint8_t axis, float deltaDeg) {
         const bool cw = JointModel::cwForDelta(axis, delta);
         motors[axis]->setSpeed(DEFAULT_AXIS_JOG_SPEEDS[axis]);
         motors[axis]->run(cw, static_cast<uint32_t>(steps));
-    } else if (axis == 4) {
-        // Jog J5 (Tilt): Chuyển động thuần Tilt qua Differential Wrist
-        float delta = deltaDeg;
-        if (jm->isHomed(4)) {
-            const float cur = (jm->encOK(4) && jm->encOK(5)) ? jm->angleFromEncoder(4) : jm->angleFromSteps(4);
-            float target = cur + delta;
-            if (target > DEFAULT_AXIS_LIMIT_MAX[4]) target = DEFAULT_AXIS_LIMIT_MAX[4];
-            if (target < DEFAULT_AXIS_LIMIT_MIN[4]) target = DEFAULT_AXIS_LIMIT_MIN[4];
-            delta = target - cur;
-            if ((deltaDeg > 0.0f && delta < 0.0f) || (deltaDeg < 0.0f && delta > 0.0f)) {
-                delta = 0.0f;
-            }
-        }
-        const wrist::ActuatorSteps steps = wrist::computeIncrementalSteps(
-            delta, 0.0f, JointModel::stepsPerDegree(4), JointModel::stepsPerDegree(5));
-        Serial.printf("[JOG] J5 (Tilt): delta=%.2f leftSteps=%lld rightSteps=%lld\n",
-                      delta, static_cast<long long>(steps.leftSteps), static_cast<long long>(steps.rightSteps));
-        if (steps.leftSteps != 0 && motors[4] != nullptr) {
-            motors[4]->setSpeed(DEFAULT_AXIS_JOG_SPEEDS[4]);
-            motors[4]->run(JointModel::cwForDelta(4, static_cast<float>(steps.leftSteps)),
-                           static_cast<uint32_t>(llabs(steps.leftSteps)));
-        }
-        if (steps.rightSteps != 0 && motors[5] != nullptr) {
-            motors[5]->setSpeed(DEFAULT_AXIS_JOG_SPEEDS[5]);
-            motors[5]->run(JointModel::cwForDelta(5, static_cast<float>(steps.rightSteps)),
-                           static_cast<uint32_t>(llabs(steps.rightSteps)));
-        }
-    } else if (axis == 5) {
-        // Jog J6 (Roll): Chuyển động thuần Roll qua Differential Wrist
-        float delta = deltaDeg;
-        if (jm->isHomed(5)) {
-            const float cur = (jm->encOK(4) && jm->encOK(5)) ? jm->angleFromEncoder(5) : jm->angleFromSteps(5);
-            float target = cur + delta;
-            if (target > DEFAULT_AXIS_LIMIT_MAX[5]) target = DEFAULT_AXIS_LIMIT_MAX[5];
-            if (target < DEFAULT_AXIS_LIMIT_MIN[5]) target = DEFAULT_AXIS_LIMIT_MIN[5];
-            delta = target - cur;
-            if ((deltaDeg > 0.0f && delta < 0.0f) || (deltaDeg < 0.0f && delta > 0.0f)) {
-                delta = 0.0f;
-            }
-        }
-        const wrist::ActuatorSteps steps = wrist::computeIncrementalSteps(
-            0.0f, delta, JointModel::stepsPerDegree(4), JointModel::stepsPerDegree(5));
-        Serial.printf("[JOG] J6 (Roll): delta=%.2f leftSteps=%lld rightSteps=%lld\n",
-                      delta, static_cast<long long>(steps.leftSteps), static_cast<long long>(steps.rightSteps));
-        if (steps.leftSteps != 0 && motors[4] != nullptr) {
-            motors[4]->setSpeed(DEFAULT_AXIS_JOG_SPEEDS[4]);
-            motors[4]->run(JointModel::cwForDelta(4, static_cast<float>(steps.leftSteps)),
-                           static_cast<uint32_t>(llabs(steps.leftSteps)));
-        }
-        if (steps.rightSteps != 0 && motors[5] != nullptr) {
-            motors[5]->setSpeed(DEFAULT_AXIS_JOG_SPEEDS[5]);
-            motors[5]->run(JointModel::cwForDelta(5, static_cast<float>(steps.rightSteps)),
-                           static_cast<uint32_t>(llabs(steps.rightSteps)));
-        }
     }
 }
 
@@ -525,10 +545,12 @@ String ArmController::statusJson() {
         case ArmMode::HOMING: j += "\"mode\":\"homing\","; break;
         case ArmMode::JOG:    j += "\"mode\":\"jog\",";    break;
         case ArmMode::CART:   j += "\"mode\":\"cart\",";   break;
-        case ArmMode::DRAW:   j += "\"mode\":\"draw\",";   break;
-        case ArmMode::FAULT:  j += "\"mode\":\"fault\",";  break;
+        case ArmMode::DRAW:     j += "\"mode\":\"draw\",";     break;
+        case ArmMode::SHOW_OFF: j += "\"mode\":\"show_off\","; break;
+        case ArmMode::FAULT:    j += "\"mode\":\"fault\",";    break;
     }
     j += "\"busy\":" + String(busy() ? "true" : "false") + ",";
+    j += "\"commandLatencyUs\":" + String(lastCommandLatencyUs_.load(std::memory_order_relaxed)) + ",";
 
     if (g_wifi != nullptr) j += "\"wifi\":" + g_wifi->toJson() + ",";
     if (hc != nullptr) j += "\"homing\":" + hc->toJson() + ",";
@@ -550,11 +572,11 @@ String ArmController::statusJson() {
         // Expose lastError/failIndex for pre-flight validator (§3.4) — HTTP 400 diagnostics via polling
         const String& pe = lastPlannerError_;
         const int pfi = lastPlannerFailIndex_;
-        char pb[160];
+        char pb[192];
         snprintf(pb, sizeof(pb),
-                 "\"planner\":{\"active\":%s,\"state\":%u,\"segs\":%u,\"lastError\":\"%s\",\"failIndex\":%d},",
+                 "\"planner\":{\"active\":%s,\"state\":%u,\"segs\":%u,\"targetJ5Deg\":%.2f,\"lastError\":\"%s\",\"failIndex\":%d},",
                  pl->isActive() ? "true" : "false", static_cast<unsigned>(pl->state()),
-                 static_cast<unsigned>(pl->segmentsDone()), pe.c_str(), pfi);
+                 static_cast<unsigned>(pl->segmentsDone()), pl->targetJ5Deg(), pe.c_str(), pfi);
         j += pb;
     }
 
@@ -566,4 +588,98 @@ String ArmController::statusJson() {
     j += "]";
     j += "}";
     return j;
+}
+
+
+
+void ArmController::startShowOff() {
+    if (showOffActive_ || jm == nullptr) return;
+    for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+        showOffBaseAngles_[i] = (jm->isHomed(i) && jm->encOK(i))
+            ? jm->angleFromEncoder(i)
+            : jm->angleFromSteps(i);
+    }
+    showOffActive_ = true;
+    showOffStep_ = 0;
+    mode_ = ArmMode::SHOW_OFF;
+    Serial.println("[ARM] Start SHOW OFF (dieu vu 6 truc dong bo)...");
+    executeShowOffStep(0);
+}
+
+void ArmController::stopShowOff() {
+    if (!showOffActive_) return;
+    showOffActive_ = false;
+    showOffStep_ = 0;
+    Serial.println("[ARM] STOP SHOW OFF");
+}
+
+void ArmController::updateShowOff() {
+    if (!showOffActive_) return;
+    bool anyRunning = false;
+    for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+        if (motors[i] != nullptr && motors[i]->isRunning()) {
+            anyRunning = true;
+            break;
+        }
+    }
+    if (anyRunning) return;
+
+    showOffStep_++;
+    if (showOffStep_ < SHOW_OFF_STEP_COUNT) {
+        executeShowOffStep(showOffStep_);
+    } else {
+        showOffActive_ = false;
+        showOffStep_ = 0;
+        mode_ = ArmMode::IDLE;
+        Serial.println("[ARM] SHOW OFF hoan tat thanh cong, tro ve IDLE");
+    }
+}
+
+void ArmController::executeShowOffStep(uint8_t step) {
+    if (step >= SHOW_OFF_STEP_COUNT || jm == nullptr) return;
+    const auto& kf = SHOW_OFF_STEPS[step];
+
+    int64_t steps[NUM_MOTORS]{};
+    float deltaAct[NUM_MOTORS]{};
+    uint32_t maxSteps = 1;
+    bool anyMove = false;
+
+    for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+        if (motors[i] == nullptr) continue;
+        const float curDeg = (jm->isHomed(i) && jm->encOK(i))
+            ? jm->angleFromEncoder(i)
+            : jm->angleFromSteps(i);
+
+        float target = showOffBaseAngles_[i] + kf.dj[i];
+        if (jm->isHomed(i)) {
+            if (target > DEFAULT_AXIS_LIMIT_MAX[i]) target = DEFAULT_AXIS_LIMIT_MAX[i];
+            if (target < DEFAULT_AXIS_LIMIT_MIN[i]) target = DEFAULT_AXIS_LIMIT_MIN[i];
+        }
+
+        deltaAct[i] = target - curDeg;
+        steps[i] = JointModel::degreesToSteps(i, fabsf(deltaAct[i]));
+        if (steps[i] > 0) {
+            anyMove = true;
+            if (static_cast<uint32_t>(steps[i]) > maxSteps) {
+                maxSteps = static_cast<uint32_t>(steps[i]);
+            }
+        }
+    }
+
+    if (!anyMove) return;
+
+    const float durationUs = static_cast<float>(kf.durationMs) * 1000.0f;
+    uint32_t dominantIntervalUs = static_cast<uint32_t>(durationUs / static_cast<float>(maxSteps));
+    if (dominantIntervalUs < MIN_STEP_INTERVAL_US) dominantIntervalUs = MIN_STEP_INTERVAL_US;
+    if (dominantIntervalUs > MAX_STEP_INTERVAL_US) dominantIntervalUs = MAX_STEP_INTERVAL_US;
+
+    for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+        if (steps[i] <= 0 || motors[i] == nullptr) continue;
+        const float scale = static_cast<float>(steps[i]) / static_cast<float>(maxSteps);
+        uint32_t interval = static_cast<uint32_t>(static_cast<float>(dominantIntervalUs) / scale);
+        if (interval < MIN_STEP_INTERVAL_US) interval = MIN_STEP_INTERVAL_US;
+        const bool cw = JointModel::cwForDelta(i, deltaAct[i]);
+        motors[i]->setSpeed(interval);
+        motors[i]->run(cw, static_cast<uint32_t>(steps[i]));
+    }
 }

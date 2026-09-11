@@ -10,7 +10,7 @@
  */
 class DrawingWorkspace {
 public:
-    static constexpr uint8_t kRecommendationCount = 3;
+    static constexpr uint8_t kRecommendationCount = 1;
 
     struct Recommendation {
         float z{0.0f};

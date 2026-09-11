@@ -70,6 +70,8 @@ public:
   void assertEStop(const char* reason);
   void notifyFault(const char* reason); // sets FAULT (drift/power) if not already FAULT/E_STOP
   bool tryClearFault();
+  // Recovery Jog may acknowledge FAULT/E_STOP only when it moves away from the sole pressed endstop.
+  bool tryBeginRecoveryJog(uint8_t axis, bool towardPositive);
   bool isMotionAllowed() const;
   bool isEStop() const; // true only for E_STOP, not FAULT
   SafetyState state() const;

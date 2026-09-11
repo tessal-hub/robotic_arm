@@ -27,6 +27,13 @@ ValidationResult validateTrajectory(const Planner::Job& job, const WorkPlane* wo
         return {true, -1, "OK"};
     }
 
+    if (workPlane != nullptr && workPlane->isEnabled()) {
+        return {false, 0, "WORKPLANE_ENABLED"};
+    }
+    if (fabsf(job.z - DRAW_PLANE_Z_MM) > 0.01f) {
+        return {false, 0, "WRONG_DRAW_PLANE"};
+    }
+
     // LINE: validate the complete draw path plus lifted endpoints before moving.
     if (job.shape == Planner::Shape::LINE) {
         const float dx = job.x2 - job.x1;

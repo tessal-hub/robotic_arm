@@ -55,3 +55,24 @@ Chạy trên phần cứng thật sau thay đổi an toàn / homing / endstop (2
 ## Ghi chú
 
 Đánh dấu từng mục sau khi pass. Nếu fail, ghi serial log + mô tả vào `docs/IMPLEMENTATION_LOG.md` (entry mới).
+
+## 7. Web command latency
+
+- [ ] Sau khi flash, để robot IDLE; Jog J1 `+0.5°` 10 lần và ghi `Command latency` trên Dashboard. PASS: không lần nào vượt 20 ms; ghi median/max.
+- [ ] Với cùng 10 lần Jog, đo thời gian click → motor bắt đầu bằng video slow-motion hoặc logic analyzer STEP. Nếu `commandLatencyUs ≤20 ms` nhưng tổng thời gian lớn, lỗi nằm ngoài queue/motion task (WiFi/browser hoặc motor ramp), không giảm `MOTION_TASK_PERIOD_MS`.
+- [ ] Chạy LINE 120 mm và ghi `commandLatencyUs`. Nếu cao hơn Jog rõ rệt, đo thời gian synchronous trajectory preflight trước khi bỏ validation; không di chuyển validation ra khỏi trust boundary.
+- [ ] Sau mỗi POST, UI chuyển BUSY không còn chờ tới poll 300 ms tiếp theo và không lóe IDLE giả.
+
+## 8. J5 tại đường vẽ
+
+- [ ] WorkPlane OFF. Đặt J5 đúng zero cơ khí hướng bút đã xác nhận, Set Home J5, rồi Jog `+5°`, `-5°` ba chu kỳ. PASS: `deg`, `encDeg` và chiều quay vật lý cùng dấu, trở lại gần 0°; không đổi `AXIS_ENC_SIGN`/DH offset nếu thiếu ba số đo này.
+- [ ] Dry-run LINE với bút cách giấy ≥10 mm. Tại một waypoint ghi `/api/status`: `planner.targetJ5Deg`, `joints[4].deg`, `joints[4].encDeg`. PASS: target/step/encoder hội tụ cùng góc sau segment; không có drift lặp về ±90°.
+- [ ] Nếu lệch, ghi thêm raw encoder trước/sau và chiều STEP thực tế; dừng commissioning, không hiệu chỉnh offset để che command/mapping fault.
+
+## 9. WRITE HELLO
+
+- [ ] WorkPlane OFF; chọn profile chính, Start X/Y mặc định và width 120 mm. Tháo bút hoặc nâng giấy cách TCP ≥10 mm trước dry-run đầu tiên.
+- [ ] Bấm `WRITE HELLO`; UI chạy đủ `stroke 1/15` → `15/15`, không 409/503/FAULT. Quan sát robot nâng bút giữa các nét và không di chuyển J6.
+- [ ] Trong một dry-run khác, bấm ABORT ở khoảng stroke 5. PASS: motor dừng và không nét 6+ nào được enqueue/chạy.
+- [ ] Gắn bút, xác nhận mặt giấy đúng Z profile, chạy một LINE 120 mm trước. Chỉ chạy HELLO khi line thẳng, J5 ổn định và pen lift rời giấy hoàn toàn.
+- [ ] Viết HELLO ba lần. PASS cuối: đủ năm chữ nhận diện được, không FAULT/out-of-reach, không runaway J5, không bỏ nét; ghi ảnh, Start X/Y/Z/width, command latency median/max và sai lệch endpoint đo được vào IMPLEMENTATION_LOG.

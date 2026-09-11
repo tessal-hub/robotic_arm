@@ -7,6 +7,9 @@
 
 inline uint32_t fakeNow = 0;
 inline uint32_t millis() { return fakeNow; }
+inline bool fakeHasEndstop[NUM_MOTORS][2]{};
+inline bool fakeEndstopPressed[NUM_MOTORS][2]{};
+inline bool fakeEndstopEnabled[NUM_MOTORS][2]{};
 
 // Hardware boundary only. The test executes production homing.cpp unchanged.
 class Motor {
@@ -52,13 +55,13 @@ public:
 class SafetyManager { public: void assertHoming(bool) {} };
 
 inline Endstops::Endstops() = default;
-inline bool Endstops::hasPin(uint8_t, EndstopWhich) const noexcept { return false; }
-inline bool Endstops::isPressed(uint8_t, EndstopWhich) const noexcept { return false; }
-inline bool Endstops::isPhysicallyPressed(uint8_t, EndstopWhich) const noexcept { return false; }
+inline bool Endstops::hasPin(uint8_t axis, EndstopWhich w) const noexcept { return fakeHasEndstop[axis][static_cast<uint8_t>(w)]; }
+inline bool Endstops::isPressed(uint8_t axis, EndstopWhich w) const noexcept { return fakeEndstopEnabled[axis][static_cast<uint8_t>(w)] && fakeEndstopPressed[axis][static_cast<uint8_t>(w)]; }
+inline bool Endstops::isPhysicallyPressed(uint8_t axis, EndstopWhich w) const noexcept { return fakeEndstopPressed[axis][static_cast<uint8_t>(w)]; }
 inline bool Endstops::isLatched(uint8_t, EndstopWhich) const noexcept { return false; }
 inline bool Endstops::isrPending(uint8_t, EndstopWhich) const noexcept { return false; }
-inline bool Endstops::isPinEnabled(uint8_t, EndstopWhich) const noexcept { return true; }
-inline void Endstops::setPinEnabled(uint8_t, EndstopWhich, bool) noexcept {}
+inline bool Endstops::isPinEnabled(uint8_t axis, EndstopWhich w) const noexcept { return fakeEndstopEnabled[axis][static_cast<uint8_t>(w)]; }
+inline void Endstops::setPinEnabled(uint8_t axis, EndstopWhich w, bool enabled) noexcept { fakeEndstopEnabled[axis][static_cast<uint8_t>(w)] = enabled; }
 inline void Endstops::clearLatch(uint8_t, EndstopWhich) noexcept {}
 inline bool Endstops::consumeLatch(uint8_t, EndstopWhich) noexcept { return false; }
 inline void Endstops::clearAllLatches() noexcept {}

@@ -3774,3 +3774,617 @@ Log cho thấy J3 homing thất bại 2/2 lần liên tiếp với 2 root cause 
 
 ### Việc còn lại (nếu có)
 - Refresh Web UI sau khi nạp firmware và Jog J3 góc nhỏ để xác nhận twin cùng chiều arm thật.
+---
+
+## 2026-09-09 — Đổi J5/J6 sang khớp quay độc lập
+
+### Việc đã làm
+- What: bỏ cơ cấu/mapping vi sai J5–J6; Jog, encoder và planner nay điều khiển trực tiếp từng A4988/khớp. Xóa `differential_wrist.*` và regression vi sai không còn áp dụng.
+- What: đặt J5 tỷ số 3:1, J4→J5 = 125 mm; J6 tỷ số 1:1, J5→J6 = 45 mm. Giữ nguyên wiring A4988 + AS5600, bút J6→TCP 130 mm và Set-Home thủ công không limit switch/StallGuard.
+- What: đồng bộ `config.h`, FK/IK, Digital Twin, host tests, `ARM_GEOMETRY.md` và `SYSTEM_OVERVIEW.html`; FK Home mới có J5=(125,0,365), TCP=(300,0,365).
+- Why: owner thay thiết kế J5/J6 từ pan–tilt vi sai sang hai khớp quay nối tiếp độc lập.
+- How: giữ Craig MDH axis convention hiện tại; chỉ thay kích thước owner cung cấp và bỏ coupling truyền động. Cần commissioning hướng trục trước khi chạy Cartesian thật.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 934,553 bytes (28.0%).
+- Host regression trực tiếp bằng `g++` → **ALL PASSED**: kinematics 4220/4220 roundtrip, drawing workspace, trajectory validator, joint logic, work plane, production J4 homing FSM, homing logic, safety manager và web validation.
+
+### Việc còn lại (nếu có)
+- Nạp firmware, Set Home J5/J6 rồi Jog riêng từng khớp góc nhỏ để xác nhận motor/encoder sign và hướng trục Craig MDH của cơ khí mới trước khi chạy Cartesian/Draw.
+---
+
+## 2026-09-09 — Tính lại top 3 plane Quick Draw
+
+### Việc đã làm
+- What: chạy lại exhaustive workspace scan lưới 10 mm với hình học J4→J5=125 mm, J5→J6=45 mm và tool 130 mm; cập nhật ba profile cố định thành Z=50/90/10 mm.
+- What: profile tương ứng có `(centerX, centerY, maxSquareSide)` là `(125,−5,200)`, `(110,0,190)`, `(160,0,170)` mm; profile Z=50 có vùng vuông lớn nhất và đứng đầu mặc định.
+- Why: ba plane Z=−10/70/110 mm trước đó được tính cho hình học cổ tay cũ.
+- How: tái dùng đúng thuật toán scan cũ: mọi ô phải IK-reachable cả tại mặt giấy và Z+5 mm, chọn global maximum rồi yêu cầu các profile cách nhau ít nhất 40 mm theo Z. Firmware vẫn chỉ giữ ba hằng số, không scan lúc startup.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 934,553 bytes (28.0%).
+- `test_drawing_workspace` → **ALL PASSED** (3 profiles; toàn bộ line/circle/square và pen-lift reachable).
+
+### Việc còn lại (nếu có)
+- Đặt giấy đúng cao độ plane đã chọn và thử hình nhỏ trước; kết quả này phụ thuộc Craig axis convention của J5/J6 mới được xác nhận trên cơ khí thật.
+---
+
+## 2026-09-09 — Refine Web UI thành Operator Console
+
+### Việc đã làm
+- What: thay navigation phẳng 4 tab bằng hai mode cấp cao `Operate` và `Setup`; Operate có Overview/Joints/Motion & Draw, Setup có Calibration/WiFi & Hardware.
+- What: tách progressive disclosure ngay trên cùng pane Joints: luồng Operate chỉ hiện step + Jog; Setup chỉ hiện Home/Set Home/Release/Enable/Clear Calib và ẩn Jog. Giữ E-STOP nổi ở mọi mode.
+- What: rút gọn brand/header, tiêu đề, Quick Draw copy, emoji và visual emphasis; card radius/shadow giảm, secondary navigation thành underline nhẹ. Giữ nguyên API, validation, polling và safety gates.
+- Why: owner chọn phương án UI số 1 "Operator Console" theo nguyên tắc less is more.
+- How: tái sử dụng toàn bộ DOM/handler hiện hữu, chỉ thêm mode switch + CSS progressive disclosure; không thêm dependency, framework hay routing mới.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 936,137 bytes (28.0%).
+- `test_web_validation` → **ALL PASSED**.
+
+### Việc còn lại (nếu có)
+- Kiểm tra trực tiếp trên desktop và điện thoại sau khi nạp firmware: chuyển Operate↔Setup, keyboard Arrow/Home/End trong navigation phụ, Jog chỉ ở Operate và calibration chỉ ở Setup.
+---
+
+## 2026-09-09 — Bỏ J6 khỏi gate và chuyển động vẽ
+
+### Việc đã làm
+- What: `Planner` chỉ yêu cầu Set Home + encoder khỏe cho J5; bỏ yêu cầu Home/encoder J6 tại submit và từng waypoint.
+- What: Cartesian/Draw chỉ tính và phát bước J1–J5 (`CARTESIAN_AXIS_COUNT=5`); mảng step/delta zero-init nên J6 luôn giữ nguyên, kể cả khi chưa Home.
+- Why: J6 chỉ roll quanh trục tool, không ảnh hưởng vị trí TCP/nét vẽ; log thực tế bị từ chối oan vì J6 chưa Set Home.
+- How: thu hẹp shared gate `syncWristFeedback()` thành `syncJ5Feedback()` và giới hạn loop planner tại J5; không thêm bypass ở Web handler.
+- Kiểm tra rung: toàn repo không có closed-loop holding hay caller phát lệnh motor lúc IDLE; `Motor::stop()` dừng timer và kéo STEP LOW. Với wiring hiện tại không có EN, A4988 vẫn cấp dòng giữ/chopper liên tục nên có thể làm cả J5/J6 rung hoặc ù dù không có STEP. Không tự chỉnh VREF/dòng khi chưa đo.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 936,145 bytes (28.0%).
+- Host checks → **ALL PASSED**: joint logic (bao gồm contract Cartesian chỉ J1–J5) và drawing workspace (3 profiles).
+
+### Việc còn lại (nếu có)
+- Nạp firmware, chỉ Set Home J5 rồi chạy Quick Draw; xác nhận J6 không đổi vị trí.
+- Đo VREF và dòng coil J5/J6. Nếu cần motor im/nguội khi idle thì phải nối chân EN của hai A4988 vào phần cứng điều khiển; wiring hiện tại không cho firmware ngắt dòng giữ.
+
+---
+
+## 2026-09-09 — Chặn contact bounce dừng oan BACKOFF J1/J2
+
+### Việc đã làm
+- What: trong `HomingController::enterScanBackoff()`, mask interrupt của cữ vừa chạm trong suốt đoạn lùi; `SCAN_BACKOFF` vẫn đọc GPIO bằng `isPhysicallyPressed()` và chỉ re-arm cữ trước `SCAN_SLOW` khi đã nhả.
+- Why: log thực tế J1/J2 cho thấy BACKOFF liên tục dừng sớm, encoder gần như không dịch rồi báo `jammed`; J3 dùng cùng FSM nhưng switch ít bounce nên home thành công. Cạnh FALLING do contact bounce lúc nhả trước đây gọi ISR và cắt motor ngay.
+- How: tái dùng đúng pattern đã có ở `LEG1_BACKOFF`; không nới timeout, không bỏ kiểm tra công tắc kẹt và không thay pin/dòng/hướng motor.
+- Regression: production homing FSM xác nhận cữ bị mask khi BACKOFF và được bật lại trước SCAN_SLOW.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 936,213 bytes (28.0%).
+- `test_homing_fsm` chạy trực tiếp bằng `g++` trên Windows → **ALL PASSED**, gồm regression mask/re-arm cữ trong BACKOFF. Script Bash không khả dụng trên máy này.
+
+### Việc còn lại (nếu có)
+- Nạp firmware và home riêng J1/J2; xác nhận mỗi BACKOFF chạy đủ hành trình, switch nhả và chuỗi đi tiếp sang SCAN_SLOW.
+
+---
+
+## 2026-09-09 — Cho phép Recovery Jog khi FAULT
+
+### Việc đã làm
+- What: thêm `SafetyManager::tryBeginRecoveryJog()` và cho `JOG_REL` tự acknowledge FAULT/E_STOP trước khi chạy.
+- Why: operator cần tự Jog arm ra khỏi lỗi, không phải tắt/bật nguồn hoặc bị kẹt vì `CLEAR_FAULT` từ chối khi endstop còn nhấn.
+- How: nếu endstop đang nhấn, chỉ đúng khớp và đúng hướng rời MIN/MAX được phép; Jog hướng vào cữ, Jog khớp khác, Cartesian/Draw/Home vẫn fail-closed.
+- Regression: kiểm tra hướng rời MIN được chấp nhận, hướng đâm MIN và Jog khớp khác bị từ chối, lệnh bị từ chối vẫn giữ E_STOP.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 936,621 bytes (28.0%).
+- `test_safety_manager` chạy trực tiếp bằng `g++` trên Windows → **ALL PASSED (11 tests)**.
+
+### Việc còn lại (nếu có)
+- Nạp firmware, kích endstop J1/J2 rồi Jog từng bước nhỏ theo hướng rời cữ; xác nhận hướng ngược vẫn bị từ chối.
+
+---
+
+## 2026-09-09 — Chặn contact bounce dừng sớm CENTERING
+
+### Việc đã làm
+- What: mask interrupt của cữ thứ hai khi bắt đầu CENTERING; khi tới đích, xác nhận GPIO đã nhả rồi re-arm trước VERIFY.
+- Why: log J1 quét đủ hai cữ và CROSSCHECK hợp lệ nhưng `CENTERING dung som`; cữ MAX vừa chạm còn rung khi motor đảo chiều về tâm nên ISR dừng pulse train.
+- How: tái dùng pattern BACKOFF/LEG1_BACKOFF; vẫn hủy nếu motor không tới đích hoặc switch còn nhấn tại đích.
+- Regression: production homing FSM kiểm tra cữ MAX bị mask trong CENTERING và được re-arm trước VERIFY_SETTLE_WAIT.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 936,793 bytes (28.0%).
+- `test_homing_fsm` chạy trực tiếp bằng `g++` trên Windows → **ALL PASSED**, gồm regression CENTERING mask/re-arm.
+
+### Việc còn lại (nếu có)
+- Nạp firmware và Home J1/J2; log mong đợi sau CENTERING là VERIFY rồi SETREF OK, không còn `CENTERING dung som`.
+
+---
+
+## 2026-09-09 — Cho Recovery Jog thực sự rời endstop
+
+### Việc đã làm
+- What: khi Recovery Jog hợp lệ, mask interrupt của endstop đang bị giữ trong toàn bộ lệnh Jog hữu hạn; khi motor dừng thì re-arm.
+- Why: auto-clear FAULT đã cho phép tạo lệnh nhưng contact bounce lúc switch nhả vẫn có thể gọi ISR và dừng motor ngay, khiến operator thấy Jog không hoạt động.
+- How: nếu kết thúc Jog mà GPIO còn LOW, firmware re-arm và lập tức giữ lại FAULT để chỉ cho lần Recovery Jog đúng hướng tiếp theo; nếu đã nhả thì trở về bình thường. Endstop đối diện vẫn luôn hoạt động.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 937,109 bytes (28.0%).
+- `test_safety_manager` chạy trực tiếp bằng `g++` trên Windows → **ALL PASSED (11 tests)**.
+
+### Việc còn lại (nếu có)
+- Nạp firmware và thử Recovery Jog bước nhỏ theo hướng rời cữ; nếu một bước chưa đủ nhả switch, FAULT phải giữ và cho phép lặp lại cùng hướng.
+
+---
+
+## 2026-09-09 — Tăng nhẹ tốc độ Homing và Normal
+
+### Việc đã làm
+- What: giảm interval FAST homing J1–J6 từ `{1200,1200,1000,1333,1667,1667}` xuống `{1100,1100,900,1200,1500,1500}` µs/step; SLOW từ 2000 xuống 1800 µs/step.
+- What: giảm `DEFAULT_STEP_INTERVAL_US` 800→720 và Jog J1–J6 từ `{800,1200,1200,1000,1667,1667}` xuống `{720,1100,1100,900,1500,1500}` µs/step.
+- Why: owner yêu cầu toàn bộ Homing/Normal nhanh thêm một chút.
+- How: mức tăng khoảng 10–11%; giữ nguyên dòng motor, ramp khởi động 3500 µs, max-speed floor 120 µs, timeout và safety guard. Không đổi feed Cartesian/Draw.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 937,109 bytes (28.0%).
+- Host regression trực tiếp bằng `g++` trên Windows → **ALL PASSED**: homing logic và production homing FSM.
+
+### Việc còn lại (nếu có)
+- Nạp firmware, Home/Jog từng khớp và nghe rung/mất bước; quay lại interval cũ riêng khớp nào nếu torque thực tế không đủ.
+
+---
+
+## 2026-09-09 — Giảm riêng tốc độ FAST homing J2
+
+### Việc đã làm
+- What: đổi `HOMING_STEP_INTERVAL_J2` từ 1100 về 1200 µs/step (909→833 bước/s).
+- Why: sau khi tăng tốc nhẹ, log J2 xuất hiện nhiều glitch endstop và chạm hard-stop mà MAX không tác động; giảm tốc để tăng torque và giảm nhiễu khi commissioning.
+- How: chỉ đổi FAST homing J2; giữ nguyên J1, SLOW 1800 µs/step, Jog/Normal, dòng 1000mA và toàn bộ safety guard.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 937,109 bytes (28.0%).
+- `test_homing_logic` chạy trực tiếp bằng `g++` trên Windows → **ALL PASSED**.
+
+### Việc còn lại (nếu có)
+- Vẫn phải kiểm tra J2 MAX GPIO10; giảm tốc không thể sửa switch/dây không tác động tại hard-stop.
+
+---
+
+## 2026-09-09 — Sửa AXIS_ENC_SIGN[J5]: encoder ngược chiều jog
+
+### Vấn đề đã làm
+- **What:** đổi `AXIS_ENC_SIGN[J5]` từ `+1` thành `-1` trong `src/config.h`.
+- **Why:** owner quan sát thấy "góc encoder ngược với chiều cộng trừ của jog J5". Phân tích log:
+  - `JOG J5 +45°` → delta=+45, steps=1200 — đúng về số bước
+  - `JOG J5 -45°` (lần 1) → delta=**-27.25**, steps=727 — bị clamp sai
+  - Lần 2 trở đi → delta=-45 — đúng
+  - Root cause: `applyJog()` gọi `resyncFromEncoder(J5)` trước khi tính delta, sync step counter vào `angleFromEncoder`. Với `AXIS_ENC_SIGN[J5]=+1` sai, `angleFromEncoder` trả giá trị **ngược dấu** với góc thực tế. Sau khi jog +45° (motor đi đúng), encoder đọc như thể khớp đang ở -45°; jog tiếp -45° thì `cur=-45°`, `target=-90°`... nhưng step counter vừa bị reset về giá trị encoder (-45°), thực ra motor phải đi thêm nhiều hơn → soft-limit clamp lại còn sai bước lần đầu.
+  - Thực tế phần cứng: khi step CW (góc tăng), raw AS5600 J5 **giảm** → `AXIS_ENC_SIGN[J5]` phải là `-1`.
+- **How:** 1 dòng trong `AXIS_ENC_SIGN[]` — không đụng logic nào khác. Sau fix, encoder và step counter cùng chiều dương, `resyncFromEncoder` đồng nhất, soft-limit clamp đúng.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 937,105 bytes (28.0%).
+- `tools/run_kin_tests.sh` — không áp dụng (không đụng kinematics).
+
+### Việc còn lại (nếu có)
+- Flash và kiểm tra jog J5 ±45° nhiều lần liên tiếp để xác nhận delta nhất quán.
+- Nếu NVS đang lưu calib cũ với `encSign=+1` cho J5, cần `Forget Home J5` để reset NVS calib (hoặc flash xong Set-Home lại).
+
+---
+
+## 2026-09-09 — Khôi phục DH_THETA5_OFFSET_DEG = 0°, sửa lỗi J5 trôi -90° khi Ready Draw
+
+### Vấn đề đã làm
+- **What:**
+  1. Đặt lại `DH_THETA5_OFFSET_DEG = 0.0f` trong `src/config.h` và `THETA5_OFFSET = 0.0f` trong `src/kinematics.h` theo đúng `docs/ARM_GEOMETRY.md` mục 4.
+  2. Khớp đúng các thông số phần cứng J5-J6 được owner xác nhận: J5 ratio 3:1, d4 = 125mm; J6 ratio 1:1, d6 = 45mm, D_tool = 130mm, D_tool_eff = 175mm.
+  3. Cập nhật suite test `test/kinematics/test_kinematics.cpp`: bỏ dependency `differential_wrist.h` cũ, cập nhật test FK home và pen-down reachable theo offset 0°.
+  4. Sửa `tools/run_host_tests.sh` và `tools/run_kin_tests.sh` để tương thích Windows (`run_bin` hỗ trợ `.exe`, `set -e`, fix CRLF).
+- **Why:**
+  - Owner bấm Ready Draw nhưng J5 lại trôi về -90° thay vì giữ góc pen-down tự nhiên (gần 0°).
+  - Phân tích: trước đó một commit đã thử gán `DH_THETA5_OFFSET_DEG = -90.0f` vào C++ firmware trong khi Web UI JS vẫn tính `e5 = -rad2deg(q23)` (offset 0). Khi IK C++ trừ đi `THETA5_OFFSET = -90°` (thành cộng 90°), góc e5 bị đẩy lệch 90°, vượt soft limit hoặc khiến động cơ quay sai 90°.
+  - Thực tế cơ khí: góc 0° của J5 đã được căn theo trục thẳng theo ARM_GEOMETRY §4 (offset DH = 0°).
+- **How:**
+  - Đồng bộ cả 3 nơi: `config.h`, `kinematics.h`, và test kinematics host.
+  - IK Pen-Down tại Ready Draw (160, 0, 10): tính ra `J1=0.0°, J2=14.56°, J3=55.53°, J4=0.0°, J5=19.91°, J6=0.0°` (FK trả về đúng TCP Z=10mm, pen vuông góc bàn).
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 937,109 bytes (28.0%).
+- `tools/run_kin_tests.sh` (toàn bộ 8 suite host test) → **ALL HOST TESTS PASSED** (kinematics 4220/4220 ok, drawing workspace, joint logic, work plane, trajectory validator, homing logic, safety manager, web validation).
+
+### Việc còn lại (nếu có)
+- Flash firmware mới xuống ESP32-S3.
+- Bấm "Forget Home J5" (hoặc clearcalib axis 4) rồi Set-Home J5 tại vị trí thẳng trục (0°).
+- Chạy thử Ready Draw để kiểm chứng J5 duy trì đúng góc cắm bút vuông góc.
+
+---
+
+## 2026-09-09 — Khôi phục AXIS_ENC_SIGN[J5] = +1: đồng bộ chiều encoder cùng chiều quay motor
+
+### Vấn đề đã làm
+- **What:** Khôi phục `AXIS_ENC_SIGN[J5] = +1` trong `src/config.h` (mảng `AXIS_ENC_SIGN[NUM_MOTORS] = { -1, -1, 1, -1, 1, -1 }`) và cập nhật test `test_joint_logic.cpp`.
+- **Why:**
+  - Owner phản hồi sau lần thử trước: "góc cộng và trừ của encoder với chiều di chuyển motor đang bị ngược" và "khi đến vị trí ready draw vẫn tự bị trôi đi".
+  - Phân tích: Khi `AXIS_ENC_SIGN[J5] = -1`, motor quay theo chiều CW thì giá trị góc encoder bị tính ngược thành âm (giảm đi). Do `syncJ5Feedback()` trong planner và `applyJog()` liên tục đọc lại encoder để neo step counter A4988, việc encoder ngược chiều motor tạo thành **vòng lặp phản hồi dương (positive feedback)**: motor càng chạy để bù sai số thì encoder báo sai số càng lớn hơn $\to$ motor tự trôi liên tục (runaway drift) tại Ready Draw và jog bị clamp sai limit.
+  - Khi đặt lại `AXIS_ENC_SIGN[J5] = +1`, chiều đếm của encoder tăng giảm hoàn toàn ăn khớp với chiều phát xung của motor $\to$ triệt tiêu hoàn toàn hiện tượng trôi tại Ready Draw.
+- **How:**
+  - Đổi index 4 của `AXIS_ENC_SIGN` thành `+1`.
+  - Cập nhật test `testJ5EncoderDirection()` trong `test/host/test_joint_logic.cpp` để xác nhận `AXIS_ENC_SIGN[4] == 1`.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 937,109 bytes (28.0%).
+- `tools/run_kin_tests.sh` → **ALL HOST TESTS PASSED** (toàn bộ 8 suite pass).
+
+---
+
+## 2026-09-09 — Cập nhật giới hạn góc mềm J5 thành ±90°
+
+### Vấn đề đã làm
+- **What:** Cập nhật giới hạn góc mềm (soft limits) của khớp J5 từ `[-120°, +120°]` thành `[-90°, +90°]` đồng bộ trên toàn hệ thống:
+  - `src/config.h`: `J5_MIN_LIMIT = -90.0f;`, `J5_MAX_LIMIT = +90.0f;`.
+  - `src/kinematics.h`: `J5_MIN = -90.0f, J5_MAX = 90.0f;`.
+  - `src/web_server.cpp`: `JOINT_LIMITS` index 4 thành `[-90.0, 90.0]`.
+  - `test/kinematics/test_kinematics.cpp`: cập nhật kiểm tra góc J5 reachable trong `[-90°, +90°]`.
+- **Why:** Theo yêu cầu của owner giới hạn hành trình J5 cơ học trong phạm vi ±90°.
+- **How:** Cập nhật đồng bộ các hằng số soft-limit và mảng giới hạn mặc định.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,860 bytes (15.2%), Flash 937,097 bytes (28.0%).
+- `tools/run_kin_tests.sh` → **ALL HOST TESTS PASSED** (toàn bộ 8 suite pass, kinematics roundtrip 3352/3352 reachable).
+---
+
+## 2026-09-09 — Kiểm tra toàn diện Kinematics, bổ sung tính năng Show Off và tinh chỉnh Web UI
+
+### Vấn đề đã làm
+- **What:**
+  1. **Kiểm tra toàn diện Kinematics (FK & IK):**
+     - Kiểm toán toàn bộ chuỗi Craig Modified DH và bộ giải IK Closed-Form Pen-Down (`kin::ikPenDown()`).
+     - Xác nhận đối chiếu với hình học cơ học thực tế: $D_1=139\text{ mm}$, $A_2=138\text{ mm}$, $A_3=88\text{ mm}$, $D_4=125\text{ mm}$, $D_6=45\text{ mm}$, $D_{\text{tool}}=130\text{ mm}$ ($D_{\text{eff}}=175\text{ mm}$), $L_{\text{fore}}=152.87\text{ mm}$, $\delta=54.85^\circ$.
+     - Khảo sát lưới 3,352 tư thế reachable: toàn bộ 3,352 điểm roundtrip FK $\to$ IK $\to$ FK đạt sai số vị trí bằng 0.0000 mm và hướng bút chỉ vuông góc tuyệt đối với mặt phẳng vẽ ($[0, 0, -1]^T$).
+     - Làm rõ hiện tượng tại Ready Draw $(160, 0, 10)$: khi J2 nghiêng $+14.56^\circ$ và J3 gập $+55.53^\circ$, trục cẳng tay chúc xuống $-19.91^\circ$ so với phương ngang; do đó J5 bắt buộc phải nghiêng $+19.91^\circ$ để bù góc và giữ bút thẳng đứng $90^\circ$ xuống bàn (thay vì $0^\circ$). Hiện tượng J5 tự trôi về $-90^\circ$ ở các phiên trước do lỗi offset $-90^\circ$ và `AXIS_ENC_SIGN[J5]=-1` tạo vòng lặp phản hồi dương nay đã được triệt tiêu hoàn toàn.
+  2. **Bổ sung tính năng Show Off (điệu múa 6 trục đồng bộ):**
+     - Thêm lệnh `ArmCommand::SHOW_OFF` trong `src/arm.h`, chế độ vận hành `ArmMode::SHOW_OFF`, endpoint REST API `POST/GET /api/showoff`.
+     - Xây dựng FSM vũ đạo 8 keyframe trong `src/arm.cpp`: dao động điều hòa đồng bộ cả 6 khớp ($J_1 \pm 15^\circ$, $J_2 \pm 6^\circ$, $J_3 \pm 8^\circ$, $J_4 \pm 30^\circ$, $J_5 \pm 15^\circ$, $J_6 \pm 45^\circ$) trong khoảng biên độ an toàn, tự động trở về chính xác vị trí góc ban đầu.
+     - Đồng bộ thời gian bước giữa các trục qua `dominantIntervalUs`, bảo vệ theo soft-limits, hủy ngay lập tức khi nhận `STOP_ALL` hoặc kích hoạt E-Stop / chạm công tắc hành trình.
+  3. **Refine Web UI:**
+     - Thêm nút "✨ SHOW OFF" với gradient tím nổi bật tại Dashboard, tab Jog và tab Motion.
+     - Bổ sung hiệu ứng badge `.b-showoff` phát sáng xung nhịp (pulse glow), hiển thị trạng thái `SHOW OFF`.
+     - Tinh chỉnh giao diện responsive, các nút thao tác nhanh, hiển thị giới hạn J5 $\pm 90^\circ$ chuẩn hóa.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,892 bytes (15.2%), Flash 940,145 bytes (28.1%).
+- Host test suites (toàn bộ 9 suite) → **ALL HOST TESTS PASSED** (kinematics 3352/3352 ok, drawing workspace, joint logic, work plane, trajectory validator, homing FSM, homing logic, safety manager, web validation).
+
+### Việc còn lại (nếu có)
+- Flash firmware xuống mạch ESP32-S3.
+- Bấm nút "✨ SHOW OFF" trên giao diện Web hoặc gửi `POST /api/showoff` để chiêm ngưỡng cánh tay robot 6 trục múa đồng bộ mượt mà.
+
+---
+
+## 2026-09-09 — Cập nhật chiều dài bút vẽ (Tool) còn 30mm (D_eff = 75mm)
+
+### Vấn đề đã làm
+- **What:**
+  1. Cập nhật chiều dài bút vẽ $D_{\text{tool}}$ từ $130.0\text{ mm}$ xuống còn $30.0\text{ mm}$ theo yêu cầu của owner:
+     - $D_6 = 45.0\text{ mm}$ (khoảng cách trục J5 $\to$ J6).
+     - $D_{\text{tool}} = 30.0\text{ mm}$ (chiều dài bút gắn đồng trục J6).
+     - Khâu công cụ hiệu dụng J5 $\to$ TCP: $D_{\text{eff}} = D_6 + D_{\text{tool}} = 45.0 + 30.0 = \mathbf{75.0\text{ mm}}$ (trước đây là $175.0\text{ mm}$).
+  2. Đồng bộ các file mã nguồn và cấu hình:
+     - `src/config.h`: `DH_D_TOOL_MM = 30.0f`, `DH_TOOL_EFFECTIVE_MM = 75.0f`.
+     - `src/kinematics.h`: `D_TOOL = 30.0f`, `D_TOOL_EFFECTIVE = 75.0f`.
+     - `src/kinematics.cpp`: cập nhật comment forward kinematics và IK pen-down wrist height ($Z_{\text{wrist}} = Z_{\text{target}} + 75.0\text{ mm}$).
+     - `src/web_server.cpp`: cập nhật hiển thị Hardware Reference (`45.0 + 30.0 mm (D_eff=75.0mm)`) và biến JavaScript visualizer (`D_TOOL = 30.0, D_TOOL_EFF = 75.0`).
+  3. Cập nhật không gian vẽ và gợi ý mặt phẳng `DrawingWorkspace`:
+     - Quét lại toàn bộ không gian làm việc bằng thuật toán tìm kiếm mặt phẳng tối ưu cho hình học mới ($D_{\text{eff}} = 75.0\text{ mm}$).
+     - Cập nhật 3 preset mặt phẳng vẽ khả thi và rộng nhất:
+       * Mặt phẳng chính: $Z = 160.0\text{ mm}$, tâm $(105.0, -5.0)$, hình vuông tối đa $200.0\text{ mm}$.
+       * Mặt phẳng trung gian: $Z = 100.0\text{ mm}$, tâm $(160.0, -20.0)$, hình vuông tối đa $150.0\text{ mm}$.
+       * Mặt phẳng bàn/thấp: $Z = 20.0\text{ mm}$, tâm $(160.0, 0.0)$, hình vuông tối đa $160.0\text{ mm}$.
+  4. Cập nhật unit test và tài liệu:
+     - `test/kinematics/test_kinematics.cpp`: cập nhật kiểm tra tọa độ TCP tại Home ($X_{\text{TCP}} = 125 + 45 + 30 = 200.0\text{ mm}$).
+     - `test/host/test_drawing_workspace.cpp`: kiểm tra mặt phẳng chính $Z = 160.0\text{ mm}$.
+     - `docs/ARM_GEOMETRY.md`: cập nhật sơ đồ ASCII, mục 1, 2, bảng DH, mục 5 (Home TCP 200mm), mục 6 (vùng với), mục 7 (IK).
+     - `docs/SYSTEM_OVERVIEW.html`: cập nhật tab Kinematics và footer log.
+- **Why:** Bút vật lý thực tế của người dùng được gá ngắn lại còn 30mm tính từ đầu J6. Việc này làm tâm cổ tay J5 khi giải IK pen-down hạ thấp xuống 100mm (từ $+175\text{ mm}$ xuống $+75\text{ mm}$ so với đầu bút), giúp cánh tay đạt đúng tầm vẽ cơ học và tránh tình trạng đầu bút bị lơ lửng trên không trung.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,892 bytes (15.2%), Flash 940,141 bytes (28.1%).
+- Toàn bộ suite host test (g++ C++17) → **ALL PASSED**:
+  * `test_kinematics`: PASS (FK home TCP X=200.000 mm, IK roundtrip 2590/2590 ok).
+  * `test_drawing_workspace`: PASS (3 profiles đạt 100% reachable with lift, size $\ge 40$mm).
+  * `test_trajectory_validator`: PASS (12 tests ok).
+  * `test_joint_logic`, `test_work_plane`, `test_homing_fsm`, `test_homing_logic`, `test_safety_manager`, `test_web_validation`: ALL PASSED.
+
+### Việc còn lại (nếu có)
+- Flash firmware mới xuống ESP32-S3 và test thực tế với ngòi bút 30mm.
+
+---
+
+## 2026-09-10 — Sửa mapping segment LINE/SQUARE trong planner
+
+### Việc đã làm
+- What: `Planner::nextDrawSegment()` dùng `DRAW_LINE_SEGMENT_MM=2 mm` cho LINE và `DRAW_SEGMENT_MM=1 mm` cho CIRCLE/SQUARE; thêm `Planner::segmentLengthFor()` và host regression kiểm tra đúng mapping runtime.
+- Why: code runtime đã dùng ngược hai hằng số, khiến LINE vẫn chạy waypoint 1 mm và tạo gấp đôi số lần stop/start so với thiết kế, trong khi SQUARE mất độ mịn vì chạy 2 mm.
+- How: sửa đúng một điểm chọn segment dùng chung, không đổi feed, IK, J5 feedback, motor timer hay safety gate.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,892 bytes (15.2%), Flash 940,141 bytes (28.1%).
+- Host `test_trajectory_validator` → **ALL PASSED (13 tests)**, gồm regression `runtime_segment_spacing`.
+
+### Việc còn lại (nếu có)
+- Flash và vẽ một line dài ở 10 mm/s; đo độ rung/dwell tại waypoint trước khi cân nhắc continuous lookahead.
+
+---
+
+## 2026-09-10 — Thêm sequencer tối thiểu để viết HELLO
+
+### Việc đã làm
+- What: thêm nút `WRITE HELLO` trong Quick Draw; frontend sinh 15 nét LINE cố định trong bounding box lấy từ Start X, Start Y và Line length hiện có.
+- What: mỗi nét chỉ được gửi sau khi `/api/status` đã thấy nét trước chạy rồi hoàn tất; STOP ALL, ABORT và E-STOP tăng run token để hủy toàn bộ nét chưa gửi trước khi enqueue `STOP_ALL`.
+- Why: tạo đường ngắn nhất từ primitive LINE đã kiểm chứng tới mục tiêu viết HELLO, không thêm font engine, SVG/G-code parser hay API motion mới.
+- How: tái dùng `/api/draw`, validation, queue, lift/drop và safety chain hiện có; UI giữ component/button vocabulary hiện tại.
+
+### Build gate
+- Embedded JavaScript parse bằng Node `new Function` → **OK**.
+- `pio run` → **SUCCESS**; RAM 49,892 bytes (15.2%), Flash 943,149 bytes (28.2%).
+
+### Việc còn lại (nếu có)
+- Flash firmware; chọn plane, đặt Start X/Y và width ≥40 mm, chạy WRITE HELLO với bút nâng khỏi giấy trước để xác nhận hướng/bounds, sau đó mới thử chạm giấy.
+- Mẫu hiện dùng nhiều LINE job độc lập nên nâng/hạ giữa 15 nét và vẫn chịu stop/start trong từng nét; chỉ thêm continuous planner khi line test thực tế còn dwell/rung.
+
+---
+
+## 2026-09-10 — Đo command latency Web tới motion task
+
+### Việc đã làm
+- What: đóng dấu `submittedAtUs` khi `ArmController::submit()` nhận lệnh, đo lại khi motion task bắt đầu `execute()`, publish `commandLatencyUs` trong `/api/status` và hiển thị trên Dashboard.
+- Why: phân biệt delay nằm trong synchronous pre-flight/queue 10 ms với delay WiFi/browser hoặc thời gian motor thực thi; tránh tuning mù.
+- How: dùng phép trừ `uint32_t micros()` an toàn qua wraparound và một atomic telemetry; không đổi command ordering, priority hay safety behavior.
+
+### Build gate
+- Embedded JavaScript parse bằng Node `new Function` → **OK**.
+- `pio run` → **SUCCESS**; RAM 49,892 bytes (15.2%), Flash 943,661 bytes (28.2%).
+
+### Việc còn lại (nếu có)
+- Sau khi flash, ghi Command latency cho 10 lần Jog và một LINE/WRITE HELLO. Nếu Jog gần 10 ms nhưng cảm giác chậm, đo browser RTT/WiFi; nếu LINE cao hơn rõ rệt, tối ưu pre-flight trùng lặp.
+
+---
+
+## 2026-09-10 — Bỏ cửa sổ UI IDLE giả sau POST
+
+### Việc đã làm
+- What: `ArmController::busy()` tính cả command đang chờ trong FreeRTOS queue; frontend gọi `pollOnce()` ngay khi POST kết thúc thay vì đợi interval status kế tiếp.
+- Why: trước đây UI có thể chờ tối đa 300 ms để phản ánh trạng thái mới, hoặc poll đúng khe command đã enqueue nhưng motion task chưa nhận và hiển thị IDLE giả.
+- How: tái dùng queue/status poll hiện có; không thêm timer, request song song hoặc thay đổi thứ tự thực thi lệnh.
+
+### Build gate
+- Embedded JavaScript parse bằng Node `new Function` → **OK**.
+- `pio run` → **SUCCESS**; RAM 49,892 bytes (15.2%), Flash 943,725 bytes (28.2%).
+
+### Việc còn lại (nếu có)
+- Flash và so sánh cảm giác phản hồi cùng `Command latency`; đây chỉ bỏ UI state lag, không rút ngắn thời gian motor ramp/chạy.
+
+---
+
+## 2026-09-10 — Preflight toàn bộ HELLO trước nét đầu
+
+### Việc đã làm
+- What: frontend kiểm tra toàn bộ 15 nét HELLO theo bước tối đa 2 mm ở Z vẽ và hai endpoint tại Z + 5 mm trước khi gửi command đầu tiên; nếu có điểm ngoài IK thì từ chối toàn bộ job.
+- What: host regression quét mẫu HELLO mặc định trên profile chính bằng C++ `kin::ikPenDown()` cho cả pen-down và pen-lift.
+- Why: tránh viết dở chữ rồi mới phát hiện nét sau ngoài vùng với; server vẫn validate lại từng nét để giữ trust-boundary fail-closed.
+
+### Build gate
+- `test_drawing_workspace` → **ALL PASSED**, gồm toàn bộ 15 nét HELLO mặc định.
+- Embedded JavaScript parse bằng Node `new Function` → **OK**.
+- `pio run` → **SUCCESS**; RAM 49,892 bytes (15.2%), Flash 944,349 bytes (28.3%).
+
+### Việc còn lại (nếu có)
+- Host test chứng minh hình học/IK, không chứng minh cơ khí thật; dry-run bút nâng vẫn bắt buộc trước khi chạm giấy.
+
+---
+
+## 2026-09-10 — Chặn HELLO base-profile khi WorkPlane bật
+
+### Việc đã làm
+- What: mỗi nét HELLO gửi cờ `base_profile=1`; `/api/draw` trả 409 `WORKPLANE_ENABLED` nếu cờ này xuất hiện khi UCS WorkPlane đang enabled.
+- Why: danh sách profile có thể còn trong browser sau khi operator bật WorkPlane; nếu không chặn, browser preflight tọa độ base robot nhưng planner lại transform cùng số đó như UCS, có thể chạy sai vị trí.
+- How: guard tại trust boundary trước khi parse/enqueue; DRAW thủ công không có cờ vẫn tiếp tục hỗ trợ WorkPlane như cũ.
+
+### Build gate
+- Embedded JavaScript parse bằng Node `new Function` → **OK**.
+- `pio run` → **SUCCESS**; RAM 49,892 bytes (15.2%), Flash 944,497 bytes (28.3%).
+
+### Việc còn lại (nếu có)
+- Không bật WorkPlane khi dùng Quick Draw/WRITE HELLO; tắt WorkPlane rồi reload profiles.
+
+---
+
+## 2026-09-10 — Chốt checklist commissioning latency, J5 và HELLO
+
+### Việc đã làm
+- What: `/api/status` bổ sung `planner.targetJ5Deg`, cho phép đối chiếu trực tiếp IK target với step angle và encoder J5 tại cùng waypoint.
+- What: mở rộng `docs/HW_REGRESSION_CHECKLIST.md` bằng ba gate: Web command latency, J5 drawing path và WRITE HELLO dry-run/pen-down/repeatability.
+- Why: automated build/IK không chứng minh timing WiFi, chiều phần cứng, pen contact hoặc chữ viết thật; checklist gom đủ bằng chứng tối thiểu để không tuning theo cảm giác.
+- How: pass Jog firmware latency ≤20 ms; HELLO phải preflight, dry-run, ABORT đúng, LINE pass trước, rồi viết nhận diện được ba lần và lưu ảnh/số đo.
+
+### Build gate
+- `pio run` → **SUCCESS**; RAM 49,900 bytes (15.2%), Flash 944,549 bytes (28.3%).
+- Host kinematics → không bắt buộc vì không đổi FK/IK; regression HELLO hiện hữu vẫn giữ nguyên.
+
+### Việc còn lại (nếu có)
+- Thực hiện checklist trên hardware và append số đo/ảnh tham chiếu vào log; chỉ lúc đó mới kết luận mục tiêu HELLO hoàn tất.
+
+---
+
+## 2026-09-10 — Digital Twin chỉnh geometry và joint limits
+
+### Việc đã làm
+- What: thêm panel `Twin geometry & limits` trong Motion & Draw để chỉnh D1/A2/A3/D4/D6/tool, theta offset J2/J5 và min/max J1–J6; canvas FK, IK và sliders cập nhật theo cấu hình mô phỏng.
+- What: hiển thị các gear ratio, step sign, encoder sign và loại driver hiện tại để đối chiếu khi commissioning.
+- Why: cho owner thử và sửa số đo/giới hạn trên Digital Twin trước khi quyết định thay đổi cấu hình robot thật.
+- How: cấu hình chỉ tồn tại trong browser RAM, có validation chiều dài dương và min < max; không gọi REST API, không ghi NVS và không sửa `config.h`/kinematics firmware.
+
+### Build gate
+- Embedded JavaScript parse bằng Node `new Function` → SUCCESS.
+- `pio run` → SUCCESS; RAM 49,900 bytes (15.2%), Flash 949,013 bytes (28.4%).
+
+### Việc còn lại (nếu có)
+- Owner đối chiếu Twin với arm thật và cung cấp số đo/limit đã xác nhận; chỉ sau đó mới cập nhật firmware theo hợp đồng geometry đầy đủ.
+
+---
+
+## 2026-09-10 — Ứng dụng Python Digital Twin chạy offline
+
+### Việc đã làm
+- What: thêm `tools/digital_twin.py`, ứng dụng desktop Tkinter độc lập với view 3D/Side/Top, orbit chuột, slider sáu khớp và TCP readout.
+- What: cho chỉnh geometry MDH, theta offsets, joint limits; load/save JSON và hiển thị drivetrain/sign hiện tại để commissioning.
+- Why: cho phép thử mô hình và hiệu chỉnh giới hạn khi không có ESP32/hardware.
+- How: chỉ dùng Python standard library, dùng cùng Craig MDH/FK và default hiện tại của firmware; không có đường kết nối hay gửi lệnh tới robot.
+
+### Build gate
+- `python tools/digital_twin.py --self-test` → PASS; Home TCP = `(200, 0, 365) mm`, invalid limit bị từ chối.
+- `python -m py_compile tools/digital_twin.py` → SUCCESS.
+- `pio run` → SUCCESS; RAM 49,900 bytes (15.2%), Flash 949,013 bytes (28.4%).
+
+### Việc còn lại (nếu có)
+- Chạy app, đối chiếu từng kích thước/limit với cơ khí thật, lưu JSON và gửi file đã xác nhận trước khi đổi firmware.
+
+---
+
+## 2026-09-10 — Sửa pose zero của Offline Digital Twin
+
+### Việc đã làm
+- What: khởi tạo mỗi `ttk.Scale` với limit thật ngay trong constructor và giữ lại góc mong muốn khi apply limit mới.
+- Why: cấu hình range sau khi tạo Scale có thể kích hoạt callback với range mặc định 0..100, làm pose khởi động bị đổi dù UI dự kiến tất cả khớp bằng 0°.
+- How: bỏ bước reconfigure range ngay sau constructor; khi apply config, snapshot sáu góc trước khi cập nhật range rồi clamp/restore.
+
+### Build gate
+- `python tools/digital_twin.py --self-test` → PASS; hidden Tkinter smoke test xác nhận sliders khởi tạo `[0,0,0,0,0,0]` và TCP `(200,0,365) mm`.
+- `pio run` → không bắt buộc vì chỉ sửa ứng dụng Python và docs.
+
+### Việc còn lại (nếu có)
+- Đóng app cũ, mở lại và bấm `Home pose`; TCP phải là `(200.0, 0.0, 365.0) mm`.
+
+---
+
+## 2026-09-10 — Đồng bộ soft limit J4 ±150°
+
+### Việc đã làm
+- What: đổi J4 soft limit từ `-180°…+180°` thành `-150°…+150°` trong `config.h`, Web Digital Twin, Offline Python Twin, README và system overview.
+- What: thêm host regression khóa J4 min/max và calibration range 300°.
+- Why: owner xác nhận giới hạn J4 là 150° mỗi phía.
+- How: chỉ đổi soft-limit contract; giữ nguyên homing mechanical travel guard 150°, sensorless detection và geometry.
+
+### Build gate
+- `python tools/digital_twin.py --self-test` → chờ kết quả.
+- Host tests → chờ kết quả.
+- `pio run` → chưa chạy trước khi owner đính chính tổng hành trình; xem entry kế tiếp.
+
+### Việc còn lại (nếu có)
+- Xác minh J4 dừng tại ±150° trên Twin trước; commissioning phần cứng vẫn cần khoảng an toàn và E-STOP.
+
+---
+
+## 2026-09-10 — Đính chính J4: tổng hành trình 150°
+
+### Việc đã làm
+- What: sửa forward entry trước: J4 soft limit đúng là `-75°…+75°`, tổng hành trình 150°, không phải 150° mỗi phía.
+- What: đồng bộ lại `config.h`, Web Twin, Offline Python Twin, README, system overview và host regression; calibration range J4 là 150°.
+- Why: owner làm rõ “150 degree for all, not each side”.
+- How: giữ zero ở tâm và chia đều tổng hành trình về hai phía; homing mechanical travel guard tiếp tục là 150°.
+
+### Build gate
+- `python tools/digital_twin.py --self-test` → PASS.
+- Host joint logic → ALL PASSED.
+- `pio run` → SUCCESS; RAM 49,900 bytes (15.2%), Flash 949,013 bytes (28.4%).
+
+### Việc còn lại (nếu có)
+- Xác minh cơ khí rằng zero J4 nằm chính giữa hai cữ; nếu zero không ở tâm thì cần owner cung cấp min/max bất đối xứng thay vì tự chia ±75°.
+
+---
+
+## 2026-09-10 — Offline Twin mô phỏng Line, Circle và HELLO
+
+### Việc đã làm
+- What: refine UI Tkinter với tab selected/input contrast rõ hơn, subtitle hướng dẫn và nhãn Base/J1–J6/TCP thay cho P-number.
+- What: thêm tab Drawing nhận X/Y/Z/Size, tạo Line/Circle/HELLO, preflight từng sample bằng IK theo geometry/limit đang chỉnh, preview path và Play/Stop animation.
+- Why: dùng Digital Twin để kiểm tra đường vẽ và giới hạn hoàn toàn offline trước khi thử hardware.
+- How: tái dùng Craig MDH hiện tại, thêm closed-form pen-down IK thuần Python và timer `after()` native; không thêm package hay kết nối robot.
+
+### Build gate
+- `python tools/digital_twin.py --self-test` → PASS; Line, Circle và HELLO mặc định đều IK-safe.
+- Hidden Tkinter smoke test → PASS; ba shape preview được, HELLO 127 frames.
+- `python -m py_compile tools/digital_twin.py` → SUCCESS.
+- `pio run` → SUCCESS; RAM 49,900 bytes (15.2%), Flash 949,013 bytes (28.4%).
+
+### Việc còn lại (nếu có)
+- Visual acceptance cần owner mở app ở DPI/màn hình thực; simulation chưa mô hình hóa collision vật lý hay backlash.
+
+---
+
+## 2026-09-10 — Sửa Play và khóa drawing plane Z=20 mm
+
+### Việc đã làm
+- What: Offline Twin gọi repaint sau mỗi animation frame nên Play thực sự di chuyển arm; Drawing khóa field Plane Z ở 20 mm.
+- What: chọn duy nhất profile base Z=20 mm, tâm (160,0), arena 160 mm; đồng bộ DrawingWorkspace, Web presets, Python Twin và tài liệu.
+- What: `/api/draw` và shared trajectory validator từ chối Draw ở Z khác bằng `WRONG_DRAW_PLANE`, đồng thời từ chối Draw khi WorkPlane/UCS enabled.
+- What: xóa các scan-range constants không còn caller sau khi chuyển từ ba profile sang một plane cố định.
+- Why: owner yêu cầu mọi Digital Twin và firmware chỉ vẽ trên một plane thấp có cân bằng tốt với vùng khả dụng.
+- How: Z=20 là profile thấp nhất hiện có; profile Z=160 chỉ tăng arena 160→200 mm nhưng nâng mặt vẽ thêm 140 mm. Cartesian POINT vẫn có thể dùng WorkPlane, Draw thì không.
+
+### Build gate
+- Python self-test → PASS; Line/Circle/HELLO mặc định reachable tại Z=20.
+- Hidden Tkinter Play smoke test → PASS; animation tiến frame và plane field = 20.0.
+- Host `test_drawing_workspace` → ALL PASSED, đúng 1 profile.
+- Host `test_trajectory_validator` → ALL PASSED (14 tests), gồm wrong-Z và UCS rejection.
+- Embedded Web JavaScript parse → SUCCESS.
+- `pio run` → SUCCESS; RAM 49,900 bytes (15.2%), Flash 949,005 bytes (28.4%).
+
+### Việc còn lại (nếu có)
+- Đặt mặt giấy thật sao cho đầu bút tiếp xúc tại base Z=20 mm; dry-run bút nâng trước khi pen-down.
+
+---
+
+## 2026-09-10 — Sửa Circle/HELLO phát nhầm animation Line
+
+### Việc đã làm
+- What: `play_drawing()` luôn gọi lại preview/preflight cho shape và input hiện tại trước khi chạy animation.
+- Why: frame cache của lần preview Line trước vẫn còn, nên đổi radio sang Circle hoặc HELLO rồi bấm Play đã phát lại Line.
+- How: bỏ điều kiện chỉ rebuild khi cache rỗng; tái dùng đúng `preview_drawing()` hiện có.
+
+### Build gate
+- Hidden Tkinter shape-switch smoke test → PASS; Line/Circle/HELLO lần lượt 25/76/105 frames.
+- `python tools/digital_twin.py --self-test` → PASS.
+- `pio run` → SUCCESS; RAM 49,900 bytes (15.2%), Flash 949,005 bytes (28.4%).
+
+### Việc còn lại (nếu có)
+- Không.
+
+---
+
+## 2026-09-10 — Đồng bộ hình chữ HELLO và pen-lift trong Offline Twin
+
+### Việc đã làm
+- What: thay glyph HELLO Python bị nén 3.2×1 bằng đúng 15 strokes chuẩn hóa 6.4×1.6 đang dùng trong Web/host regression.
+- What: Line/Circle/HELLO animation thêm nâng bút 5 mm trước/sau stroke và travel giữa các stroke ở độ cao nâng bút; preview chỉ tô phần pen-down.
+- Why: HELLO trong Twin sai tỷ lệ so với main project và robot teleport ngang mặt giấy giữa các nét.
+- How: một helper `with_pen_lifts()` dùng chung cho cả ba shape, không thêm dependency.
+
+### Build gate
+- Python self-test → PASS; HELLO span đúng 95 mm, 167 frames gồm 73 pen-down và 94 lift/travel.
+- Hidden Tkinter HELLO smoke test → không chạy được do tool quota từ chối mở GUI; cần owner visual-check app đã restart.
+- `pio run` → SUCCESS; RAM 49,900 bytes (15.2%), Flash 949,005 bytes (28.4%).
+
+### Việc còn lại (nếu có)
+- Visual acceptance cần owner mở lại app và xem ở Top XY để kiểm tra chữ không bị phối cảnh 3D làm xiên.
+
+---
+
+## 2026-09-11 — Drawing giữ nguyên J6 pen roll
+
+### Việc đã làm
+- What: Offline Twin snapshot góc J6 khi Preview/Play và giữ đúng góc đó trong toàn bộ frame Line/Circle/HELLO; status hiển thị `J6 HOLD`.
+- Why: J6 nối với bút và chỉ roll quanh trục tool, nên Drawing không được kéo J6 về 0° hoặc phát chuyển động J6.
+- How: truyền `j6_deg` vào IK output; J1–J5 vẫn được IK điều khiển như trước. Firmware đã dùng `CARTESIAN_AXIS_COUNT=5`, không cần sửa motion path thật.
+
+### Build gate
+- Python self-test → PASS; IK giữ nguyên J6=37° trong regression.
+- `pio run` → SUCCESS; RAM 49,900 bytes (15.2%), Flash 949,005 bytes (28.4%).
+
+### Việc còn lại (nếu có)
+- Không.

@@ -59,16 +59,20 @@ public:
                            job_.shape == Shape::SQUARE);
     }
     [[nodiscard]] State state() const noexcept { return state_; }
+    [[nodiscard]] static constexpr float segmentLengthFor(Shape shape) noexcept {
+        return shape == Shape::LINE ? DRAW_LINE_SEGMENT_MM : DRAW_SEGMENT_MM;
+    }
 
     // Gọi định kỳ từ motion task (10ms). Sinh segment khi các trục đã dừng.
     void tick();
 
     [[nodiscard]] uint32_t segmentsDone() const noexcept { return segDone_; }
+    [[nodiscard]] float targetJ5Deg() const noexcept { return targetJ5Deg_; }
     void setWorkPlane(class WorkPlane* wp) noexcept { workPlane = wp; }
     [[nodiscard]] class WorkPlane* getWorkPlane() const noexcept { return workPlane; }
 
 private:
-    bool syncWristFeedback();
+    bool syncJ5Feedback();
     bool startMoveTo(float x, float y, float z, float feedMmS); // 1 segment tới đích
     bool nextDrawSegment();
     void finishAll();
@@ -88,6 +92,7 @@ private:
     float sweep_{0.0f};         // CIRCLE: cung quét (dương = CCW)
     float curX_{0}, curY_{0}, curZ_{0}; // vị trí Cartesian hiện tại (theo lệnh)
     uint32_t segDone_{0};
+    float targetJ5Deg_{0.0f};
 };
 
 #endif // PLANNER_H

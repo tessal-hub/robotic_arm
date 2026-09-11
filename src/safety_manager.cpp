@@ -164,6 +164,35 @@ bool SafetyManager::tryClearFault() {
   return true;
 }
 
+bool SafetyManager::tryBeginRecoveryJog(uint8_t axis, bool towardPositive) {
+  if (axis >= NUM_MOTORS) return false;
+  const SafetyState cur = state_.load(std::memory_order_acquire);
+  if (cur != SafetyState::FAULT && cur != SafetyState::E_STOP) return true;
+
+  for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
+    for (const auto w : {EndstopWhich::MIN, EndstopWhich::MAX}) {
+      bool pressed = false;
+#ifdef ARDUINO
+      if (endstops_ != nullptr) pressed = endstops_->isPressed(a, w);
+#else
+      if (isPressed_) pressed = isPressed_(a, w);
+#endif
+      if (!pressed) continue;
+      if (a != axis || (w == EndstopWhich::MIN && !towardPositive) ||
+          (w == EndstopWhich::MAX && towardPositive)) return false;
+    }
+  }
+
+#ifdef ARDUINO
+  if (endstops_ != nullptr) endstops_->clearAllLatches();
+  else forceClear();
+#else
+  if (clearLatches_) clearLatches_();
+  forceClear();
+#endif
+  return true;
+}
+
 bool SafetyManager::isMotionAllowed() const {
   SafetyState s = state_.load(std::memory_order_acquire);
   return s == SafetyState::NORMAL || s == SafetyState::HOMING;

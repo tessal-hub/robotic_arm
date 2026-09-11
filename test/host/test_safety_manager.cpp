@@ -103,6 +103,18 @@ static void test_tryClear_success_clears() {
   else CHECK(false, "tryClear_success_clears");
 }
 
+static void test_recovery_jog_only_moves_away() {
+  MockEndstops es; es.setGpio(0, EndstopWhich::MIN, false);
+  MockJointModel jm; SafetyManager sm(&es, &jm);
+  sm.assertEStop("J1 MIN");
+  CHECK(!sm.tryBeginRecoveryJog(0, false), "reject jog deeper into MIN");
+  CHECK(!sm.tryBeginRecoveryJog(1, true), "reject another axis while J1 MIN pressed");
+  CHECK(sm.state() == SafetyState::E_STOP, "rejected recovery keeps E_STOP");
+  CHECK(sm.tryBeginRecoveryJog(0, true), "allow J1 jog away from MIN");
+  CHECK(sm.state() == SafetyState::NORMAL && !sm.isEStop(), "valid recovery clears latch");
+  PASS("recovery_jog_only_moves_away");
+}
+
 static void test_manual_release_ignores_endstop() {
   MockEndstops es; es.setGpio(0, EndstopWhich::MIN, true);
   MockJointModel jm;
@@ -195,6 +207,7 @@ int main() {
   test_tryClear_reject_when_pressed();
   test_tryClear_acknowledges_drift_after_endstop_release();
   test_tryClear_success_clears();
+  test_recovery_jog_only_moves_away();
   test_manual_release_ignores_endstop();
   test_isMotionAllowed_matrix();
   test_anyLatched_and_assertEStop();

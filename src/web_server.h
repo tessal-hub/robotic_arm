@@ -20,6 +20,7 @@ class WorkPlane;
  *   GET  /api/stop             dừng tất cả
  *   POST /api/move             x,y,z,feed      chuyển động Cartesian
  *   POST /api/draw             shape,params    vẽ line/circle
+ *   POST /api/showoff                          trình diễn đồng bộ 6 khớp (Show Off dance)
  *   GET  /api/home/all         homing chuỗi J1..J4
  *   GET  /api/home/axis?axis=  homing 1 khớp (0-based, chỉ 0..3)
  *   GET  /api/sethome?axis=    đặt home tại chỗ (mọi khớp, kể cả J5/J6)

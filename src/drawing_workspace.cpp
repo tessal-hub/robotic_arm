@@ -15,11 +15,9 @@ bool poseReachable(float x, float y, float z) {
 
 const std::array<DrawingWorkspace::Recommendation, DrawingWorkspace::kRecommendationCount>&
 DrawingWorkspace::recommendations() {
-    // Commissioned from the former exhaustive scan; -10 mm is the primary drawing plane.
+    // Owner-selected single low plane: 160 mm arena at base Z=20 mm.
     static constexpr std::array<Recommendation, kRecommendationCount> values{{
-        {-10.0f, 165.0f, -15.0f, 160.0f, true},
-        { 70.0f, 115.0f, -15.0f, 200.0f, true},
-        {110.0f, 110.0f,   0.0f, 190.0f, true},
+        {DRAW_PLANE_Z_MM, 160.0f, 0.0f, 160.0f, true},
     }};
     return values;
 }

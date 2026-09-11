@@ -213,7 +213,7 @@ $$^{i-1}T_i = R_x(\alpha_{i-1}) \cdot T_x(a_{i-1}) \cdot R_z(\theta_i) \cdot T_z
 | **1** | J1 (Base Yaw) | $0\,\text{mm}$ | $0^\circ$ | **$139\,\text{mm}$** | $0^\circ$ | $[-90^\circ, +90^\circ]$ |
 | **2** | J2 (Shoulder) | $0\,\text{mm}$ | $-90^\circ$ | $0\,\text{mm}$ | **$-90^\circ$** | $[-90^\circ, +90^\circ]$ |
 | **3** | J3 (Elbow) | **$138\,\text{mm}$** | $0^\circ$ | $0\,\text{mm}$ | $0^\circ$ | $[0^\circ, +90^\circ]$ |
-| **4** | J4 (Wrist Pan) | **$88\,\text{mm}$** | $-90^\circ$ | **$126\,\text{mm}$** | $0^\circ$ | $[-180^\circ, +180^\circ]$ |
+| **4** | J4 (Wrist Pan) | **$88\,\text{mm}$** | $-90^\circ$ | **$126\,\text{mm}$** | $0^\circ$ | $[-75^\circ, +75^\circ]$ |
 | **5** | J5 (Wrist Tilt) | $0\,\text{mm}$ | $+90^\circ$ | $0\,\text{mm}$ | $0^\circ$ | $[-120^\circ, +120^\circ]$ |
 | **6** | J6 (Tool Roll) | $0\,\text{mm}$ | $-90^\circ$ | **$31\,\text{mm}$** | $0^\circ$ | $[-360^\circ, +360^\circ]$ |
 | **Tool**| Drawing Pen | $0\,\text{mm}$ | $0^\circ$ | **$20\,\text{mm}$** | $0^\circ$ | Fixed Tool Axis |
@@ -302,7 +302,7 @@ Upon powering up, the controller attempts to connect to the provisioned WiFi net
 | `GET` | `/api/status` | — | Full JSON telemetry snapshot (mode, joints, pose, homing, safety) |
 | `POST`| `/api/jog` | `{"axis": 0..5, "deg": float}` | Jog single joint angle by relative delta |
 | `POST`| `/api/move` | `{"x": float, "y": float, "z": float, "feed": float}` | Command Cartesian linear point move |
-| `POST`| `/api/draw` | `{"shape": "line"\|"circle", ...}` | Execute coordinated line or circular drawing trajectory |
+| `POST`| `/api/draw` | `{"shape": "line"\|"circle", ...}` | Draw only on fixed base plane Z=20 mm; other Z/UCS rejected |
 | `GET` | `/api/home/all`| — | Initiate automatic sequential homing (J1 $\to$ J4) |
 | `GET` | `/api/home/axis`| `?axis=0..3` | Initiate homing on a single designated axis |
 | `GET` | `/api/sethome` | `?axis=0..5` | Zero joint at current physical location & save to NVS |
@@ -359,7 +359,7 @@ When bringing up the physical robotic arm for the first time:
 3. **Open-Loop Jog Validation**: Jog each joint by small increments ($+1.0^\circ$). Verify direction matches physical convention; flip `AXIS_STEP_SIGN` in [`src/config.h`](file:///E:/00.Project/04.robot-arm/robotic_arm/src/config.h) if inverted.
 4. **Encoder Zeroing**: Confirm AS5600 magnet alignment (air gap 1–2 mm, centered over IC).
 5. **Homing Calibration**: Execute `/api/home/all`. Verify J1/J2 center calibration and J3 backoff.
-6. **Inclined Plane Test**: Calibrate WorkPlane with 3 corner points of a tilted drawing pad, then execute `/api/draw` to confirm accurate surface adherence.
+6. **Fixed Plane Test**: Place the drawing pad at base Z=20 mm, then confirm Line/Circle/HELLO remain inside the 160 mm arena.
 
 ---
 

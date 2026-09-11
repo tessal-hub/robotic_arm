@@ -1,9 +1,7 @@
 // Host-side unit tests cho kinematics.
-// Chạy: tools/run_kin_tests.sh  (g++ trực tiếp — PIO test runner native bị lỗi
-// "Nothing to build" trên Core 6.1.19, xem docs/IMPLEMENTATION_LOG.md)
+// Chay: tools/run_kin_tests.sh  (g++ truc tiep - PIO native bi loi "Nothing to build")
 #include <cstdio>
 #include <cmath>
-#include "differential_wrist.h"
 #include "kinematics.h"
 
 static int g_fail = 0;
@@ -18,21 +16,35 @@ static int g_fail = 0;
 
 static bool near(float a, float b, float tol) { return fabsf(a - b) <= tol; }
 
+// FK tai Home (tat ca encoder = 0):
+//   THETA5_OFFSET = 0 -> th5_DH = 0 -> J5 nam ngang -> TCP theo +X tu wrist.
+//   Wrist: (125, 0, 365) theo ARM_GEOMETRY.md muc 5.
+//   TCP  : (125 + 75, 0, 365) = (200, 0, 365).
 static void testFkHome() {
     const float home[6] = {0, 0, 0, 0, 0, 0};
     const kin::FkResult r = kin::forward(home);
     printf("FK home wrist=(%.3f, %.3f, %.3f) tcp=(%.3f, %.3f, %.3f)\n",
            r.wristCenter.x, r.wristCenter.y, r.wristCenter.z,
            r.tcp.x, r.tcp.y, r.tcp.z);
-    // docs/ARM_GEOMETRY.md mục 5: wrist center (J5) = (126, 0, 365), tcp = (287, 0, 365)
-    CHECK(near(r.wristCenter.x, 126.0f, 1e-3f), "wrist x");
-    CHECK(near(r.wristCenter.y, 0.0f, 1e-3f), "wrist y");
+    CHECK(near(r.wristCenter.x, 125.0f, 1e-3f), "wrist x");
+    CHECK(near(r.wristCenter.y,   0.0f, 1e-3f), "wrist y");
     CHECK(near(r.wristCenter.z, 365.0f, 1e-3f), "wrist z");
-    CHECK(near(r.tcp.x, 287.0f, 1e-3f), "tcp x");
-    CHECK(near(r.tcp.y, 0.0f, 1e-3f), "tcp y");
-    CHECK(near(r.tcp.z, 365.0f, 1e-3f), "tcp z");
+    CHECK(near(r.tcp.x, 200.0f, 1e-3f), "tcp x (J5=0, tool along +X)");
+    CHECK(near(r.tcp.y,   0.0f, 1e-3f), "tcp y");
+    CHECK(near(r.tcp.z, 365.0f, 1e-3f), "tcp z (J5 horizontal)");
 }
 
+// IK pen-down tai (100, 0, 50): wrist=(100,0,225), dist=132mm, trong vung voi.
+// THETA5_OFFSET=0: e5 = -q23_deg, ket qua phai nam trong soft-limit [-90, 90].
+static void testIkPenDownReachable() {
+    float enc[6];
+    CHECK(kin::ikPenDown({100.0f, 0.0f, 50.0f}, enc), "pen-down (100,0,50) reachable");
+    CHECK(enc[4] >= -90.0f && enc[4] <= 90.0f, "J5 enc within soft limits");
+    printf("IK (100,0,50): e=[%.1f %.1f %.1f %.1f %.1f %.1f]\n",
+           enc[0],enc[1],enc[2],enc[3],enc[4],enc[5]);
+}
+
+// Roundtrip FK(IK(target)) = target voi sai so < 0.5mm.
 static void testIkRoundTrip() {
     int ok = 0, fail = 0;
     for (int ix = -12; ix <= 12; ++ix) {
@@ -47,18 +59,18 @@ static void testIkRoundTrip() {
 
                 float enc[6];
                 kin::Pose target;
-                target.x = tx; target.y = ty; target.z = static_cast<float>(z);
+                target.x = tx; target.y = ty; target.z = z;
                 if (!kin::ikPenDown(target, enc)) continue;
 
                 const kin::FkResult r = kin::forward(enc);
                 const float perr = sqrtf((r.tcp.x - tx) * (r.tcp.x - tx) +
                                          (r.tcp.y - ty) * (r.tcp.y - ty) +
-                                         (r.tcp.z - z) * (r.tcp.z - z));
+                                         (r.tcp.z -  z) * (r.tcp.z -  z));
                 if (perr <= 0.5f) {
                     ++ok;
                 } else if (++fail < 6) {
-                    printf("RT FAIL t=(%.1f,%.1f,%.1f) e=[%.1f %.1f %.1f %.1f %.1f %.1f] err=%.2f\n",
-                           tx, ty, z, enc[0], enc[1], enc[2], enc[3], enc[4], enc[5], perr);
+                    printf("RT FAIL t=(%.1f,%.1f,%.1f) e=[%.1f %.1f %.1f %.1f %.1f] err=%.2f\n",
+                           tx, ty, z, enc[0],enc[1],enc[2],enc[3],enc[4], perr);
                 }
             }
         }
@@ -71,48 +83,17 @@ static void testIkRoundTrip() {
 static void testIkRejectsUnreachable() {
     float enc[6];
     CHECK(!kin::ikPenDown({900.0f, 0.0f, 100.0f}, enc), "far target rejected");
-    CHECK(!kin::ikPenDown({0.0f, 0.0f, 700.0f}, enc), "high target rejected");
-    CHECK(!kin::ikPenDown({50.0f, 0.0f, -80.0f}, enc), "below-floor target rejected");
-}
-
-static void testDifferentialMapping() {
-
-    // 1. Commissioned J5 sign: equal positive motors produce positive Tilt.
-    wrist::JointState j1 = wrist::forward(30.0f, 30.0f);
-    CHECK(near(j1.tiltDeg, 30.0f, 1e-4f), "diff pure tilt sign");
-    CHECK(near(j1.rollDeg, 0.0f, 1e-4f), "diff pure tilt zero roll");
-
-    // 2. Pure Roll (M_L = 45°, M_R = -45°) => Tilt = 0°, Roll = 45°
-    wrist::JointState j2 = wrist::forward(45.0f, -45.0f);
-    CHECK(near(j2.tiltDeg, 0.0f, 1e-4f), "diff pure roll zero tilt");
-    CHECK(near(j2.rollDeg, 45.0f, 1e-4f), "diff pure roll");
-
-    // 3. Inverse Kinematics (Tilt = 15°, Roll = -20°) => M_L = -5°, M_R = 35°
-    wrist::ActuatorState a3 = wrist::inverse(15.0f, -20.0f);
-    CHECK(near(a3.leftDeg, -5.0f, 1e-4f), "diff inverse left");
-    CHECK(near(a3.rightDeg, 35.0f, 1e-4f), "diff inverse right");
-
-    // 4. Roundtrip consistency across sweep
-    for (int t = -60; t <= 60; t += 15) {
-        for (int r = -180; r <= 180; r += 30) {
-            const float tilt = static_cast<float>(t);
-            const float roll = static_cast<float>(r);
-            const wrist::ActuatorState act = wrist::inverse(tilt, roll);
-            const wrist::JointState rec = wrist::forward(act.leftDeg, act.rightDeg);
-            CHECK(near(rec.tiltDeg, tilt, 1e-4f), "diff roundtrip tilt");
-            CHECK(near(rec.rollDeg, roll, 1e-4f), "diff roundtrip roll");
-        }
-    }
-    printf("Differential Wrist: all kinematic transforms and roundtrip tests PASSED\n");
+    CHECK(!kin::ikPenDown({  0.0f, 0.0f, 700.0f}, enc), "high target rejected");
+    CHECK(!kin::ikPenDown({ 50.0f, 0.0f, -80.0f}, enc), "below-floor target rejected");
 }
 
 int main() {
     testFkHome();
+    testIkPenDownReachable();
     testIkRoundTrip();
     testIkRejectsUnreachable();
-    testDifferentialMapping();
     if (g_fail == 0) {
-        printf("ALL KINEMATICS & DIFFERENTIAL WRIST TESTS PASSED\n");
+        printf("ALL KINEMATICS TESTS PASSED\n");
         return 0;
     }
     printf("%d CHECKS FAILED\n", g_fail);

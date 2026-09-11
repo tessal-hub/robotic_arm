@@ -283,7 +283,12 @@ void HomingController::enterScanBackoff() {
     const int64_t steps = JointModel::degreesToSteps(curAxis_, HOME_OFFSET_FROM_MIN_DEG * scale);
     // FIX #3: Xoá latch của endstop approachSide_ trước khi lùi, tránh latch cũ
     // gây false-positive khi kiểm tra "cong tac van nhan" sau backoff.
-    if (es != nullptr) es->clearLatch(curAxis_, approachSide_);
+    if (es != nullptr) {
+        es->clearLatch(curAxis_, approachSide_);
+        // The switch is still held at the start of backoff. Mask its FALLING ISR so
+        // release bounce cannot stop the escape move before the lever opens.
+        es->setPinEnabled(curAxis_, approachSide_, false);
+    }
     // Non-blocking settle: thay delay(30) bằng BACKOFF_SETTLE_WAIT — motion task không bị block.
     pendingBackoffSteps_ = steps;
     pendingBackoffCw_ = !cwApproach_;
@@ -395,6 +400,12 @@ bool HomingController::stallGuardConfirmed(Motor& m, uint32_t now) {
 
 void HomingController::enterCenteringScan() {
     Motor& m = *motors[curAxis_];
+    // Centering starts while the second switch is still held. Mask that channel
+    // until the arm has moved away so release bounce cannot stop the long move.
+    if (es != nullptr && es->hasPin(curAxis_, approachSide_)) {
+        es->clearLatch(curAxis_, approachSide_);
+        es->setPinEnabled(curAxis_, approachSide_, false);
+    }
     // ---- Stage 5: crosscheck — tâm + tỷ số steps/độ thực tế từ góc tích lũy unwrapped ----
     encCenterRaw_ = (encFirstRaw_ + encSecondRaw_) / 2.0f;
     float spanRaw = fabsf(encSecondRaw_ - encFirstRaw_);
@@ -800,7 +811,8 @@ void HomingController::tickScan(uint32_t now, Motor& m) {
             // công tắc lớn hơn khoảng lùi. Nới rộng (2.5°→5°→10°→20°) trước khi kết luận fail.
             // FIX #3: Latch đã được xoá trong enterScanBackoff() — chỉ kiểm tra isPressed()
             // (trạng thái thật), không để latch cũ gây false-positive "jammed".
-            if (es != nullptr && es->hasPin(curAxis_, approachSide_) && es->isPressed(curAxis_, approachSide_)) {
+            if (es != nullptr && es->hasPin(curAxis_, approachSide_) &&
+                es->isPhysicallyPressed(curAxis_, approachSide_)) {
                 // Log encoder delta để chẩn đoán: motor thực sự di chuyển (long-travel switch)
                 // hay encoder không dịch (motor stall — cần báo cho owner kiểm tra cơ khí).
                 if (jm != nullptr && jm->encOK(curAxis_)) {
@@ -823,6 +835,10 @@ void HomingController::tickScan(uint32_t now, Motor& m) {
                               curAxis_ + 1, backoffExtend_ + 1);
                 finishJoint(false);
                 return;
+            }
+            if (es != nullptr && es->hasPin(curAxis_, approachSide_)) {
+                es->setPinEnabled(curAxis_, approachSide_, true);
+                es->clearLatch(curAxis_, approachSide_);
             }
             enterScanSlow();
             return;
@@ -1001,6 +1017,15 @@ void HomingController::tickScan(uint32_t now, Motor& m) {
                 Serial.printf("[HOME] J%u: CENTERING dung som — HUY, khong luu Home\n", curAxis_ + 1);
                 finishJoint(false);
                 return;
+            }
+            if (es != nullptr && es->hasPin(curAxis_, approachSide_)) {
+                if (es->isPhysicallyPressed(curAxis_, approachSide_)) {
+                    Serial.printf("[HOME] J%u: CENTERING xong nhung cu van nhan — HUY\n", curAxis_ + 1);
+                    finishJoint(false);
+                    return;
+                }
+                es->setPinEnabled(curAxis_, approachSide_, true);
+                es->clearLatch(curAxis_, approachSide_);
             }
             // Motor stopped — chuyển sang settle wait non-blocking trước khi VERIFY
             phase_ = HomePhase::VERIFY_SETTLE_WAIT;

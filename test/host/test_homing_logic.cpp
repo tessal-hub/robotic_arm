@@ -79,9 +79,9 @@ static void testHomingCurrentsConfig() {
 
 static void testHomingStepIntervals() {
     for (uint8_t a = 0; a < NUM_MOTORS; ++a) {
-        CHECK(HOMING_STEP_INTERVAL_J1 >= 1000, "Homing interval J1 >= 1000us");
-        CHECK(HOMING_STEP_INTERVAL_J2 >= 1000, "Homing interval J2 >= 1000us");
-        CHECK(HOMING_STEP_INTERVAL_J3 >= 1000, "Homing interval J3 >= 1000us");
+        CHECK(HOMING_STEP_INTERVAL_J1 >= 900, "Homing interval J1 >= 900us");
+        CHECK(HOMING_STEP_INTERVAL_J2 >= 900, "Homing interval J2 >= 900us");
+        CHECK(HOMING_STEP_INTERVAL_J3 >= 900, "Homing interval J3 >= 900us");
     }
 }
 
@@ -91,8 +91,8 @@ static void testTwoSpeedArchitecture() {
         CHECK(HOMING_SLOW_SCAN_INTERVAL_US >= DEFAULT_AXIS_HOMING_SPEEDS[a],
               "Slow re-approach interval >= fast scan interval for TMC axis");
     }
-    CHECK(HOMING_SLOW_SCAN_INTERVAL_US >= 2000,
-          "Slow interval >= 2000us after the requested 1.5x speed increase");
+    CHECK(HOMING_SLOW_SCAN_INTERVAL_US >= 1800,
+          "Slow interval >= 1800us after the requested small speed increase");
 }
 
 // Retry: đủ để chống glitch, không vô hạn
