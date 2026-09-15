@@ -488,6 +488,20 @@ body.setup-mode .jog-controls { display: none; }
     </div>
 
     <div class="grid-cards-3" id="jointCardsGrid"></div>
+    <section class="card" aria-labelledby="headTeach" style="margin-top:16px">
+      <div class="card-head">
+        <h2 id="headTeach">Teach points</h2>
+        <span class="meta" id="teachStatus">A — B — C —</span>
+      </div>
+      <p class="meta">Move the arm, save each pose, then replay A → B → C. Teach again after changing home or encoder direction.</p>
+      <div class="btn-row">
+        <button class="btn btn-ghost need-idle" onclick="saveTeachPoint(0)">Save A</button>
+        <button class="btn btn-ghost need-idle" onclick="saveTeachPoint(1)">Save B</button>
+        <button class="btn btn-ghost need-idle" onclick="saveTeachPoint(2)">Save C</button>
+        <button class="btn btn-success need-idle" onclick="api('/api/teach/play')">▶ Play A-B-C</button>
+        <button class="btn btn-danger need-idle" onclick="clearTeachPoints()">Clear</button>
+      </div>
+    </section>
   </div>
 
   <!-- =========================================================================
@@ -1508,6 +1522,10 @@ function post(url, body, trigger){
 }
 function clearFault(){ post('/api/jog', 'fault_clear=1'); }
 function jog(axis, dir){ post('/api/jog', `axis=${axis}&deg=${dir * stepSize}`); }
+function saveTeachPoint(slot){ api(`/api/teach/save?slot=${slot}`); }
+function clearTeachPoints(){
+  if(confirm('Clear saved teach points A-C from NVS?')) api('/api/teach/clear');
+}
 function confirmSetHome(axis){
   const axes = axis === 255 ? [4, 5] : [axis];
   const labels = axes.map(a => `J${a + 1}`).join(' + ');
@@ -1671,6 +1689,11 @@ function updateUI(d){
   if(wifiInfo) wifiInfo.textContent = `${(d.wifi.mode||'').toUpperCase()} · RSSI ${d.wifi.rssi || 0} dBm`;
   const commandLatency = document.getElementById('dashCommandLatency');
   if(commandLatency) commandLatency.textContent = `${((d.commandLatencyUs || 0) / 1000).toFixed(1)} ms`;
+  const teachStatus = document.getElementById('teachStatus');
+  if(teachStatus && d.teachPoints){
+    const errors = ['', 'Save/clear failed — check remaining points and retry', 'Home all six joints and check encoders', 'Home changed — teach points again', 'No valid point or playback rejected'];
+    teachStatus.textContent = d.teachPoints.map((v, i) => `${String.fromCharCode(65 + i)} ${v ? '✓' : '—'}`).join('  ') + (d.teachError ? ' · ' + errors[d.teachError] : '');
+  }
 
   const wfModeText = document.getElementById('wfModeText');
   if(wfModeText) wfModeText.textContent = (d.wifi.mode||'').toUpperCase();
@@ -1986,6 +2009,38 @@ void handleShowOff() {
     srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
 }
 
+void handleTeachSave() {
+    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    int slot = -1;
+    if (!webval::parseInt(srv->arg("slot").c_str(), slot) || slot < 0 || slot >= 3) {
+        srv->send(400, "text/plain", "slot 0..2"); return;
+    }
+    if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
+    ArmCommand c;
+    c.type = ArmCommand::SAVE_TEACH_POINT;
+    c.axis = static_cast<uint8_t>(slot);
+    const bool ok = armPtr->submit(c, 20);
+    srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
+}
+
+void handleTeachPlay() {
+    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
+    ArmCommand c;
+    c.type = ArmCommand::PLAY_TEACH_POINTS;
+    const bool ok = armPtr->submit(c, 20);
+    srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
+}
+
+void handleTeachClear() {
+    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
+    ArmCommand c;
+    c.type = ArmCommand::CLEAR_TEACH_POINTS;
+    const bool ok = armPtr->submit(c, 20);
+    srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
+}
+
 void handleClearCalib() {
     if (jointsPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
     // Flash Write Isolation Guard: Cấm xóa NVS khi robot đang chuyển động
@@ -2104,6 +2159,9 @@ void webBegin(WebServer& server, ArmController* arm, WifiManager* wifi,
     server.on("/api/enable/j1-j4", HTTP_POST, handleEnableJ1J4);
     server.on("/api/showoff", HTTP_POST, handleShowOff);
     server.on("/api/showoff", HTTP_GET, handleShowOff);
+    server.on("/api/teach/save", HTTP_POST, handleTeachSave);
+    server.on("/api/teach/play", HTTP_POST, handleTeachPlay);
+    server.on("/api/teach/clear", HTTP_POST, handleTeachClear);
     server.on("/api/clearcalib", HTTP_POST, handleClearCalib);
     server.on("/api/wifi", HTTP_POST, handleWifiSave);
     server.on("/api/workplane/calib", HTTP_POST, handleWorkPlaneCalib);

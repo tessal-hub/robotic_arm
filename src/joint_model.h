@@ -75,6 +75,7 @@ public:
 
     // Dấu encoder đo được (±1) đã áp dụng (homing dùng quy đổi raw encoder <-> góc khớp).
     [[nodiscard]] float encSignOf(uint8_t axis) const;
+    [[nodiscard]] float homeRawDeg(uint8_t axis) const { return axis < NUM_MOTORS ? homeRawDeg_[axis] : NAN; }
 
     // Đo và áp dụng hiệu chuẩn động (gọi từ homing sau cross-check):
     // encSign = dấu encoder (±1) thay AXIS_ENC_SIGN, stepsPerDeg = bước/độ đo được.
@@ -90,6 +91,7 @@ private:
     Sensor* sensor{nullptr};
     NvsStore* nvs{nullptr};
     float encZeroRef[NUM_MOTORS]{};
+    float homeRawDeg_[NUM_MOTORS]{}; // Exact saved home reference, also restored from NVS.
     bool homed[NUM_MOTORS]{};
     bool restored[NUM_MOTORS]{};
     bool driftFault[NUM_MOTORS]{};

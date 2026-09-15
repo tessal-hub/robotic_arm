@@ -201,9 +201,9 @@ $$^{i-1}T_i = R_x(\alpha_{i-1}) \cdot T_x(a_{i-1}) \cdot R_z(\theta_i) \cdot T_z
 ```
   Base (J1) ──[D1=139]──► Shoulder (J2) ──[A2=138]──► Elbow (J3)
                                                         │
-                                                 [A3=88, D4=126]
+                                                 [A3=88, D4=125]
                                                         ▼
-  Pen TCP ◄──[D_tool=20]── Tool Roll (J6) ◄── Wrist Center (J4/J5)
+  Pen TCP ◄──[D_tool=30]── Tool Roll (J6) ◄──[D6=45]── J5 (Revolute)
 ```
 
 ### Craig Modified DH Parameter Table
@@ -213,18 +213,18 @@ $$^{i-1}T_i = R_x(\alpha_{i-1}) \cdot T_x(a_{i-1}) \cdot R_z(\theta_i) \cdot T_z
 | **1** | J1 (Base Yaw) | $0\,\text{mm}$ | $0^\circ$ | **$139\,\text{mm}$** | $0^\circ$ | $[-90^\circ, +90^\circ]$ |
 | **2** | J2 (Shoulder) | $0\,\text{mm}$ | $-90^\circ$ | $0\,\text{mm}$ | **$-90^\circ$** | $[-90^\circ, +90^\circ]$ |
 | **3** | J3 (Elbow) | **$138\,\text{mm}$** | $0^\circ$ | $0\,\text{mm}$ | $0^\circ$ | $[0^\circ, +90^\circ]$ |
-| **4** | J4 (Wrist Pan) | **$88\,\text{mm}$** | $-90^\circ$ | **$126\,\text{mm}$** | $0^\circ$ | $[-75^\circ, +75^\circ]$ |
-| **5** | J5 (Wrist Tilt) | $0\,\text{mm}$ | $+90^\circ$ | $0\,\text{mm}$ | $0^\circ$ | $[-120^\circ, +120^\circ]$ |
-| **6** | J6 (Tool Roll) | $0\,\text{mm}$ | $-90^\circ$ | **$31\,\text{mm}$** | $0^\circ$ | $[-360^\circ, +360^\circ]$ |
-| **Tool**| Drawing Pen | $0\,\text{mm}$ | $0^\circ$ | **$20\,\text{mm}$** | $0^\circ$ | Fixed Tool Axis |
+| **4** | J4 (Wrist Pan) | **$88\,\text{mm}$** | $-90^\circ$ | **$125\,\text{mm}$** | $0^\circ$ | $[-75^\circ, +75^\circ]$ |
+| **5** | J5 (Revolute) | $0\,\text{mm}$ | $+90^\circ$ | $0\,\text{mm}$ | $0^\circ$ | $[-90^\circ, +90^\circ]$ |
+| **6** | J6 (Tool Roll) | $0\,\text{mm}$ | $-90^\circ$ | **$45\,\text{mm}$** | $0^\circ$ | $[-360^\circ, +360^\circ]$ |
+| **Tool**| Drawing Pen | $0\,\text{mm}$ | $0^\circ$ | **$30\,\text{mm}$** | $0^\circ$ | Fixed Tool Axis |
 
 - **Home Reference Pose $(0^\circ, 0^\circ, 0^\circ, 0^\circ, 0^\circ, 0^\circ)$**:
-  - Wrist Center (J5): $(X = 126.0\,\text{mm}, Y = 0.0\,\text{mm}, Z = 365.0\,\text{mm})$
-  - J6 Origin: $(X = 157.0\,\text{mm}, Y = 0.0\,\text{mm}, Z = 365.0\,\text{mm})$
-  - Tool Pen Tip: $(X = 177.0\,\text{mm}, Y = 0.0\,\text{mm}, Z = 365.0\,\text{mm})$
-- **Effective Tool Length (J5 $\to$ TCP)**: $D_{\text{tool\_eff}} = 31\,\text{mm} + 20\,\text{mm} = \mathbf{51\,\text{mm}}$
-- **Max Planar Reach (to J5)**: $R_{\text{max}} = A_2 + \sqrt{A_3^2 + D_4^2} = 138.0 + 153.69 = 291.69\,\text{mm}$
-- **Inner Deadzone**: $R_{\text{min}} = |A_2 - \sqrt{A_3^2 + D_4^2}| = |138.0 - 153.69| = 15.69\,\text{mm}$
+  - Wrist Center (J5): $(X = 125.0\,\text{mm}, Y = 0.0\,\text{mm}, Z = 365.0\,\text{mm})$
+  - J6 Origin: $(X = 170.0\,\text{mm}, Y = 0.0\,\text{mm}, Z = 365.0\,\text{mm})$
+  - Tool Pen Tip (TCP): $(X = 200.0\,\text{mm}, Y = 0.0\,\text{mm}, Z = 365.0\,\text{mm})$
+- **Effective Tool Length (J5 $\to$ TCP)**: $D_{\text{tool\_eff}} = 45\,\text{mm} + 30\,\text{mm} = \mathbf{75\,\text{mm}}$
+- **Max Planar Reach (to J5)**: $R_{\text{max}} = A_2 + \sqrt{A_3^2 + D_4^2} = 138.0 + 152.87 = 290.87\,\text{mm}$
+- **Inner Deadzone**: $R_{\text{min}} = |A_2 - \sqrt{A_3^2 + D_4^2}| = |138.0 - 152.87| = 14.87\,\text{mm}$
 
 ---
 

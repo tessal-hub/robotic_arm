@@ -17,7 +17,6 @@ Motor::Motor(HardwareSerial* serial, float rSense, uint8_t uartAddress,
       label(motorLabel),
       running(false),
       dirCW(true),
-      lastShaftDir(-1),
       targetSpeedUs(DEFAULT_STEP_INTERVAL_US),
       currentSpeedUs(MAX_STEP_INTERVAL_US),
       startSpeedUs(MAX_STEP_INTERVAL_US),
@@ -68,10 +67,9 @@ inline uint32_t Motor::calculateSCurveInterval(uint32_t currentStep, uint32_t to
     const float vTarget = 1000000.0f / static_cast<float>(targetInterval);
     const float vCurrent = vStart + s * (vTarget - vStart);
 
-    if (vCurrent <= 1.0f) return MAX_STEP_INTERVAL_US;
+    if (vCurrent <= 0.0f) return startInterval;
     uint32_t interval = static_cast<uint32_t>(1000000.0f / vCurrent);
     if (interval < MIN_STEP_INTERVAL_US) interval = MIN_STEP_INTERVAL_US;
-    if (interval > MAX_STEP_INTERVAL_US) interval = MAX_STEP_INTERVAL_US;
     return interval;
 }
 
@@ -103,10 +101,9 @@ void IRAM_ATTR Motor::onStepTimer(void* arg) {
         self->absSteps.fetch_add(self->dirCW.load(std::memory_order_relaxed) ? 1 : -1,
                                  std::memory_order_relaxed);
 
-        const bool coordinated = self->coordinatedMode.load(std::memory_order_relaxed);
-        if (!coordinated && counter < self->accelSteps) {
+        if (counter < self->accelSteps) {
             nextInterval = calculateSCurveInterval(counter, self->accelSteps, self->startSpeedUs, self->targetSpeedUs.load(std::memory_order_relaxed));
-        } else if (!coordinated && remaining <= self->decelSteps) {
+        } else if (self->decelSteps > 0 && remaining <= self->decelSteps) {
             nextInterval = calculateSCurveInterval(remaining, self->decelSteps, self->startSpeedUs, self->targetSpeedUs.load(std::memory_order_relaxed));
         }
 
@@ -299,7 +296,6 @@ void Motor::begin(uint16_t initialCurrentMa, uint16_t initialMicrosteps,
     driver->SGTHRS(DEFAULT_STALL_THRESHOLD);
 
     driver->shaft(false);
-    lastShaftDir = -1;
 
     giveUart();
 
@@ -320,20 +316,20 @@ bool Motor::setDirection(bool cw) {
     }
 
     if (isTMC && dirPin == 255) { // TMC dùng UART đảo chiều
-        const int8_t requestedDir = cw ? 1 : 0;
-        if (lastShaftDir != requestedDir) {
-            if (!takeUart(100)) {
-                Serial.printf("[MOTOR] Canh bao: %s take UART timeout, khong doi duoc chieu!\n", label);
-                return false;
-            }
-            flushUartRx();
+        auto lock = makeTimedLock(uartMutex ? *uartMutex : nullptr, 20);
+        if (!lock) return false;
+        flushUartRx();
+        const bool actual = driver->shaft();
+        uartOk = !driver->CRCerror;
+        if (!uartOk) return false; // A timeout returns false too: inspect CRCerror.
+        if (actual != cw) {
             driver->shaft(cw);
-            lastShaftDir = requestedDir;
-            dirCW.store(cw, std::memory_order_relaxed);
-            giveUart();
-        } else {
-            dirCW.store(cw, std::memory_order_relaxed);
+            flushUartRx();
+            const bool verified = driver->shaft();
+            uartOk = !driver->CRCerror && verified == cw;
+            if (!uartOk) return false;
         }
+        dirCW.store(cw, std::memory_order_relaxed);
     }
     return true;
 }
@@ -425,7 +421,8 @@ void Motor::runContinuous(bool cw) {
     }
 }
 
-bool Motor::prepareCoordinatedRun(bool cw, uint32_t steps, uint32_t intervalUs) {
+bool Motor::prepareCoordinatedRun(bool cw, uint32_t steps, uint32_t intervalUs,
+                                  uint32_t rampStartIntervalUs) {
     if (steps == 0 || stepTimer == nullptr) return false;
 
     esp_timer_stop(stepTimer);
@@ -444,11 +441,12 @@ bool Motor::prepareCoordinatedRun(bool cw, uint32_t steps, uint32_t intervalUs) 
     targetSteps.store(steps, std::memory_order_relaxed);
     stepsRemaining.store(steps, std::memory_order_relaxed);
     stepCounter.store(0, std::memory_order_relaxed);
-    accelSteps = 0;
-    decelSteps = 0;
-    startSpeedUs = intervalUs;
+    // Same ramp fraction and interval ratio on every axis preserve coordination.
+    accelSteps = rampStartIntervalUs > intervalUs ? steps / 4 : 0;
+    decelSteps = accelSteps;
+    startSpeedUs = rampStartIntervalUs > intervalUs ? rampStartIntervalUs : intervalUs;
     targetSpeedUs.store(intervalUs, std::memory_order_relaxed);
-    currentSpeedUs.store(intervalUs, std::memory_order_relaxed);
+    currentSpeedUs.store(startSpeedUs, std::memory_order_relaxed);
     preparedRun.store(true, std::memory_order_release);
     return true;
 }

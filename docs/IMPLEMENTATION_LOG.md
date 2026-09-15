@@ -4388,3 +4388,108 @@ Log cho thấy J3 homing thất bại 2/2 lần liên tiếp với 2 root cause 
 
 ### Việc còn lại (nếu có)
 - Không.
+
+---
+
+## 2026-09-14 — Teach points A/B/C bằng encoder
+
+### Việc đã làm
+- What: thêm ba slot A/B/C lưu đủ sáu góc khớp từ encoder vào NVS, REST API Save/Play/Clear và panel Teach points trong Web UI.
+- Why: cho operator đưa tay máy tới các pose, ghi lại rồi phát tuần tự A→B→C sau cả khi khởi động lại.
+- How: tái dùng Release/Enable fail-closed và motor joint-space hiện có; Save chỉ nhận khi robot đứng yên, đủ sáu khớp đã home và encoder khỏe; Play kiểm tra lại home, encoder và soft limit trước từng pose, STOP_ALL hủy ngay.
+
+### Build gate
+- `pio run` → SUCCESS; RAM 49,980 bytes (15.3%), Flash 953,257 bytes (28.5%).
+
+### Việc còn lại (nếu có)
+- Commissioning phần cứng: thử ở tốc độ thấp, khoảng trống an toàn và tay sẵn trên E-STOP; firmware chưa kiểm tra collision giữa hai pose joint-space.
+
+---
+
+## 2026-09-15 — Safety hardening P1/P2: review findings fix
+
+### Việc đã làm
+
+#### P1 — Ưu tiên cao
+
+1. **TMC shaft() read-back verify** (`motor.cpp:310–335`)
+   - What: `setDirection()` giờ đọc register `shaft()` trước, chỉ ghi khi giá trị khác mong đợi; sau ghi flush RX rồi đọc lại xác nhận (read-back verify). CRCerror hoặc verified != mong đợi → trả `false`. `Motor::run()` từ chối phát xung khi `setDirection()` thất bại.
+   - Why: datagram UART mất sẽ khiến motor chạy sai chiều — trước đây chỉ dựa vào cache mà không xác nhận driver đã nhận.
+   - How: read-before-write → conditional write → flush → read-back verify → update cache `dirCW` chỉ khi verified.
+
+2. **CLEAR_FAULT busy() gate** (`arm.cpp:321–338`)
+   - What: `CLEAR_FAULT` thêm `if (busy()) break;` trước khi gọi `tryClearFault()` / resync encoder.
+   - Why: resync encoder trong khi motor đang chạy sẽ thay đổi bộ đếm bước giữa chừng.
+   - How: `busy()` kiểm tra motor running + queue + homing/planner/teach active.
+
+3. **Teach points home epoch binding** (`arm.cpp:442–463, 668–685`, `nvs_store.h:44–55`, `joint_model.h:78,94`)
+   - What: mỗi teach point lưu kèm `homeRawDeg` + `encSign` cho từng trục. `refreshTeachPoints()` so sánh với giá trị hiện tại; khác → `TeachError::FRAME`, vô hiệu hóa point.
+   - Why: Set Home tại vị trí khác → góc cũ trong hệ tọa độ mới sẽ đưa robot tới pose khác dù soft limit vẫn hợp lệ.
+   - How: `NvsStore::TeachPoint::Axis` thêm `homeRawDeg` + `encSign`; validate on save/play/load.
+
+4. **Teach playback S-curve accel/decel** (`arm.cpp:714–755`, `motor.cpp:424–452`)
+   - What: `moveToTeachPoint()` tính `rampStart = max(dominantInterval×4, MAX_STEP_INTERVAL_US)` rồi truyền `rampStart/scale` vào `prepareCoordinatedRun()`. Motor engine phân bổ `accelSteps = steps/4`, `decelSteps = accelSteps`.
+   - Why: trước đây teach playback dùng accel/decel = 0, khởi động ngay ở tốc độ cao gây giật/mất bước.
+   - How: tái dùng S-curve trapezoidal profile sẵn có trong `Motor::prepareCoordinatedRun()`.
+
+5. **Sensor fail-closed init** (`sensor.cpp:13–15, 314–318`)
+   - What: constructor khởi tạo `sensor_error[i] = true` cho tất cả kênh. Chỉ chuyển `false` sau khi `begin()` đọc thành công 10 vòng calibration và task scan publish mẫu hợp lệ.
+   - Why: trước đây `sensor_error = false` mặc định; nếu khởi tạo thất bại, `isSensorOK()` vẫn cho phép restore home từ dữ liệu góc mặc định (0°).
+   - How: fail-closed — sensor phải chứng minh mình khỏe trước khi được tin.
+
+#### P2 — Tính nhất quán dữ liệu
+
+6. **NVS clear teach error propagation** (`nvs_store.cpp:150–182`)
+   - What: `clearTeachPoints()` kiểm tra `putBool()` return value + read-back verify; trả `false` nếu bất kỳ slot nào ghi thất bại. `arm.cpp` đặt `TeachError::NVS` và giữ nguyên trạng thái RAM khi NVS chưa xác nhận xóa.
+   - Why: trước đây clear xóa RAM + báo thành công dù NVS ghi thất bại; reboot sẽ thấy point cũ quay lại.
+
+7. **Sửa tài liệu drift watchdog** (`SYSTEM_OVERVIEW.html:228, 345, 768`)
+   - What: overview mô tả drift watchdog đang hoạt động mỗi 500ms (line 228, 768) trong khi code và nhật ký xác nhận đã chủ động tắt. Đã sửa cả 3 chỗ để phản ánh đúng: hàm tồn tại nhưng luôn trả false.
+
+#### Regression test suite
+
+8. **test/host/test_firmware_regression.cpp** (229 dòng, 7 test cases)
+   - `direction_failure_stops_all_start_paths()`: TMC shaft read-back failure, write failure, direction cache reset.
+   - `clear_fault_and_resync_require_stopped_motors()`: CLEAR_FAULT, resyncFromEncoder, setHomeHere reject running motors.
+   - `sensor_health_requires_a_published_sample_and_task()`: sensor_error starts true, requires published sample and active task.
+   - `teach_frame_is_bound_to_home_across_reboot()`: teach points invalidate across home reference changes and rejection of legacy points.
+   - `teach_nvs_failures_remain_visible_and_reboot_consistent()`: NVS write failures in save/clear teach points.
+   - `teach_ramps_and_drawing_keeps_constant_rate()`: teach motion S-curve ramp accel/decel.
+   - `teach_rejects_bad_axes_before_start_and_stop_cancels_sequence()`: axis preflight and STOP_ALL cancellation.
+   - Runner: `tools/run_host_tests.sh` compiles với production sources (arm/motor/sensor/joint_model/nvs_store/endstop/safety_manager/homing/planner/kinematics/work_plane/trajectory_validator).
+
+#### Tài liệu
+
+9. Cập nhật `SYSTEM_OVERVIEW.html`:
+   - Tab "RTOS & Tasks": arm_motion drift watchdog → disabled
+   - Tab "Modules": motor direction tag → read-back verify; CLEAR_FAULT → busy() gate; sensor health → fail-closed init; teach points → home epoch + S-curve + NVS error
+   - Tab "REST API": teach save/play/clear → epoch, ramp, NVS error
+   - Tab "An toàn": invariant #7 drift → disabled
+   - Footer: thêm entry 2026-09-15
+
+### Build gate
+- `pio run` → **SUCCESS** — RAM 15.3% (50,156 B), Flash 28.6% (955,245 B)
+- `tools/run_host_tests.sh` → **ALL 9 GROUPS PASSED** (kinematics, drawing workspace, joint logic, work plane, trajectory validator, homing FSM, homing logic, safety manager, web validation, firmware failure regressions)
+  - Warning benign duy nhất: `%lld` format trên host 64-bit (int64_t = `long` trên host, `long long` trên ESP32) — không ảnh hưởng firmware.
+
+### Việc còn lại (nếu có)
+- Commissioning phần cứng theo [HW_REGRESSION_CHECKLIST.md](docs/HW_REGRESSION_CHECKLIST.md): Teach A/B/C (gồm re-home rồi Play kiểm tra FRAME reject), STOP, homing và HELLO thực tế.
+- Host tests chưa bao phủ web handler end-to-end hoặc planner cartesian integration.
+
+---
+
+## 2026-09-15 — Làm rõ cấu trúc đoạn cẳng tay J4–J5 (16mm + 109mm = 125mm)
+
+### Việc đã làm
+- What: Cập nhật sơ đồ ASCII và phần mô tả trong `docs/ARM_GEOMETRY.md` mục 1 & 2 để làm rõ đoạn $16\text{ mm}$ (từ điểm gập vuông góc đến tâm roll J4) và đoạn $109\text{ mm}$ (từ tâm J4 đến tâm J5) nối tiếp nhau trên cùng trục xoay $Z_4$, tổng khoảng cách tịnh tiến là $d_4 = 125\text{ mm}$.
+- What: Đồng bộ hóa toàn bộ tài liệu dự án theo đúng kích thước chuẩn:
+  - `README.md`: sơ đồ chuỗi động học, bảng Craig MDH, Home pose (Wrist 125, J6 170, TCP 200 mm), $D_{\text{tool\_eff}} = 75\text{ mm}$, $R_{\text{max}} = 290.87\text{ mm}$, Deadzone $14.87\text{ mm}$.
+  - `docs/SYSTEM_OVERVIEW.html`: hình vẽ SVG side view, vị trí J5/J6/TCP, nhãn $125\text{ mm} (=16+109)$, $L = 152.87\text{ mm}$, $\delta = 54.85^\circ$, bảng MDH và tóm tắt workspace.
+  - `AGENTS.md`: cập nhật quy tắc bất biến #2 phản ánh mô hình chuẩn $d_4 = 125\text{ mm}, \delta = 54.85^\circ$.
+- Why: Đảm bảo 100% tài liệu, sơ đồ, code, twin và test nhất quán tuyệt đối theo kích thước hình học thực tế.
+- How: Toàn bộ code (`src/config.h`, `src/kinematics.h/.cpp`, `src/web_server.cpp`, `tools/digital_twin.py`) đã dùng đúng $D_1=139, A_2=138, A_3=88, D_4=125, D_6=45, D_{\text{tool}}=30\text{ mm}$; cập nhật các tài liệu mô tả còn giữ số liệu cũ.
+
+### Build gate
+- `pio run` → **SUCCESS** — RAM 15.3% (50,156 B), Flash 28.6% (955,245 B).
+- `tools/run_host_tests.sh` → **ALL 9 GROUPS PASSED** (kinematics, drawing workspace, joint logic, work plane, trajectory validator, homing FSM, homing logic, safety manager, web validation, firmware failure regressions).
+

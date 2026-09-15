@@ -11,7 +11,7 @@ Sensor::Sensor() {
     turn_counts.fill(0);
     initialized.fill(false);
     for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
-        sensor_error[i].store(false, std::memory_order_relaxed);
+        sensor_error[i].store(true, std::memory_order_relaxed);
     }
     read_fail_counts.fill(0);
     for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
@@ -192,12 +192,12 @@ void Sensor::scanOnce() {
         }
 
         read_fail_counts[i] = 0;
-        sensor_error[i].store(false, std::memory_order_relaxed);
 
         auto dataLock = makeTimedLock(dataMutex, SENSOR_I2C_MUTEX_TIMEOUT_MS);
         if (dataLock) {
             filter(i, raw);
             publishSample(i);
+            sensor_error[i].store(false, std::memory_order_release);
         }
     }
 }
@@ -254,7 +254,7 @@ void Sensor::taskLoop() {
     vTaskDelete(nullptr);
 }
 
-void Sensor::begin(uint8_t coreID, uint8_t priority, uint32_t period_ms) {
+void Sensor::begin(uint8_t coreID, uint8_t priority, uint32_t /*period_ms*/) {
     Serial.printf("[SENSOR] begin: SDA=%d SCL=%d freq=%lu Hz timeout=50ms\n",
                   SDA_PIN, SCL_PIN, (unsigned long)I2C_FREQUENCY);
 
@@ -314,6 +314,7 @@ void Sensor::begin(uint8_t coreID, uint8_t priority, uint32_t period_ms) {
     if (taskOk != pdPASS) {
         taskRunning = false;
         taskHandle = nullptr;
+        for (auto& error : sensor_error) error.store(true, std::memory_order_release);
         Serial.println("[SENSOR] LOI: khong tao duoc SensorScanTask!");
         return;
     }
@@ -340,5 +341,5 @@ float Sensor::getAccumulatedAngle(uint8_t ch) {
 
 bool Sensor::isSensorOK(uint8_t ch) {
     if (ch >= NUM_SENSORS) return false;
-    return !sensor_error[ch].load(std::memory_order_relaxed);
+    return !sensor_error[ch].load(std::memory_order_acquire);
 }

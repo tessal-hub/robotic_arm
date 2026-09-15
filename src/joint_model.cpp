@@ -83,18 +83,20 @@ float JointModel::rawEncoder(uint8_t axis) {
 
 void JointModel::setHomeHere(uint8_t axis) {
     if (axis >= NUM_MOTORS) return;
-    if (motors[axis] == nullptr) return;
+    if (motors[axis] == nullptr || motors[axis]->isRunning()) return;
 
     motors[axis]->setAbsoluteSteps(0);
     if (sensor != nullptr && sensor->isSensorOK(axis)) {
         const float encAngle = sensor->getAccumulatedAngle(axis);
         const float rawDeg = sensor->getAngle(axis);
+        homeRawDeg_[axis] = rawDeg;
         encZeroRef[axis] = encAngle;
         bool nvsSaved = false;
         if (nvs != nullptr) nvsSaved = nvs->saveJointHome(axis, rawDeg);
         Serial.printf("[JM] SetHome J%u (enc=ok, raw=%.1f deg, zeroRef=%.1f deg, NVS=%s)\n",
                       axis + 1, rawDeg, encAngle, nvsSaved ? "OK" : "FAIL");
     } else {
+        homeRawDeg_[axis] = NAN;
         Serial.printf("[JM] SetHome J%u (enc=DEAD, step-only)\n", axis + 1);
     }
     driftFault[axis] = false;
@@ -116,6 +118,7 @@ void JointModel::clearHome(uint8_t axis) {
 bool JointModel::resyncFromEncoder(uint8_t axis) {
     if (axis >= NUM_MOTORS) return false;
     if (motors[axis] == nullptr || sensor == nullptr || !sensor->isSensorOK(axis) || !homed[axis]) return false;
+    if (motors[axis]->isRunning()) return false;
     const float relEncDeg = (sensor->getAccumulatedAngle(axis) - encZeroRef[axis]) * s_encSign[axis];
     motors[axis]->setAbsoluteSteps(AXIS_STEP_SIGN[axis] * degreesToSteps(axis, relEncDeg));
     return true;
@@ -189,6 +192,7 @@ uint8_t JointModel::restoreFromNVS() {
         }
 
         const float now = sensor->getAngle(a);
+        homeRawDeg_[a] = h.rawDeg;
         const float delta = s_encSign[a] * wrap180(now - h.rawDeg);
 
         motors[a]->setAbsoluteSteps(AXIS_STEP_SIGN[a] * degreesToSteps(a, delta));
@@ -240,7 +244,7 @@ void JointModel::clearAllDriftFaults() noexcept {
         lastRunningMs[i] = millis();
         if (homed[i] && encOK(i)) {
             (void)resyncFromEncoder(i);
-        } else if (!homed[i] && motors[i] != nullptr) {
+        } else if (!homed[i] && motors[i] != nullptr && !motors[i]->isRunning()) {
             motors[i]->setAbsoluteSteps(0);
         }
     }

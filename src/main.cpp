@@ -111,7 +111,7 @@ void setup() {
     g_planner.begin(motorPtrs, &g_joints);
     g_planner.setWorkPlane(&g_workPlane);
     armSetWifiProvider(&g_wifi);
-    g_arm.begin(motorPtrs, &g_sensor, &g_endstops, &g_joints, &g_homing, &g_planner);
+    g_arm.begin(motorPtrs, &g_sensor, &g_endstops, &g_joints, &g_homing, &g_planner, &g_nvs);
 
     // 7) WiFi: STA(NVS creds) -> AP fallback
     g_wifi.begin(&g_nvs);

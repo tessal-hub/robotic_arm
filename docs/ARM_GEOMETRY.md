@@ -7,23 +7,12 @@ chính xác với bản vẽ tay gốc (xem `docs/sketches/` nếu có lưu ản
 
 ---
 
-# Arm Geometry Reference — 6-DOF NEMA Robotic Arm
-
-**Đây là tài liệu gốc duy nhất (single source of truth) về cấu trúc hình học cơ khí của cánh tay.**
-Mọi lần tính DH table, viết FK/IK, hay giải thích lại cấu trúc — luôn tham chiếu file này trước,
-không suy diễn lại từ đầu. Nội dung đã được xác nhận bằng đo đạc vật lý thực tế và khớp
-chính xác với bản vẽ tay gốc (xem `docs/sketches/` nếu có lưu ảnh gốc).
-
----
-
 ## 1. Sơ đồ cơ khí gốc (từ bản vẽ tay)
 
 ```
-                              <--16-->
-                                 |
-                    ,----[ J4 ]---------[ J5 ] ─────── [ J6 ] ─────── (Pen TCP)
-                    |              125mm       \    45mm     \    30mm     \
-                    | 88mm                                  '-(D_TOOL)---'
+                    ,----(16mm)---[ J4 ]----(109mm)----[ J5 ] ─────── [ J6 ] ─────── (Pen TCP)
+                    |               '---- 125mm tổng ---'      \    45mm     \    30mm     \
+                    | 88mm                                                    '-(D_TOOL)---'
                     |
                   [ J3 ]---- (elbow, quay ngang)
                     |
@@ -40,8 +29,10 @@ chính xác với bản vẽ tay gốc (xem `docs/sketches/` nếu có lưu ản
 
 - **J1 → J2**: 139mm — chiều cao đế lên vai. J1 là khớp **base yaw**, trục xoay **thẳng đứng**.
 - **J2 → J3**: 138mm — cánh tay trên (upper arm). J2 là khớp **shoulder pitch**, trục xoay **nằm ngang**.
-- **J3 → điểm gập**: 88mm — J3 là khớp **elbow pitch**, trục xoay **song song J2**.
-- **J4 → J5**: **125mm**.
+- **J3 → điểm gập**: 88mm — J3 là khớp **elbow pitch**, trục xoay **song song J2** ($a_3 = 88\text{mm}$).
+- **Điểm gập → J4**: 16mm — khoảng cách từ điểm gập vuông góc đến tâm khớp roll J4.
+- **J4 → J5**: 109mm — khoảng cách từ tâm roll J4 đến tâm pitch J5.
+- **Điểm gập → J5 tổng cộng ($d_4$)**: $16\text{mm} + 109\text{mm} = \mathbf{125\text{mm}}$ nối tiếp trên cùng trục xoay cẳng tay ($Z_4$).
 - **J5 → J6**: **45mm**.
 - **J6 → Pen Tip (TCP)**: **30mm** gắn đồng trục với J6.
 - **Tổng chiều dài khâu công cụ hiệu dụng (J5 → Pen TCP)**: $45\text{mm} + 30\text{mm} = \mathbf{75\text{mm}}$.
@@ -52,7 +43,7 @@ chính xác với bản vẽ tay gốc (xem `docs/sketches/` nếu có lưu ản
 |---|---|
 | J1, J2, J3 | Các trục xoay **giao nhau** theo chuỗi liên tiếp (cấu trúc RRR kinh điển) |
 | J3 → J4 | Trục **vuông góc** với J3, có khoảng lệch vuông góc chung (common perpendicular) = $a_3 = 88\text{mm}$. |
-| J4, J5 | Chuỗi khớp quay nối tiếp, khoảng cách J4 → J5 là $d_4 = 125\text{mm}$. |
+| J4, J5 | Chuỗi khớp quay nối tiếp dọc trục cẳng tay: điểm gập $\to$ J4 (16mm) $\to$ J5 (109mm), tổng tịnh tiến $d_4 = 125\text{mm}$. |
 | J5 → J6 | Hai khớp quay nối tiếp độc lập; J5 → J6 là $d_6 = 45\text{mm}$. |
 | J6 → TCP | Bút gắn đồng trục với $Z_6$, dài $D_{\text{tool}} = 30\text{mm}$. |
 

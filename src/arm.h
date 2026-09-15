@@ -9,6 +9,7 @@
 #include <freertos/task.h>
 #include "config.h"
 #include "safety_manager.h"
+#include "nvs_store.h"
 
 class Motor;
 class Sensor;
@@ -16,6 +17,7 @@ class Endstops;
 class JointModel;
 class HomingController;
 class Planner;
+class NvsStore;
 
 enum class ArmMode : uint8_t { IDLE = 0, RELEASE, HOMING, JOG, CART, DRAW, SHOW_OFF, FAULT };
 
@@ -37,7 +39,10 @@ struct ArmCommand {
         DRAW_LINE,   // p[0..4]=x1,y1,x2,y2,z ; p[5]=feed
         DRAW_CIRCLE, // p[0..2]=cx,cy,z ; p[3]=r ; p[5]=feed
         DRAW_SQUARE, // p[0..2]=cx,cy,z ; p[3]=side ; p[5]=feed
-        SHOW_OFF     // trình diễn đồng bộ 6 khớp múa nhẹ nhàng trong khoảng an toàn
+        SHOW_OFF,    // trình diễn đồng bộ 6 khớp múa nhẹ nhàng trong khoảng an toàn
+        SAVE_TEACH_POINT,
+        PLAY_TEACH_POINTS,
+        CLEAR_TEACH_POINTS
     };
     Type type{Type::NONE};
     uint8_t axis{0};
@@ -59,7 +64,7 @@ public:
     ArmController& operator=(const ArmController&) = delete;
 
     void begin(Motor** motors, Sensor* sensor, Endstops* endstops,
-               JointModel* joints, HomingController* homing, Planner* planner);
+               JointModel* joints, HomingController* homing, Planner* planner, NvsStore* nvs);
 
     // Đưa lệnh vào hàng đợi. Trả false nếu đầy/đang bận với lệnh không thể trộn.
     [[nodiscard]] bool submit(const ArmCommand& cmd, uint32_t timeoutMs = 10);
@@ -85,6 +90,9 @@ private:
     void updateShowOff();
     void stopShowOff();
     void executeShowOffStep(uint8_t step);
+    void updateTeachPlayback();
+    bool moveToTeachPoint(uint8_t slot);
+    void refreshTeachPoints();
 
     Motor* motors[NUM_MOTORS]{};
     Sensor* sensor{nullptr};
@@ -92,6 +100,7 @@ private:
     JointModel* jm{nullptr};
     HomingController* hc{nullptr};
     Planner* pl{nullptr};
+    NvsStore* nvs{nullptr};
 
     QueueHandle_t queue{nullptr};
     TaskHandle_t task{nullptr};
@@ -110,6 +119,13 @@ private:
     bool showOffActive_{false};
     uint8_t showOffStep_{0};
     float showOffBaseAngles_[NUM_MOTORS]{};
+    static constexpr uint8_t TEACH_POINT_COUNT = 3;
+    NvsStore::TeachPoint teachPoints_[TEACH_POINT_COUNT]{};
+    std::atomic<uint8_t> teachValidMask_{0};
+    enum class TeachError : uint8_t { NONE, NVS, HOME, FRAME, INVALID };
+    std::atomic<TeachError> teachError_{TeachError::NONE};
+    bool teachPlaybackActive_{false};
+    uint8_t teachPlaybackSlot_{0};
 };
 
 #endif // ARM_H

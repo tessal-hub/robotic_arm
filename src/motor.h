@@ -39,7 +39,6 @@ private:
 
     std::atomic<bool> running{false};
     std::atomic<bool> dirCW{true};
-    int8_t lastShaftDir{-1};
     std::atomic<uint32_t> targetSpeedUs{DEFAULT_STEP_INTERVAL_US};
     std::atomic<uint32_t> currentSpeedUs{MAX_STEP_INTERVAL_US};
     uint32_t startSpeedUs{MAX_STEP_INTERVAL_US};
@@ -100,7 +99,9 @@ public:
     // Planner path: configure every axis first, then start all axes only after every
     // UART direction write succeeded. Constant-rate intervals may exceed the jog
     // profile's MAX_STEP_INTERVAL_US so low-step axes finish with the dominant axis.
-    [[nodiscard]] bool prepareCoordinatedRun(bool cw, uint32_t steps, uint32_t intervalUs);
+    // Optional start interval enables a proportional S-curve for long Teach moves.
+    [[nodiscard]] bool prepareCoordinatedRun(bool cw, uint32_t steps, uint32_t intervalUs,
+                                            uint32_t rampStartIntervalUs = 0);
     [[nodiscard]] bool startPreparedRun();
     void stop();
     void stopFromISR();

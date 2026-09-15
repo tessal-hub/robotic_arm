@@ -83,9 +83,7 @@ Nếu thay đổi chỉ là docs/tài liệu nhưng chạm quyết định thi�
    (`DH_D1_MM`, `DH_A2_MM`, `DH_D4_MM`, `DH_D6_TOOL_MM`, theta offsets) nếu thiếu phép đo
    thực nghiệm do owner cung cấp. Nếu đổi (có bằng chứng): phải đồng bộ cả 3 nơi —
    `config.h`, `kinematics.cpp`, test host — rồi log vào IMPLEMENTATION_LOG.
-2. **KHÔNG tái nhập** `atan2(110,88)=51.34°` hay d4=110 — mô hình đúng là d4=126,
-   δ=atan2(126,88)=55.06°. Chi tiết: IMPLEMENTATION_LOG mục "Kiểm chứng mô hình động học".
-   Chỉ owner mới được phê duyệt đổi mô hình (qua thí nghiệm jog J3 +30°).
+2. **KHÔNG tái nhập** `atan2(110,88)=51.34°`, `d4=110`, hay số liệu cũ `d4=126` — mô hình chuẩn đã được owner xác nhận là `d4=125` (gồm 16mm điểm gập→J4 + 109mm J4→J5), `δ=atan2(125,88)=54.85°`, `d6=45`, `d_tool=30` (`d_tool_eff=75`). Chi tiết: `docs/ARM_GEOMETRY.md`. Chỉ owner mới được phê duyệt đổi mô hình.
 3. **WiFi credentials CHỈ qua NVS** (`wifi_manager.provision()` → trang `/api/wifi`).
    Không secrets.h, không hardcode SSID/pass thật vào source.
 4. **Web handler không đụng hardware trực tiếp** — chỉ enqueue `ArmCommand` qua

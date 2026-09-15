@@ -4,6 +4,7 @@
 #include "joint_model.h"
 #include "kinematics.h"
 #include "motor.h"
+#include "nvs_store.h"
 #include "planner.h"
 #include "safety_manager.h"
 #include "sensor.h"
@@ -64,13 +65,20 @@ ArmController::~ArmController() = default;
 
 void ArmController::begin(Motor** motors_, Sensor* sensor_, Endstops* endstops_,
                           JointModel* joints_, HomingController* homing_,
-                          Planner* planner_) {
+                          Planner* planner_, NvsStore* nvs_) {
     for (uint8_t i = 0; i < NUM_MOTORS; ++i) motors[i] = motors_[i];
     sensor = sensor_;
     es = endstops_;
     jm = joints_;
     hc = homing_;
     pl = planner_;
+    nvs = nvs_;
+    if (nvs != nullptr) {
+        for (uint8_t slot = 0; slot < TEACH_POINT_COUNT; ++slot) {
+            teachPoints_[slot] = nvs->loadTeachPoint(slot);
+        }
+    }
+    refreshTeachPoints();
 
     // Create single owner SafetyManager and inject into all safety-dependent modules
     if (es != nullptr && jm != nullptr) {
@@ -141,6 +149,7 @@ bool ArmController::busy() const {
     if (hc != nullptr && hc->isActive()) return true;
     if (pl != nullptr && pl->isActive()) return true;
     if (showOffActive_) return true;
+    if (teachPlaybackActive_) return true;
     for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
         if (motors[i] != nullptr && motors[i]->isRunning()) return true;
     }
@@ -181,6 +190,7 @@ void ArmController::taskLoop() {
 
         // Safety poll: debounce ISR pending → latch/E_STOP (50ms)
         if (safety_ != nullptr) safety_->pollEndstops();
+        refreshTeachPoints();
 
         // Recovery Jog masks the held switch until that finite jog finishes. Then
         // re-arm it; if the switch is still held, restore FAULT for the next command.
@@ -202,6 +212,7 @@ void ArmController::taskLoop() {
         if (hc != nullptr) hc->tick();
         if (pl != nullptr) pl->tick();
         updateShowOff();
+        updateTeachPlayback();
 
         // Sau khi homing hoàn tất: endstop vẫn nhấn do backoff là bình thường → clear latch
         if (hc != nullptr && wasHoming && !hc->isActive()) {
@@ -308,6 +319,8 @@ void ArmController::execute(const ArmCommand& cmd) {
             break;
 
         case ArmCommand::CLEAR_FAULT: {
+            // Clearing includes encoder resync. Never change coordinates during motion.
+            if (busy()) break;
             bool ok = true;
             if (safety_) {
                 ok = safety_->tryClearFault();
@@ -426,6 +439,57 @@ void ArmController::execute(const ArmCommand& cmd) {
             startShowOff();
             break;
 
+        case ArmCommand::SAVE_TEACH_POINT: {
+            if (busy() || cmd.axis >= TEACH_POINT_COUNT || jm == nullptr || nvs == nullptr) break;
+            NvsStore::TeachPoint point;
+            for (uint8_t axis = 0; axis < NUM_MOTORS; ++axis) {
+                if (!jm->isHomed(axis) || !jm->encOK(axis)) {
+                    Serial.printf("[TEACH] SAVE %c rejected: J%u not homed/encoder unhealthy\n", 'A' + cmd.axis, axis + 1);
+                    teachError_.store(TeachError::HOME);
+                    return;
+                }
+                point.axes[axis] = {jm->angleFromEncoder(axis), jm->homeRawDeg(axis), jm->encSignOf(axis)};
+            }
+            if (nvs->saveTeachPoint(cmd.axis, point)) {
+                teachError_.store(TeachError::NONE);
+                Serial.printf("[TEACH] Saved point %c\n", 'A' + cmd.axis);
+            } else {
+                teachError_.store(TeachError::NVS);
+                Serial.printf("[TEACH] SAVE %c failed (NVS)\n", 'A' + cmd.axis);
+            }
+            teachPoints_[cmd.axis] = nvs->loadTeachPoint(cmd.axis);
+            refreshTeachPoints();
+            break;
+        }
+
+        case ArmCommand::PLAY_TEACH_POINTS:
+            if (!resumeManualRelease() || !motionAllowed() || busy() || jm == nullptr) break;
+            refreshTeachPoints();
+            if (teachValidMask_.load() == 0) {
+                teachError_.store(TeachError::INVALID);
+                break;
+            }
+            teachError_.store(TeachError::NONE);
+            teachPlaybackActive_ = true;
+            teachPlaybackSlot_ = 0;
+            updateTeachPlayback();
+            break;
+
+        case ArmCommand::CLEAR_TEACH_POINTS:
+            if (busy() || nvs == nullptr) break;
+            if (nvs->clearTeachPoints()) {
+                teachError_.store(TeachError::NONE);
+                Serial.println("[TEACH] Cleared points A-C");
+            } else {
+                teachError_.store(TeachError::NVS);
+                Serial.println("[TEACH] CLEAR failed (NVS); inspect remaining slots");
+            }
+            for (uint8_t slot = 0; slot < TEACH_POINT_COUNT; ++slot) {
+                teachPoints_[slot] = nvs->loadTeachPoint(slot);
+            }
+            refreshTeachPoints();
+            break;
+
         case ArmCommand::MOVE_CART:
         case ArmCommand::DRAW_LINE:
         case ArmCommand::DRAW_CIRCLE:
@@ -459,6 +523,7 @@ void ArmController::execute(const ArmCommand& cmd) {
 
 void ArmController::stopAllAndDiscardQueuedMotion() {
     stopShowOff();
+    teachPlaybackActive_ = false;
     if (hc != nullptr) hc->cancel();
     if (pl != nullptr) pl->stop();
     for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
@@ -551,6 +616,14 @@ String ArmController::statusJson() {
     }
     j += "\"busy\":" + String(busy() ? "true" : "false") + ",";
     j += "\"commandLatencyUs\":" + String(lastCommandLatencyUs_.load(std::memory_order_relaxed)) + ",";
+    j += "\"teachPoints\":[";
+    const uint8_t teachMask = teachValidMask_.load();
+    for (uint8_t slot = 0; slot < TEACH_POINT_COUNT; ++slot) {
+        if (slot) j += ",";
+        j += (teachMask & (1U << slot)) ? "true" : "false";
+    }
+    j += "],";
+    j += "\"teachError\":" + String(static_cast<unsigned>(teachError_.load())) + ",";
 
     if (g_wifi != nullptr) j += "\"wifi\":" + g_wifi->toJson() + ",";
     if (hc != nullptr) j += "\"homing\":" + hc->toJson() + ",";
@@ -591,6 +664,95 @@ String ArmController::statusJson() {
 }
 
 
+
+void ArmController::refreshTeachPoints() {
+    uint8_t mask = 0;
+    for (uint8_t slot = 0; slot < TEACH_POINT_COUNT; ++slot) {
+        auto& point = teachPoints_[slot];
+        if (!point.valid) continue;
+        for (uint8_t axis = 0; axis < NUM_MOTORS; ++axis) {
+            if (jm == nullptr || !jm->isHomed(axis) ||
+                point.axes[axis].homeRawDeg != jm->homeRawDeg(axis) ||
+                point.axes[axis].encSign != jm->encSignOf(axis)) {
+                point.valid = false;
+                teachError_.store(TeachError::FRAME);
+                break;
+            }
+        }
+        if (point.valid) mask |= 1U << slot;
+    }
+    teachValidMask_.store(mask);
+}
+
+void ArmController::updateTeachPlayback() {
+    if (!teachPlaybackActive_) return;
+    if (!motionAllowed()) {
+        teachPlaybackActive_ = false;
+        return;
+    }
+    for (uint8_t axis = 0; axis < NUM_MOTORS; ++axis) {
+        if (motors[axis] != nullptr && motors[axis]->isRunning()) return;
+    }
+    while (teachPlaybackSlot_ < TEACH_POINT_COUNT && !teachPoints_[teachPlaybackSlot_].valid) {
+        ++teachPlaybackSlot_;
+    }
+    if (teachPlaybackSlot_ >= TEACH_POINT_COUNT) {
+        teachPlaybackActive_ = false;
+        mode_ = ArmMode::IDLE;
+        Serial.println("[TEACH] Playback complete");
+        return;
+    }
+    if (!moveToTeachPoint(teachPlaybackSlot_++)) {
+        teachPlaybackActive_ = false;
+        teachError_.store(TeachError::INVALID);
+        if (safety_ != nullptr) safety_->assertEStop("teach point invalid");
+        mode_ = ArmMode::FAULT;
+        Serial.println("[TEACH] Playback rejected");
+    }
+}
+
+bool ArmController::moveToTeachPoint(uint8_t slot) {
+    refreshTeachPoints();
+    if (slot >= TEACH_POINT_COUNT || !teachPoints_[slot].valid) return false;
+    int64_t steps[NUM_MOTORS]{};
+    float delta[NUM_MOTORS]{};
+    uint32_t maxSteps = 1;
+    for (uint8_t axis = 0; axis < NUM_MOTORS; ++axis) {
+        const float target = teachPoints_[slot].axes[axis].deg;
+        if (motors[axis] == nullptr || !jm->isHomed(axis) || !jm->encOK(axis) || !std::isfinite(target) ||
+            target < DEFAULT_AXIS_LIMIT_MIN[axis] || target > DEFAULT_AXIS_LIMIT_MAX[axis]) return false;
+        delta[axis] = target - jm->angleFromEncoder(axis);
+        steps[axis] = JointModel::degreesToSteps(axis, fabsf(delta[axis]));
+        if (steps[axis] > static_cast<int64_t>(maxSteps)) maxSteps = static_cast<uint32_t>(steps[axis]);
+    }
+
+    constexpr float MOVE_DURATION_US = 3000000.0f;
+    uint32_t dominantInterval = static_cast<uint32_t>(MOVE_DURATION_US / maxSteps);
+    if (dominantInterval < MIN_STEP_INTERVAL_US) dominantInterval = MIN_STEP_INTERVAL_US;
+    const uint32_t rampStart = dominantInterval * 4 > MAX_STEP_INTERVAL_US
+        ? dominantInterval * 4 : MAX_STEP_INTERVAL_US;
+    for (uint8_t axis = 0; axis < NUM_MOTORS; ++axis) {
+        if (steps[axis] <= 0) continue;
+        const float scale = static_cast<float>(steps[axis]) / static_cast<float>(maxSteps);
+        uint32_t interval = static_cast<uint32_t>(dominantInterval / scale);
+        if (interval < MIN_STEP_INTERVAL_US) interval = MIN_STEP_INTERVAL_US;
+        if (!motors[axis]->prepareCoordinatedRun(JointModel::cwForDelta(axis, delta[axis]),
+                                                 static_cast<uint32_t>(steps[axis]), interval,
+                                                 static_cast<uint32_t>(rampStart / scale))) {
+            for (Motor* motor : motors) if (motor != nullptr) motor->stop();
+            return false;
+        }
+    }
+    for (uint8_t axis = 0; axis < NUM_MOTORS; ++axis) {
+        if (steps[axis] > 0 && !motors[axis]->startPreparedRun()) {
+            for (Motor* motor : motors) if (motor != nullptr) motor->stop();
+            return false;
+        }
+    }
+    mode_ = ArmMode::JOG;
+    Serial.printf("[TEACH] Moving to point %c\n", 'A' + slot);
+    return true;
+}
 
 void ArmController::startShowOff() {
     if (showOffActive_ || jm == nullptr) return;

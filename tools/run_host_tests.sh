@@ -70,4 +70,13 @@ g++ -std=c++17 -Wall -Wextra -I test/host -I src \
     -o "$WEB_VALIDATION_OUT"
 run_bin "$WEB_VALIDATION_OUT" || exit 1
 
+echo "=== firmware failure regressions ==="
+FIRMWARE_OUT=/tmp/opencode/firmware_regression_test
+g++ -std=gnu++17 -Wall -Wextra -DARDUINO -I test/host/firmware -I src \
+    test/host/test_firmware_regression.cpp src/arm.cpp src/motor.cpp src/sensor.cpp \
+    src/joint_model.cpp src/nvs_store.cpp src/endstop.cpp src/safety_manager.cpp \
+    src/homing.cpp src/planner.cpp src/kinematics.cpp src/work_plane.cpp src/trajectory_validator.cpp \
+    -o "$FIRMWARE_OUT"
+run_bin "$FIRMWARE_OUT" || exit 1
+
 echo "=== ALL HOST TESTS PASSED ==="

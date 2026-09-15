@@ -41,6 +41,18 @@ public:
     bool saveCalib(uint8_t axis, float encSign, float stepsPerDeg);
     void clearCalib(uint8_t axis);
 
+    struct TeachPoint {
+        struct Axis {
+            float deg{0.0f};
+            float homeRawDeg{0.0f};
+            float encSign{1.0f};
+        } axes[NUM_MOTORS];
+        bool valid{false};
+    };
+    [[nodiscard]] TeachPoint loadTeachPoint(uint8_t slot) const;
+    bool saveTeachPoint(uint8_t slot, const TeachPoint& point);
+    [[nodiscard]] bool clearTeachPoints();
+
 private:
     mutable Preferences prefs_;
     bool ok_{false};
