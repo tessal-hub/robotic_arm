@@ -130,6 +130,11 @@ static void teach_frame_is_bound_to_home_across_reboot() {
         restored.joints.setHomeHere(0);
         assert(!restored.arm.moveToTeachPoint(0));
         assert(restored.arm.teachValidMask_.load() == 0);
+        restored.command(ArmCommand::RELEASE_J1_J4);
+        restored.command(ArmCommand::PLAY_TEACH_POINTS);
+        assert(restored.arm.teachError_.load() == ArmController::TeachError::FRAME);
+        assert(restored.arm.manualRelease_.load());
+        for (uint8_t a = 0; a < 4; ++a) assert(!restored.motors[a].enabled.load());
         for (auto& m : restored.motors) assert(!m.isRunning());
     }
     {
@@ -196,7 +201,14 @@ static void teach_ramps_and_drawing_keeps_constant_rate() {
 }
 
 static void teach_rejects_bad_axes_before_start_and_stop_cancels_sequence() {
-    Rig r; r.save(0); r.save(1);
+    Preferences::storage.clear();
+    Rig r;
+    r.command(ArmCommand::RELEASE_J1_J4);
+    r.command(ArmCommand::PLAY_TEACH_POINTS);
+    assert(r.arm.manualRelease_.load());
+    assert(r.arm.teachError_.load() == ArmController::TeachError::INVALID);
+    for (uint8_t a = 0; a < 4; ++a) assert(!r.motors[a].enabled.load());
+    r.save(0); r.save(1);
     r.arm.teachPoints_[0].axes[0].deg = 20;
     r.arm.teachPoints_[0].axes[1].deg = 20;
     r.sensor.sensor_error[1].store(true);
@@ -209,6 +221,7 @@ static void teach_rejects_bad_axes_before_start_and_stop_cancels_sequence() {
     for (auto& m : r.motors) assert(!m.isRunning() && !m.preparedRun.load());
     driver->readOK = true;
     r.command(ArmCommand::PLAY_TEACH_POINTS);
+    assert(!r.arm.manualRelease_.load());
     assert(r.arm.teachPlaybackActive_ && r.motors[0].isRunning());
     r.command(ArmCommand::STOP_ALL);
     r.arm.updateTeachPlayback();
@@ -216,7 +229,47 @@ static void teach_rejects_bad_axes_before_start_and_stop_cancels_sequence() {
     assert(!r.arm.teachPlaybackActive_);
 }
 
+static void gripper_queue_limits_and_stop() {
+    Rig r;
+    assert(fakeLedcPin == GRIPPER_SERVO_PIN && fakeLedcHz == 50 && fakeLedcBits == 14);
+    assert(fakeLedcDuty == 0 && !r.arm.gripperActive_.load());
+    ArmCommand c; c.type = ArmCommand::SET_GRIPPER;
+    for (float angle : {0.0f, 90.0f, 180.0f}) {
+        c.value = angle;
+        assert(r.arm.submit(c));
+        ArmCommand queued;
+        assert(xQueueReceive(r.arm.queue, &queued, 0) == pdTRUE);
+        r.arm.execute(queued);
+        const uint32_t expected = static_cast<uint32_t>(lroundf((1000.0f + angle / 180.0f * 1000.0f) * 50 * 16384 / 1000000));
+        assert(fakeLedcDuty == expected && r.arm.gripperTargetDeg_.load() == angle);
+    }
+    const auto duty = fakeLedcDuty;
+    for (float bad : {-1.0f, 181.0f, NAN, INFINITY}) {
+        c.value = bad; assert(!r.arm.submit(c)); r.arm.execute(c);
+        assert(fakeLedcDuty == duty);
+    }
+    c.value = 90;
+    assert(r.arm.submit(c));
+    r.command(ArmCommand::STOP_ALL);
+    assert(fakeLedcDuty == 0 && !r.arm.gripperActive_.load());
+    assert(uxQueueMessagesWaiting(r.arm.queue) == 0);
+    r.arm.safety()->notifyFault("test");
+    assert(!r.arm.submit(c)); r.arm.execute(c); assert(fakeLedcDuty == 0);
+    r.command(ArmCommand::CLEAR_FAULT);
+    r.motors[0].run(true, 100);
+    assert(!r.arm.submit(c)); r.arm.execute(c); assert(fakeLedcDuty == 0);
+    r.command(ArmCommand::STOP_ALL);
+    r.arm.execute(c); assert(fakeLedcDuty != 0);
+    r.command(ArmCommand::RELEASE_J1_J4);
+    assert(fakeLedcDuty == 0 && !r.arm.submit(c));
+    r.arm.execute(c); assert(fakeLedcDuty == 0 && r.arm.manualRelease_.load());
+    fakeLedcOK = false;
+    { Rig failed; assert(!failed.arm.gripperAvailable()); assert(!failed.arm.submit(c)); }
+    fakeLedcOK = true;
+}
+
 int main() {
+    gripper_queue_limits_and_stop();
     direction_failure_stops_all_start_paths();
     clear_fault_and_resync_require_stopped_motors();
     sensor_health_requires_a_published_sample_and_task();

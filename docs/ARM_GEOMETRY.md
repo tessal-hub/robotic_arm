@@ -107,7 +107,7 @@ Sử dụng **Closed-form Analytic IK** (`kin::ikPenDown()` trong `src/kinematic
 
 J5 và J6 là hai khớp quay nối tiếp, không còn cơ cấu pan–tilt vi sai. Mỗi A4988 điều khiển trực tiếp một khớp và mỗi AS5600 phản hồi đúng khớp tương ứng:
 
-- J5: tỷ số truyền **3:1**, khoảng cách J4 → J5 **125mm**.
+- J5: tỷ số truyền **3:1**, khoảng cách J4 → J5 **109mm**; tổng điểm gập → J5 là **125mm = 16mm + 109mm**.
 - J6: tỷ số truyền **1:1**, khoảng cách J5 → J6 **45mm**.
 - Không có limit switch hay StallGuard; J5/J6 tiếp tục dùng **Set Home thủ công**.
 - Jog đổi trực tiếp góc khớp sang bước của cùng trục. Cartesian/Draw chỉ điều khiển J1–J5; J6 là tool roll nên giữ nguyên và không cần Home/encoder để vẽ.

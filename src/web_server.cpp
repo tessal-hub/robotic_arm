@@ -488,6 +488,19 @@ body.setup-mode .jog-controls { display: none; }
     </div>
 
     <div class="grid-cards-3" id="jointCardsGrid"></div>
+    <section class="card" aria-labelledby="headGripper" style="margin-top:16px">
+      <div class="card-head">
+        <h2 id="headGripper">Gripper · MG90</h2>
+        <span class="meta" id="gripperStatus" role="status">Waiting for connection</span>
+      </div>
+      <form class="btn-row" onsubmit="setGripper(event)">
+        <label for="gripperAngle">Target angle (°)</label>
+        <input id="gripperAngle" class="need-gripper" type="number" min="0" max="180" step="1" value="90" required disabled>
+        <button class="btn btn-primary need-gripper" type="submit" disabled>Set angle</button>
+        <button class="btn btn-danger" type="button" onclick="stopRobot()">STOP ALL</button>
+      </form>
+      <p class="meta">Target only, no position feedback. STOP ALL or Release cuts servo pulses; the gripper may lose its hold. Teach A–B–C saves arm joints only.</p>
+    </section>
     <section class="card" aria-labelledby="headTeach" style="margin-top:16px">
       <div class="card-head">
         <h2 id="headTeach">Teach points</h2>
@@ -1022,6 +1035,9 @@ function isPaneActive(id){
 }
 
 function syncCommandState(){
+  document.querySelectorAll('.need-gripper').forEach(b => {
+    b.disabled = !latestStatus?.gripper?.available || failN > 0 || pendingCommands > 0;
+  });
   const moving = !!latestStatus && latestStatus.busy;
   const fault = !!latestStatus && latestStatus.mode === 'fault';
   const released = !!latestStatus && latestStatus.mode === 'release';
@@ -1522,6 +1538,11 @@ function post(url, body, trigger){
 }
 function clearFault(){ post('/api/jog', 'fault_clear=1'); }
 function jog(axis, dir){ post('/api/jog', `axis=${axis}&deg=${dir * stepSize}`); }
+function setGripper(event){
+  event.preventDefault();
+  const input = document.getElementById('gripperAngle');
+  if(input.reportValidity()) post('/api/gripper', `deg=${encodeURIComponent(input.value)}`, event.submitter);
+}
 function saveTeachPoint(slot){ api(`/api/teach/save?slot=${slot}`); }
 function clearTeachPoints(){
   if(confirm('Clear saved teach points A-C from NVS?')) api('/api/teach/clear');
@@ -1690,6 +1711,13 @@ function updateUI(d){
   const commandLatency = document.getElementById('dashCommandLatency');
   if(commandLatency) commandLatency.textContent = `${((d.commandLatencyUs || 0) / 1000).toFixed(1)} ms`;
   const teachStatus = document.getElementById('teachStatus');
+  if(d.gripper){
+    const g = d.gripper;
+    document.getElementById('gripperAngle').min = g.minDeg;
+    document.getElementById('gripperAngle').max = g.maxDeg;
+    document.getElementById('gripperStatus').textContent = !g.ready ? 'PWM unavailable' :
+      g.active ? `Target ${g.targetDeg.toFixed(1)}°` : 'Pulses off';
+  }
   if(teachStatus && d.teachPoints){
     const errors = ['', 'Save/clear failed — check remaining points and retry', 'Home all six joints and check encoders', 'Home changed — teach points again', 'No valid point or playback rejected'];
     teachStatus.textContent = d.teachPoints.map((v, i) => `${String.fromCharCode(65 + i)} ${v ? '✓' : '—'}`).join('  ') + (d.teachError ? ' · ' + errors[d.teachError] : '');
@@ -1775,7 +1803,12 @@ function pollOnce(){
     return r.json();
   })
     .then(d => { failN = 0; setOnline(true); updateUI(d); })
-    .catch(err => { if(err.name !== 'AbortError' && ++failN >= 3) setOnline(false); })
+    .catch(err => {
+      if(err.name !== 'AbortError') {
+        if(++failN >= 3) setOnline(false);
+        syncCommandState();
+      }
+    })
     .finally(() => { if(statusPollController === controller) statusPollController = null; });
 }
 
@@ -1810,9 +1843,11 @@ void handleStatus() {
 void handleJog() {
     if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
     if (srv->hasArg("fault_clear")) {
+        if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
         ArmCommand c;
         c.type = ArmCommand::CLEAR_FAULT;
-        srv->send(200, "text/plain", armPtr->submit(c) ? "OK" : "busy");
+        const bool ok = armPtr->submit(c);
+        srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
         return;
     }
     if (!srv->hasArg("axis") || !srv->hasArg("deg")) {
@@ -1843,6 +1878,23 @@ void handleStop() {
     c.type = ArmCommand::STOP_ALL;
     const bool ok = armPtr->submit(c, 50);
     srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "queue full");
+}
+
+void handleGripper() {
+    if (armPtr == nullptr) { srv->send(503, "text/plain", "not ready"); return; }
+    float deg = 0.0f;
+    if (!webval::parseFiniteFloat(srv->arg("deg").c_str(), deg) ||
+        deg < GRIPPER_MIN_DEG || deg > GRIPPER_MAX_DEG) {
+        srv->send(400, "text/plain", "invalid gripper angle"); return;
+    }
+    if (!armPtr->gripperAvailable()) {
+        srv->send(409, "text/plain", "gripper unavailable: check idle, Release, fault and PWM"); return;
+    }
+    ArmCommand command;
+    command.type = ArmCommand::SET_GRIPPER;
+    command.value = deg;
+    const bool ok = armPtr->submit(command);
+    srv->send(ok ? 202 : 409, "text/plain", ok ? "Queued" : "gripper unavailable");
 }
 
 void handleMove() {
@@ -2148,6 +2200,7 @@ void webBegin(WebServer& server, ArmController* arm, WifiManager* wifi,
     server.on("/api/status", HTTP_GET, handleStatus);
     server.on("/api/jog", HTTP_POST, handleJog);
     server.on("/api/stop", HTTP_POST, handleStop);
+    server.on("/api/gripper", HTTP_POST, handleGripper);
     server.on("/api/move", HTTP_POST, handleMove);
     server.on("/api/draw", HTTP_POST, handleDraw);
     server.on("/api/draw/presets", HTTP_GET, handleDrawProfiles);

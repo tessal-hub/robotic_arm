@@ -14,8 +14,6 @@ JointModel::JointModel() {
         homed[i] = false;
         restored[i] = false;
         driftFault[i] = false;
-        lastRunningMs[i] = 0;
-        driftFailCount[i] = 0;
         s_encSign[i] = AXIS_ENC_SIGN[i];
         s_measuredSpd[i] = jointcal::configuredStepsPerDegree(i);
         s_hasMeasured[i] = false;
@@ -57,23 +55,15 @@ bool JointModel::cwForDelta(uint8_t axis, float deltaDeg) {
     return (AXIS_STEP_SIGN[axis] > 0) ? (deltaDeg >= 0.0f) : (deltaDeg < 0.0f);
 }
 
-float JointModel::actuatorAngleFromSteps(uint8_t axis) const {
+float JointModel::angleFromSteps(uint8_t axis) const {
     if (axis >= NUM_MOTORS || motors[axis] == nullptr) return 0.0f;
     return AXIS_STEP_SIGN[axis] * stepsToDegrees(axis, motors[axis]->getAbsoluteSteps());
 }
 
-float JointModel::actuatorAngleFromEncoder(uint8_t axis) {
+float JointModel::angleFromEncoder(uint8_t axis) {
     if (axis >= NUM_MOTORS || sensor == nullptr || !homed[axis]) return 0.0f;
     const float rawDiff = sensor->getAccumulatedAngle(axis) - encZeroRef[axis];
     return s_encSign[axis] * rawDiff;
-}
-
-float JointModel::angleFromSteps(uint8_t axis) const {
-    return actuatorAngleFromSteps(axis);
-}
-
-float JointModel::angleFromEncoder(uint8_t axis) {
-    return actuatorAngleFromEncoder(axis);
 }
 
 float JointModel::rawEncoder(uint8_t axis) {
@@ -100,8 +90,6 @@ void JointModel::setHomeHere(uint8_t axis) {
         Serial.printf("[JM] SetHome J%u (enc=DEAD, step-only)\n", axis + 1);
     }
     driftFault[axis] = false;
-    driftFailCount[axis] = 0;
-    lastRunningMs[axis] = millis();
     restored[axis] = false;
     homed[axis] = true;
 }
@@ -111,8 +99,6 @@ void JointModel::clearHome(uint8_t axis) {
     homed[axis] = false;
     restored[axis] = false;
     driftFault[axis] = false;
-    driftFailCount[axis] = 0;
-    lastRunningMs[axis] = millis();
 }
 
 bool JointModel::resyncFromEncoder(uint8_t axis) {
@@ -198,8 +184,6 @@ uint8_t JointModel::restoreFromNVS() {
         motors[a]->setAbsoluteSteps(AXIS_STEP_SIGN[a] * degreesToSteps(a, delta));
         encZeroRef[a] = sensor->getAccumulatedAngle(a) - delta / s_encSign[a];
         driftFault[a] = false;
-        driftFailCount[a] = 0;
-        lastRunningMs[a] = millis();
         restored[a] = true;
         homed[a] = true;
         ++okCount;
@@ -223,11 +207,6 @@ bool JointModel::allPositioningHomed() const noexcept {
     return true;
 }
 
-bool JointModel::updateDriftCheck(uint8_t /*axis*/) {
-    // Drift watchdog disabled by user request: open-loop step counting is ground truth
-    return false;
-}
-
 bool JointModel::hasMeasuredCalibration(uint8_t axis) noexcept {
     return axis < NUM_MOTORS && s_hasMeasured[axis] &&
            jointcal::isPlausible(axis, s_encSign[axis], s_measuredSpd[axis]);
@@ -240,8 +219,6 @@ bool JointModel::hasAnyDriftFault() const noexcept {
 void JointModel::clearAllDriftFaults() noexcept {
     for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
         driftFault[i] = false;
-        driftFailCount[i] = 0;
-        lastRunningMs[i] = millis();
         if (homed[i] && encOK(i)) {
             (void)resyncFromEncoder(i);
         } else if (!homed[i] && motors[i] != nullptr && !motors[i]->isRunning()) {

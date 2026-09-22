@@ -38,6 +38,14 @@ inline void delayMicroseconds(uint32_t) {}
 inline void esp_rom_delay_us(uint32_t) {}
 inline void pinMode(int, int) {}
 inline void digitalWrite(int, int) {}
+inline bool fakeLedcOK = true;
+inline uint32_t fakeLedcDuty = 0, fakeLedcHz = 0;
+inline uint8_t fakeLedcBits = 0, fakeLedcPin = 255;
+inline uint32_t ledcSetup(uint8_t, uint32_t hz, uint8_t bits) {
+    fakeLedcHz = hz; fakeLedcBits = bits; return fakeLedcOK ? hz : 0;
+}
+inline void ledcWrite(uint8_t, uint32_t duty) { fakeLedcDuty = duty; }
+inline void ledcAttachPin(uint8_t pin, uint8_t) { fakeLedcPin = pin; }
 inline int digitalRead(int) { return HIGH; }
 inline int digitalPinToInterrupt(int pin) { return pin; }
 inline void attachInterruptArg(int, void (*)(void*), void*, int) {}

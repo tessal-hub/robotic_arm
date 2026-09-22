@@ -80,6 +80,14 @@ void ArmController::begin(Motor** motors_, Sensor* sensor_, Endstops* endstops_,
     }
     refreshTeachPoints();
 
+    pinMode(GRIPPER_SERVO_PIN, OUTPUT);
+    digitalWrite(GRIPPER_SERVO_PIN, LOW);
+    gripperReady_ = ledcSetup(GRIPPER_PWM_CHANNEL, GRIPPER_PWM_HZ, GRIPPER_PWM_BITS) != 0;
+    if (gripperReady_) {
+        ledcWrite(GRIPPER_PWM_CHANNEL, 0); // no movement command at boot
+        ledcAttachPin(GRIPPER_SERVO_PIN, GRIPPER_PWM_CHANNEL);
+    }
+
     // Create single owner SafetyManager and inject into all safety-dependent modules
     if (es != nullptr && jm != nullptr) {
         safety_ = std::make_unique<SafetyManager>(es, jm);
@@ -114,6 +122,9 @@ bool ArmController::submit(const ArmCommand& cmd, uint32_t timeoutMs) {
         return true;
     }
 
+    if (cmd.type == ArmCommand::SET_GRIPPER &&
+        (!std::isfinite(cmd.value) || cmd.value < GRIPPER_MIN_DEG ||
+         cmd.value > GRIPPER_MAX_DEG || !gripperAvailable())) return false;
     if (uxQueueMessagesWaiting(queue) != 0) return false;
     ArmCommand queued = cmd;
     queued.submittedAtUs = micros();
@@ -154,6 +165,11 @@ bool ArmController::busy() const {
         if (motors[i] != nullptr && motors[i]->isRunning()) return true;
     }
     return false;
+}
+
+bool ArmController::gripperAvailable() const {
+    return gripperReady_ && !stopRequested_.load(std::memory_order_acquire) &&
+           !manualRelease_.load(std::memory_order_acquire) && motionAllowed() && !busy();
 }
 
 ArmMode ArmController::mode() const { return mode_; }
@@ -295,6 +311,8 @@ void ArmController::taskLoop() {
             }
         }
 
+        if (!motionAllowed()) stopGripper();
+
         // 4) Rút lệnh từ queue (không block)
         while (queue != nullptr && xQueueReceive(queue, &cmd, 0) == pdTRUE) {
             execute(cmd);
@@ -314,6 +332,19 @@ void ArmController::execute(const ArmCommand& cmd) {
         lastCommandLatencyUs_.store(micros() - cmd.submittedAtUs, std::memory_order_relaxed);
     }
     switch (cmd.type) {
+        case ArmCommand::SET_GRIPPER: {
+            if (!gripperAvailable() || !std::isfinite(cmd.value) ||
+                cmd.value < GRIPPER_MIN_DEG || cmd.value > GRIPPER_MAX_DEG) break;
+            const float ratio = (cmd.value - GRIPPER_MIN_DEG) / (GRIPPER_MAX_DEG - GRIPPER_MIN_DEG);
+            const float pulseUs = GRIPPER_MIN_PULSE_US + ratio * (GRIPPER_MAX_PULSE_US - GRIPPER_MIN_PULSE_US);
+            const uint32_t duty = static_cast<uint32_t>(lroundf(
+                pulseUs * GRIPPER_PWM_HZ * (1UL << GRIPPER_PWM_BITS) / 1000000.0f));
+            ledcWrite(GRIPPER_PWM_CHANNEL, duty);
+            gripperTargetDeg_.store(cmd.value, std::memory_order_relaxed);
+            gripperActive_.store(true, std::memory_order_release);
+            break;
+        }
+
         case ArmCommand::STOP_ALL:
             stopAllAndDiscardQueuedMotion();
             break;
@@ -375,6 +406,7 @@ void ArmController::execute(const ArmCommand& cmd) {
                 break;
             }
             if (safety_ != nullptr) safety_->assertManualRelease(true);
+            stopGripper();
             manualRelease_.store(true, std::memory_order_release);
             mode_ = ArmMode::RELEASE;
             for (uint8_t axis = 0; axis < 4; ++axis) {
@@ -463,12 +495,13 @@ void ArmController::execute(const ArmCommand& cmd) {
         }
 
         case ArmCommand::PLAY_TEACH_POINTS:
-            if (!resumeManualRelease() || !motionAllowed() || busy() || jm == nullptr) break;
+            if (busy() || jm == nullptr) break;
             refreshTeachPoints();
             if (teachValidMask_.load() == 0) {
-                teachError_.store(TeachError::INVALID);
+                if (teachError_.load() != TeachError::FRAME) teachError_.store(TeachError::INVALID);
                 break;
             }
+            if (!resumeManualRelease() || !motionAllowed()) break;
             teachError_.store(TeachError::NONE);
             teachPlaybackActive_ = true;
             teachPlaybackSlot_ = 0;
@@ -522,6 +555,7 @@ void ArmController::execute(const ArmCommand& cmd) {
 }
 
 void ArmController::stopAllAndDiscardQueuedMotion() {
+    stopGripper();
     stopShowOff();
     teachPlaybackActive_ = false;
     if (hc != nullptr) hc->cancel();
@@ -532,6 +566,12 @@ void ArmController::stopAllAndDiscardQueuedMotion() {
     if (queue != nullptr) xQueueReset(queue);
     if (mode_ != ArmMode::FAULT) mode_ = ArmMode::IDLE;
     Serial.println("[ARM] STOP ALL: motion cancelled and queue cleared");
+}
+
+void ArmController::stopGripper() {
+    if (gripperActive_.exchange(false, std::memory_order_acq_rel)) {
+        ledcWrite(GRIPPER_PWM_CHANNEL, 0);
+    }
 }
 
 bool ArmController::resumeManualRelease() {
@@ -615,6 +655,13 @@ String ArmController::statusJson() {
         case ArmMode::FAULT:    j += "\"mode\":\"fault\",";    break;
     }
     j += "\"busy\":" + String(busy() ? "true" : "false") + ",";
+    char gripper[200];
+    snprintf(gripper, sizeof(gripper),
+             "\"gripper\":{\"ready\":%s,\"available\":%s,\"active\":%s,\"targetDeg\":%.1f,\"minDeg\":%.1f,\"maxDeg\":%.1f,\"pin\":%u},",
+             gripperReady_ ? "true" : "false", gripperAvailable() ? "true" : "false",
+             gripperActive_.load(std::memory_order_acquire) ? "true" : "false",
+             gripperTargetDeg_.load(std::memory_order_relaxed), GRIPPER_MIN_DEG, GRIPPER_MAX_DEG, GRIPPER_SERVO_PIN);
+    j += gripper;
     j += "\"commandLatencyUs\":" + String(lastCommandLatencyUs_.load(std::memory_order_relaxed)) + ",";
     j += "\"teachPoints\":[";
     const uint8_t teachMask = teachValidMask_.load();

@@ -13,7 +13,7 @@
 // ==============================================================================
 // 2. HARDWARE PINOUT (ESP32-S3 DevKitC-1) — BẢNG CHỐT 2026-08-26
 //    Loại trừ: GPIO4 (bootloop), GPIO0/3/45/46 (strapping), GPIO19/20 (USB-OTG),
-//              GPIO26-32 (flash nội bộ). Dự phòng trống: GPIO13, 14, 17, 18, 48.
+//              GPIO26-32 (flash nội bộ). Dự phòng trống: GPIO14, 17, 18, 48.
 //    KHÔNG có chân EN — mọi driver luôn ở trạng thái enabled.
 // ==============================================================================
 // Cụm 1: Joint 1 -> Joint 4 (TMC2209, chung Serial1: GPIO 15 RX / GPIO 16 TX)
@@ -47,6 +47,19 @@ constexpr uint8_t DIR_PIN_4                     = 39;
 
 constexpr uint8_t STEP_PIN_5                    = 40;  // Motor 5 (Joint 6 - independent revolute) - A4988
 constexpr uint8_t DIR_PIN_5                     = 47;
+
+// MG90 gripper: separate servo supply, common GND; calibrate without a load first.
+constexpr uint8_t GRIPPER_SERVO_PIN             = 13;
+constexpr uint8_t GRIPPER_PWM_CHANNEL           = 0;
+constexpr uint8_t GRIPPER_PWM_BITS              = 14;
+constexpr uint32_t GRIPPER_PWM_HZ               = 50;
+constexpr uint16_t GRIPPER_MIN_PULSE_US         = 1000;
+constexpr uint16_t GRIPPER_MAX_PULSE_US         = 2000;
+constexpr float GRIPPER_MIN_DEG                = 0.0f;
+constexpr float GRIPPER_MAX_DEG                = 180.0f;
+static_assert(GRIPPER_MIN_DEG < GRIPPER_MAX_DEG, "Invalid gripper angle range");
+static_assert(GRIPPER_MIN_PULSE_US < GRIPPER_MAX_PULSE_US &&
+              GRIPPER_MAX_PULSE_US < 1000000 / GRIPPER_PWM_HZ, "Invalid servo pulses");
 
 constexpr uint8_t NUM_MOTORS                    = 6;
 constexpr uint8_t CARTESIAN_AXIS_COUNT          = 5;    // J1..J5; J6 roll không đổi TCP khi vẽ
@@ -114,7 +127,6 @@ constexpr float DEFAULT_AXIS_GEAR_RATIOS[NUM_MOTORS] = {
     GEAR_RATIO_J6
 };
 
-constexpr float DEFAULT_GEAR_RATIO              = GEAR_RATIO_J1;
 constexpr uint16_t DEFAULT_FULL_STEPS           = 200;    // 1.8 degree stepper (200 steps/rev)
 constexpr uint16_t DEFAULT_MICROSTEPS           = 16;     // 1/16 microstepping
 constexpr uint16_t DEFAULT_NORMAL_CURRENT       = 800;    // Normal running current (mA)
@@ -202,7 +214,6 @@ constexpr uint32_t HOMING_BACKOFF_SETTLE_MS    = 30;     // Settle cơ khí & ti
 constexpr uint32_t DEFAULT_STEP_INTERVAL_US     = 720;    // Target step interval -> 1389 steps/sec
 constexpr uint32_t MIN_STEP_INTERVAL_US         = 120;    // Max speed limit -> ~8333 steps/sec
 constexpr uint32_t MAX_STEP_INTERVAL_US         = 3500;   // Starting speed interval (~285 steps/sec, max static torque)
-constexpr uint32_t DEFAULT_ACCEL_RATE           = 12;
 
 // Tốc độ Jog độc lập từng khớp (us/step) — tối ưu mô-men xoắn cao tuyệt đối, không trượt bước:
 constexpr uint32_t DEFAULT_AXIS_JOG_SPEEDS[NUM_MOTORS] = {
@@ -213,15 +224,6 @@ constexpr uint32_t DEFAULT_AXIS_JOG_SPEEDS[NUM_MOTORS] = {
     1500,  // J5 (3:1):  667 steps/s  -> 25.00 deg/s
     1500   // J6 (1:1):  667 steps/s  -> 75.00 deg/s
 };
-
-// Schmitt-Trigger Deadband for closed-loop holding
-constexpr float DEFAULT_DEADBAND_ENTER          = 0.3f;   // Enter holding window (degrees)
-constexpr float DEFAULT_DEADBAND_EXIT           = 0.8f;   // Exit holding window (degrees)
-constexpr float DEFAULT_ANGLE_TOLERANCE         = 0.5f;   // Tolerance (degrees)
-constexpr float RUNAWAY_ERROR_THRESHOLD         = 25.0f;  // Runaway threshold (degrees) — nới rộng cho hộp số planetary có backlash lớn (~10°-15°)
-constexpr uint16_t DRIFT_CHECK_PERIOD_MS        = 500;    // Idle encoder/step comparison interval
-constexpr uint16_t DRIFT_SETTLE_MS              = 300;    // Let encoder EMA settle after motor stops
-constexpr uint8_t DRIFT_FAULT_CONSECUTIVE_CHECKS = 3;     // Persistent runaway before latching FAULT
 
 // Drawing (Cartesian trajectory, pen = tool coaxial J6)
 constexpr float PEN_LIFT_MM                     = 5.0f;   // Độ nâng bút giữa các nét (Z-raise)
@@ -246,7 +248,7 @@ constexpr BaseType_t MOTION_TASK_CORE           = 1;
 constexpr float DH_D1_MM                        = 139.0f; // J1 -> J2: Chiều cao đế lên vai (Base height)
 constexpr float DH_A2_MM                        = 138.0f; // J2 -> J3: Cánh tay trên (Upper arm length)
 constexpr float DH_A3_MM                        = 88.0f;  // J3 -> Điểm gập (Elbow longitudinal offset)
-constexpr float DH_D4_MM                        = 125.0f; // J4 -> J5
+constexpr float DH_D4_MM                        = 125.0f; // Forearm bend -> J5 = 16 mm + 109 mm (J4 -> J5)
 constexpr float DH_D6_MM                        = 45.0f;  // J5 -> J6
 constexpr float DH_D_TOOL_MM                    = 30.0f;  // Bút (tool), gắn đồng trục với J6 (30mm từ J6)
 constexpr float DH_TOOL_EFFECTIVE_MM            = 75.0f;  // J5 -> TCP = 45 + 30

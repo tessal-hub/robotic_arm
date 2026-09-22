@@ -10,20 +10,6 @@
 
 class SafetyManager;
 
-struct TMC2209Diag {
-    bool uartOk{false};
-    uint8_t driverVersion{0};
-    bool overTemp{false};
-    bool overTempWarning{false};
-    bool shortToGndA{false};
-    bool shortToGndB{false};
-    bool openLoadA{false};
-    bool openLoadB{false};
-    bool standStill{false};
-    uint8_t csActual{0};
-    uint16_t sgResult{0};
-};
-
 class Motor {
 private:
     HardwareSerial* serialPort;
@@ -110,36 +96,23 @@ public:
     void setSpeed(uint32_t intervalUs);
     void setCurrent(uint16_t mA);
     void setChopperMode(bool spreadCycle);
-    void setSGThreshold(uint8_t sgthrs);
     uint16_t getSGResult();
 
-    void update();
     bool testUART();
-    [[nodiscard]] bool isUartOK() const noexcept { return uartOk; }
     [[nodiscard]] bool isTmc() const noexcept { return isTMC; }
-    [[nodiscard]] uint8_t getDriverVersion() const noexcept { return driverVersion; }
-    TMC2209Diag getDriverStatus();
     TMC2209Stepper* getDriver() noexcept { return driver.get(); }
 
     [[nodiscard]] bool isRunning() const noexcept { return running.load(std::memory_order_relaxed); }
     [[nodiscard]] bool getDirCW() const noexcept { return dirCW.load(std::memory_order_relaxed); }
-    [[nodiscard]] uint32_t getStepsRemaining() const noexcept { return stepsRemaining.load(std::memory_order_relaxed); }
     [[nodiscard]] uint32_t getTargetSteps() const noexcept { return targetSteps.load(std::memory_order_relaxed); }
     [[nodiscard]] uint32_t getStepCounter() const noexcept { return stepCounter.load(std::memory_order_relaxed); }
-    void resetStepCounter() noexcept { stepCounter.store(0, std::memory_order_relaxed); }
     // Vị trí tuyệt đối tính bằng microstep. Chỉ set khi motor KHÔNG chạy (homing/calib).
     [[nodiscard]] int64_t getAbsoluteSteps() const noexcept { return absSteps.load(std::memory_order_relaxed); }
     void setAbsoluteSteps(int64_t v) noexcept { absSteps.store(v, std::memory_order_relaxed); }
     [[nodiscard]] uint32_t getStepInterval() const noexcept { return targetSpeedUs.load(std::memory_order_relaxed); }
     [[nodiscard]] uint32_t getCurrentInterval() const noexcept { return currentSpeedUs.load(std::memory_order_relaxed); }
-    [[nodiscard]] uint16_t getCurrent() const noexcept { return currentMa; }
-    [[nodiscard]] uint8_t getHoldScale() const noexcept { return holdScale; }
-    [[nodiscard]] bool getSpreadCycle() const noexcept { return spreadCycleMode; }
-    [[nodiscard]] uint16_t getMicrosteps() const noexcept { return microstepsVal; }
-    [[nodiscard]] uint8_t getAddress() const noexcept { return address; }
     [[nodiscard]] uint8_t getStepPin() const noexcept { return stepPin; }
     [[nodiscard]] uint8_t getDirPin() const noexcept { return dirPin; }
-    [[nodiscard]] const char* getLabel() const noexcept { return label; }
 
     String toJson() const;
 };

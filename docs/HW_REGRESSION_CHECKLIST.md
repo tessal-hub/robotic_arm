@@ -44,9 +44,9 @@ Chạy trên phần cứng thật sau thay đổi an toàn / homing / endstop (2
 - [ ] `/api/move` tới điểm mới — bút **không** hạ xuống Z vẽ
 - [ ] `/api/draw` LINE — bút hạ, vẽ, nâng xong mới `planner.active=false`
 
-## 5. Drift FAULT
+## 5. Drift watchdog đã tắt
 
-- [ ] (Nếu có điều kiện) lệch step/encoder > 5° → FAULT, motion bị chặn
+- Drift watchdog đã vô hiệu hóa theo yêu cầu owner; không dùng lệch step/encoder làm tiêu chí phải phát sinh FAULT. Endstop/STOP vẫn phải pass các mục riêng.
 
 ## 6. UART direction fail (TMC)
 
@@ -76,3 +76,15 @@ Chạy trên phần cứng thật sau thay đổi an toàn / homing / endstop (2
 - [ ] Trong một dry-run khác, bấm ABORT ở khoảng stroke 5. PASS: motor dừng và không nét 6+ nào được enqueue/chạy.
 - [ ] Gắn bút, xác nhận mặt giấy đúng Z profile, chạy một LINE 120 mm trước. Chỉ chạy HELLO khi line thẳng, J5 ổn định và pen lift rời giấy hoàn toàn.
 - [ ] Viết HELLO ba lần. PASS cuối: đủ năm chữ nhận diện được, không FAULT/out-of-reach, không runaway J5, không bỏ nét; ghi ảnh, Start X/Y/Z/width, command latency median/max và sai lệch endpoint đo được vào IMPLEMENTATION_LOG.
+
+
+## 10. Teach points và các bản sửa 2026-09-15
+
+- [ ] Sau khi nâng cấp, Save lại A/B/C: bản ghi cũ không có mốc home sẽ bị từ chối. Home đủ sáu khớp, encoder khỏe; thử các pose gần nhau với bút tháo và không gian trống.
+- [ ] Play A→B→C: quan sát tăng/giảm tốc êm, không mất bước; kiểm tra góc encoder tại từng pose. Thời gian thực có thêm ramp và overhead UART/timer, không coi 3 giây là deadline chính xác.
+- [ ] STOP giữa A→B: mọi motor dừng; C không tự chạy sau đó. Clear Fault trong lúc đang chuyển động không được đổi bộ đếm bước.
+- [ ] Save A, đổi mốc Set Home một khớp tại vị trí khác: A không còn hợp lệ. Reboot và thử lại: A vẫn bị từ chối; chỉ Save lại mới chấp nhận hệ tọa độ mới.
+- [ ] Save các điểm ở cùng hệ tọa độ, reboot: các slot được phục hồi; thử Play trong không gian trống.
+- [ ] Clear và reboot: các slot đã xóa không xuất hiện lại. Khi có lỗi NVS, UI hiển thị lỗi và phản ánh đúng từng slot còn hợp lệ; không coi HTTP 200 enqueue là bằng chứng đã ghi flash thành công.
+- [ ] Khởi động thiếu một encoder: khớp đó không được restore home từ góc mặc định 0°. Kiểm tra lại sau khi kết nối encoder ổn định.
+- [ ] Với robot đứng yên, ngắt UART rồi yêu cầu Jog TMC đổi chiều: không phát STEP sai chiều. Khôi phục UART và xác nhận chiều thực tế trước khi chạy pose dài.

@@ -166,46 +166,11 @@ bool Motor::testUART() {
     flushUartRx();
     driverVersion = driver->version();
     uartOk = (driverVersion == 0x21);
+    const bool readError = driver->CRCerror;
     giveUart();
+    Serial.printf("[TMC UART READ] %s addr=%u version=0x%02X expected=0x21 readError=%u (timeout/CRC)\n",
+                  label, address, driverVersion, readError);
     return uartOk;
-}
-
-TMC2209Diag Motor::getDriverStatus() {
-    TMC2209Diag diag = {};
-    if (!isTMC) {
-        diag.uartOk = true;
-        return diag;
-    }
-
-    if (!takeUart(50)) return diag;
-
-    flushUartRx();
-    driverVersion = driver->version();
-    uartOk = (driverVersion == 0x21);
-    diag.uartOk = uartOk;
-    diag.driverVersion = driverVersion;
-
-    if (uartOk) {
-        flushUartRx();
-        const uint32_t drvStatus = driver->DRV_STATUS();
-        // Bit layout DRV_STATUS (TMC2209 datasheet / TMCStepper TMC2208_bitfields.h):
-        // otpw=0, ot=1, s2ga=2, s2gb=3, s2vsa=4, s2vsb=5, ola=6, olb=7, t120..t157=8..11,
-        // cs_actual=16..20, stealth=30, stst=31.
-        diag.overTemp        = (drvStatus & (1UL << 1)) != 0;
-        diag.overTempWarning = (drvStatus & (1UL << 0)) != 0;
-        diag.shortToGndA     = (drvStatus & (1UL << 2)) != 0;
-        diag.shortToGndB     = (drvStatus & (1UL << 3)) != 0;
-        diag.openLoadA       = (drvStatus & (1UL << 6)) != 0;
-        diag.openLoadB       = (drvStatus & (1UL << 7)) != 0;
-        diag.standStill      = (drvStatus & (1UL << 31)) != 0;
-        diag.csActual        = static_cast<uint8_t>((drvStatus >> 16) & 0x1F);
-
-        flushUartRx();
-        diag.sgResult        = static_cast<uint16_t>(driver->SG_RESULT());
-    }
-
-    giveUart();
-    return diag;
 }
 
 void Motor::begin(uint16_t initialCurrentMa, uint16_t initialMicrosteps,
@@ -295,10 +260,20 @@ void Motor::begin(uint16_t initialCurrentMa, uint16_t initialMicrosteps,
     driver->TCOOLTHRS(0xFFFFF); // Kích hoạt StallGuard4 ở mọi vận tốc
     driver->SGTHRS(DEFAULT_STALL_THRESHOLD);
 
+    // Observe the existing startup write; no extra configuration or motion command.
+    flushUartRx();
+    const uint8_t ifcntBefore = driver->IFCNT();
+    const bool beforeError = driver->CRCerror;
     driver->shaft(false);
+    flushUartRx();
+    const uint8_t ifcntAfter = driver->IFCNT();
+    const bool afterError = driver->CRCerror;
 
     giveUart();
 
+    Serial.printf("[TMC UART WRITE] %s addr=%u IFCNT=%u->%u delta=%u expected=1 readError=%u/%u (delta valid only if both errors=0)\n",
+                  label, address, ifcntBefore, ifcntAfter,
+                  static_cast<uint8_t>(ifcntAfter - ifcntBefore), beforeError, afterError);
     testUART();
     if (uartOk) {
         Serial.printf("  >> [TMC2209 OK] %s (Addr %u, STEP Pin %d): UART tot! Ver: 0x%02X\n", label, address, stepPin, driverVersion);
@@ -539,22 +514,12 @@ void Motor::setChopperMode(bool spreadCycle) {
     giveUart();
 }
 
-void Motor::setSGThreshold(uint8_t sgthrs) {
-    if (!isTMC || !takeUart(20)) return;
-    flushUartRx();
-    driver->SGTHRS(sgthrs);
-    giveUart();
-}
-
 uint16_t Motor::getSGResult() {
     if (!isTMC || !uartOk || !takeUart(10)) return 1023;
     flushUartRx();
     const uint16_t sg = static_cast<uint16_t>(driver->SG_RESULT());
     giveUart();
     return sg;
-}
-
-void Motor::update() {
 }
 
 String Motor::toJson() const {

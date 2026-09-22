@@ -42,7 +42,8 @@ struct ArmCommand {
         SHOW_OFF,    // trình diễn đồng bộ 6 khớp múa nhẹ nhàng trong khoảng an toàn
         SAVE_TEACH_POINT,
         PLAY_TEACH_POINTS,
-        CLEAR_TEACH_POINTS
+        CLEAR_TEACH_POINTS,
+        SET_GRIPPER // value: commanded servo angle, independent of J1..J6/Teach
     };
     Type type{Type::NONE};
     uint8_t axis{0};
@@ -69,6 +70,7 @@ public:
     // Đưa lệnh vào hàng đợi. Trả false nếu đầy/đang bận với lệnh không thể trộn.
     [[nodiscard]] bool submit(const ArmCommand& cmd, uint32_t timeoutMs = 10);
     [[nodiscard]] bool busy() const;
+    [[nodiscard]] bool gripperAvailable() const;
 
     [[nodiscard]] ArmMode mode() const;
     [[nodiscard]] SafetyManager* safety() noexcept { return safety_.get(); }
@@ -81,6 +83,7 @@ private:
     void taskLoop();
     void execute(const ArmCommand& cmd);
     void stopAllAndDiscardQueuedMotion();
+    void stopGripper();
     [[nodiscard]] bool resumeManualRelease();
     void applyJog(uint8_t axis, float deltaDeg);
     [[nodiscard]] bool motionAllowed() const;
@@ -107,11 +110,13 @@ private:
     std::unique_ptr<SafetyManager> safety_{nullptr};
     std::atomic<ArmMode> mode_{ArmMode::IDLE};
     std::atomic<bool> stopRequested_{false};
+    bool gripperReady_{false}; // initialized before motion/web tasks use it
+    std::atomic<bool> gripperActive_{false};
+    std::atomic<float> gripperTargetDeg_{90.0f}; // target only; no servo feedback
     std::atomic<bool> manualRelease_{false};
     std::atomic<uint32_t> lastCommandLatencyUs_{0};
     uint8_t recoveryJogAxis_{NUM_MOTORS};
     EndstopWhich recoveryJogSide_{EndstopWhich::MIN};
-    uint32_t driftTickCounter{0};
     String lastPlannerError_{"OK"};
     int lastPlannerFailIndex_{-1};
 

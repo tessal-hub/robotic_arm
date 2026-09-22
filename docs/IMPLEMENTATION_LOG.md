@@ -4493,3 +4493,164 @@ Log cho thấy J3 homing thất bại 2/2 lần liên tiếp với 2 root cause 
 - `pio run` → **SUCCESS** — RAM 15.3% (50,156 B), Flash 28.6% (955,245 B).
 - `tools/run_host_tests.sh` → **ALL 9 GROUPS PASSED** (kinematics, drawing workspace, joint logic, work plane, trajectory validator, homing FSM, homing logic, safety manager, web validation, firmware failure regressions).
 
+
+---
+
+## 2026-09-15 — Recheck sau safety hardening và đính chính tài liệu
+
+### Việc đã làm
+- What: kiểm tra lại checkout 226089f và các bản sửa UART direction, CLEAR_FAULT/resync, sensor init, Teach frame/ramp/NVS bằng bộ regression production; giữ nguyên logic điều khiển.
+- What: sửa nhãn còn sai trong ARM_GEOMETRY mục 8, SVG/bảng MDH ở SYSTEM_OVERVIEW và chú thích config.h: J4→J5 = 109 mm; điểm gập→J5 = 16+109 = 125 mm. Không đổi bất kỳ hằng số hình học nào.
+- What: sửa các mô tả drift watchdog còn hoạt động, tiêu đề DDA 50kHz không đúng với esp_timer từng trục, sensor khỏe từ mẫu publish đầu tiên và Clear Teach có thể xóa thành công một phần; thêm schema teachError, yêu cầu Save lại payload Teach cũ và checklist commissioning Teach/UART/encoder.
+- Why: yêu cầu owner kiểm tra lại; tài liệu sau lượt sửa trước vẫn có vài nhãn và điều kiện không khớp code.
+- Đính chính forward các entry trước: runner hiện có **10 nhóm**, không phải 9. Sensor không cần đủ 10 vòng đọc thành công để khỏe; Clear lỗi nạp lại trạng thái từng slot từ NVS, không giữ nguyên toàn bộ RAM.
+
+### Build gate
+- `pio run` (PlatformIO đã cài, gọi bằng đường dẫn tuyệt đối) → SUCCESS; RAM 50,156 bytes (15.3%), Flash 955,245 bytes (28.6%).
+- Toàn bộ lệnh g++ tương đương `tools/run_host_tests.sh`, chạy trực tiếp bằng PowerShell → 10 nhóm ALL PASSED; không có compiler warning trong lượt chạy này.
+- `python tools/digital_twin.py --self-test` → PASS.
+- JavaScript nhúng Web UI và SYSTEM_OVERVIEW → parse PASS; `git diff --check` → PASS.
+
+### Việc còn lại
+- Chưa flash hoặc chạy robot thật. Cần commissioning theo HW_REGRESSION_CHECKLIST mục 10 cùng homing/HELLO; host mocks không chứng minh timing bus, torque, collision, backlash hoặc chất lượng nét vẽ.
+- Browser không khả dụng trong phiên; chưa xác nhận giao diện trực quan trên màn hình thật.
+
+---
+
+## 2026-09-15 — Final refine: Teach Play và phản hồi Clear Fault
+
+### Việc đã làm
+- What: Arm kiểm tra slot Teach hợp lệ trước khi gọi Enable/resync; Play khi chưa có điểm hoặc mốc home đã đổi giữ nguyên Release. Không ghi đè lỗi FRAME bằng INVALID khi operator bấm Play lại.
+- What: API fault_clear trả 409 khi robot busy và 503 khi enqueue thất bại; executor vẫn giữ guard đứng yên trước resync.
+- Why: tránh bật mô-men cho một lệnh Play không có điểm chạy và giữ thông báo lỗi đủ rõ để operator biết phải Teach lại.
+- How: đổi thứ tự các guard hiện có, bổ sung assert trong regression production; không thêm dependency hoặc đổi geometry/motion profile.
+
+### Build gate
+- `pio run` → SUCCESS; RAM 50,156 bytes (15.3%), Flash 955,253 bytes (28.6%).
+- Host production firmware regression, g++ `-Wall -Wextra` → ALL PASSED; bổ sung Play rỗng/FRAME giữ Release và Play hợp lệ thoát Release.
+- JavaScript Web UI và SYSTEM_OVERVIEW parse → PASS.
+- 9 nhóm host còn lại và Python Twin đã pass trong lượt recheck trước; không đổi các module đó trong lượt này.
+
+### Việc còn lại
+- Chưa commit hoặc flash. Commissioning robot thật và visual acceptance vẫn cần thực hiện theo checklist; build/host tests không thay thế xác nhận phần cứng.
+
+---
+
+## 2026-09-16 — Log chẩn đoán UART TMC2209
+
+### Việc đã làm
+- What: `src/motor.cpp` in `[TMC UART READ]` với version thực đọc, địa chỉ và CRCerror; boot in `[TMC UART WRITE]` với IFCNT trước/sau lệnh shaft(false) đã có, delta modulo 256 và lỗi của từng lần đọc.
+- Why: owner báo motor có mô-men giữ nhưng cả bốn địa chỉ không UART; cần dữ liệu trước khi kết luận phần cứng hoặc firmware.
+- How: chỉ thêm đọc và log, giữ mutex và safety gate. Không thêm lệnh ghi/chuyển động. Delta kỳ vọng 1 chỉ có ý nghĩa khi cả hai lần đọc hợp lệ; CRCerror của TMCStepper 0.7.3 bao gồm timeout và CRC lỗi. Đồng bộ mock IFCNT/version và SYSTEM_OVERVIEW.
+
+### Build gate
+- `pio run` → SUCCESS; RAM 50,156 bytes (15.3%), Flash 955,585 bytes (28.6%). Chạy bằng PlatformIO đã cài với quyền ghi cache/lock ngoài workspace.
+- Host production firmware regression, g++ -Wall -Wextra → ALL PASSED, không compiler warning.
+- Không sửa kinematics; không chạy lại kin suite.
+
+### Việc còn lại
+- Chưa flash hoặc xác nhận UART trên robot thật; cần log boot mới.
+- Browser không khả dụng; đã đọc và cập nhật trực tiếp HTML, chưa kiểm tra render.
+
+---
+
+## 2026-09-16 — Chuẩn bị test UART loopback độc lập
+
+### Việc đã làm
+- What: thêm project `tools/uart_loopback` và hướng dẫn nạp/khôi phục; dùng chân và baud từ config.h, partition default_8MB.csv khớp firmware chính. Cập nhật SYSTEM_OVERVIEW.
+- Why: tách kiểm tra UART ESP32 khỏi TMC2209 sau log đọc lỗi cả bốn địa chỉ; owner chọn chuẩn bị file trước, chưa nạp.
+- How: gửi 7 byte có sequence thay đổi, timeout nhận 200 ms; PASS chỉ khi số byte gửi/nhận đủ và memcmp khớp. In TX/RX mỗi giây. Không khởi tạo motor/sensor/WiFi hoặc ghi NVS; không sửa firmware điều khiển.
+
+### Build gate
+- `pio run -d tools/uart_loopback` → SUCCESS; RAM 18,432 bytes, Flash 264,021 bytes.
+- `pio run` firmware chính → SUCCESS; RAM 50,156 bytes, Flash 955,585 bytes.
+- `git diff --check` → PASS. Không sửa kinematics.
+
+### Việc còn lại
+- Chưa nạp/chạy hardware theo lựa chọn của owner. Cần tắt nguồn động lực, tách UART driver và nối GPIO16 với GPIO15 trước khi test; nạp lại firmware chính trước khi vận hành robot.
+
+---
+
+## 2026-09-17 — Test độc lập một TMC2209 địa chỉ UART 0
+
+### Việc đã làm
+- What: thay loopback trong tools/uart_loopback bằng init một TMC2209 addr=0; giữ đường dẫn, đổi env thành tmc2209-address0 và dùng TMCStepper 0.7.3. Cập nhật README và SYSTEM_OVERVIEW.
+- Why: owner xác nhận loopback PASS liên tục và yêu cầu test driver thật ở địa chỉ 0.
+- How: dùng Serial/GPIO/baud từ config.h; init theo standalone cũ (700mA, SpreadCycle, microstep16, hold8). Giữ sáu STEP LOW, không tạo chuyển động; mọi giao dịch qua mutex bounded 50ms. In IFCNT trước/sau một ghi cùng giá trị pdn_disable, rồi version/CRCerror mỗi giây; PASS cần 0x21 và không lỗi đọc. Không init WiFi/sensor hoặc ghi NVS.
+
+### Build gate
+- `pio run -d tools/uart_loopback` → SUCCESS; RAM 18,976 bytes, Flash 293,009 bytes.
+- `pio run` → SUCCESS; RAM 50,156 bytes, Flash 955,585 bytes.
+- `git diff --check` → PASS. Chương trình test là phép kiểm tra chạy trên hardware; không sửa kinematics.
+
+### Việc còn lại
+- Chưa nạp hoặc chạy driver thật. Cần tháo cầu loopback, nối một driver MS1/MS2 LOW với VM/VIO/GND đúng; driver có dòng giữ dù không phát STEP. Nạp lại firmware chính sau test.
+
+---
+
+## 2026-09-17 — Tăng thời gian chờ đầu firmware chính
+
+### Việc đã làm
+- What: src/main.cpp đổi delay sau Serial.begin từ 200ms lên 1500ms, trước NVS/UART/motor init; cập nhật SYSTEM_OVERVIEW.
+- Why: owner yêu cầu thử timing giống bài test TMC2209 độc lập đã đọc version=0x21 PASS.
+- How: chỉ đổi một thời gian chờ; không thay cấu hình driver hoặc safety gate. Đây là thử nghiệm, chưa xác nhận nguyên nhân lỗi UART.
+
+### Build gate
+- `pio run` → SUCCESS; RAM 50,156 bytes (15.3%), Flash 955,585 bytes (28.6%).
+- Không sửa kinematics; không thêm logic cần host test.
+
+### Việc còn lại
+- Chưa flash. Cần log boot firmware chính sau nạp để xác nhận ảnh hưởng trên hardware.
+
+---
+
+## 2026-09-17 — Giảm chờ init xuống 1000ms
+
+### Việc đã làm
+- What: src/main.cpp đổi delay đầu firmware từ 1500ms xuống 1000ms theo owner; cập nhật SYSTEM_OVERVIEW.
+- Evidence: log owner ở 1500ms xác nhận cả J1–J4 version=0x21/readError=0, IFCNT 17→18. PCA9548A NACK và encoder chưa sẵn sàng vẫn là vấn đề còn lại.
+
+### Build gate
+- `pio run` → SUCCESS; RAM 50,156 bytes (15.3%), Flash 955,585 bytes (28.6%).
+- Không sửa kinematics hoặc logic điều khiển.
+
+### Việc còn lại
+- Chưa flash; mức 1000ms cần xác nhận khi bật nguồn thực tế, chưa suy rộng kết quả 1500ms sang 1000ms.
+
+---
+
+## 2026-09-22 — Ponytail cleanup và servo tay gắp MG90 GPIO13
+
+### Việc đã làm
+- What: bỏ TMC2209Diag/getDriverStatus/setSGThreshold, Motor::update rỗng và getter không có caller; bỏ updateDriftCheck/counter/config chết; gộp angleFrom*/actuatorAngleFrom* và đổi caller Planner; bỏ CONFIG_ASYNC_TCP_RUNNING_CORE. Giữ encoder resync, telemetry, NVS và các safety gate đang dùng.
+- What: thêm GRIPPER_* trong src/config.h, signal GPIO13, LEDC channel 0 / 50Hz / 14-bit; mặc định góc lệnh 0–180° ánh xạ 1000–2000us. Arm begin giữ duty=0, không ra lệnh xoay khi boot. Không thêm dependency.
+- What: POST /api/gripper với deg → ArmCommand::SET_GRIPPER → motion task; parse strict, kiểm tra finite/range ở cả submit và execute. Chặn khi busy, Release, FAULT/E_STOP, STOP pending hoặc PWM init thất bại. STOP ALL xóa queue và ngắt xung; Release và mất quyền chuyển động trong motion loop cũng ngắt xung.
+- What: Web tab Jog thêm Gripper MG90 với nhập góc/Set angle, trạng thái PWM và khóa pending/offline/unavailable. Status gripper công bố ready/available/active/targetDeg/minDeg/maxDeg/pin. Target là lệnh, không phải góc đo; không suy ra servo đã tới vị trí từ busy. Teach A/B/C vẫn chỉ lưu sáu khớp.
+- Why: owner đồng ý áp dụng audit và yêu cầu thêm servo MG90 làm tay gắp, chưa chọn GPIO; chọn GPIO13 còn trống theo pinout.
+- How: dùng LEDC native trong Arduino ESP32 đang cài, không thêm task/module/thư viện servo. Hiệu chỉnh dải xung và góc ở config.h theo phần cứng thật; chưa khẳng định hành trình cơ khí MG90. Đã cập nhật SYSTEM_OVERVIEW (GPIO, RTOS, modules, API, status, commissioning và Generated).
+
+### Build gate
+- `pio run` → SUCCESS; RAM 50,204 bytes (15.3%), Flash 963,753 bytes (28.8%). Dùng PlatformIO đã cài với quyền ghi cache/lock ngoài workspace; không flash.
+- `tools/run_host_tests.sh` qua Git Bash + g++ → ALL HOST TESTS PASSED, gồm kinematics, production homing FSM, safety và production firmware regression.
+- Regression servo: boot không xung, queue thực thi góc 0/90/180 đúng duty, từ chối NaN/Inf/ngoài range, FAULT/busy/Release, STOP xóa lệnh chờ và ngắt PWM, PWM setup lỗi không nhận lệnh.
+- Node: parse toàn bộ inline JavaScript và kiểm tra trạng thái control servo (chưa kết nối/available/unavailable/pending/offline) → PASS.
+- `git diff --check` → PASS. Không sửa kinematics hoặc geometry.
+
+### Việc còn lại
+- Chưa flash/commissioning: signal servo → GPIO13, nguồn servo riêng phù hợp model, chung GND ESP32; thử không tải quanh góc lệnh 90° rồi hiệu chỉnh dải xung/góc. STOP/Release/FAULT ngắt xung có thể mất lực giữ và không bảo đảm servo dừng tức thời.
+- Browser không khả dụng (CUA trả No browser is available); đã đọc HTML và kiểm tra JS nhưng chưa xác nhận render Web UI.
+- Không commit; giữ nguyên các thay đổi có sẵn trước lượt này. Giữ skill Impeccable hiện tại theo lựa chọn owner.
+
+---
+
+## 2026-09-22 — Viết lại README dễ tra cứu
+
+### Việc đã làm
+- Viết lại README bằng tiếng Việt, đưa build/nạp/kết nối và vận hành Web lên trước; gom GPIO vào bảng, bổ sung tay gắp MG90, Teach và liên kết tài liệu chi tiết bằng đường dẫn tương đối.
+- Đối chiếu source hiện tại: sửa J1 MIN/MAX, J6 1:1, I2C 40kHz, sensor period 20ms; bỏ mô tả DDA/SPSC 50kHz, cổ tay vi sai, drift watchdog đang bật và vẽ trên mặt phẳng nghiêng không đúng code. Không thay đổi thiết kế hoặc firmware.
+- Cập nhật Generated trong SYSTEM_OVERVIEW; giữ phần kiểm chứng hardware/render chưa hoàn tất.
+
+### Build gate
+- `pio run` → SUCCESS; RAM 50,204 bytes, Flash 963,753 bytes (build incremental, không đổi firmware).
+- Kiểm tra 19 liên kết/anchor README, code fences, đường dẫn portable và `git diff --check` → PASS.
+- Không chạy lại host tests vì chỉ sửa tài liệu; không flash hoặc commit.

@@ -72,7 +72,7 @@ void setup() {
     }
 
     Serial.begin(115200);
-    delay(200);
+    delay(1000); // Startup wait before UART init; verify on cold power-up.
     Serial.printf("\n\n=== %s v%s (%s) ===\n", FW_NAME, FW_VERSION, FW_BUILD_DATE);
 
     // 1) NVS

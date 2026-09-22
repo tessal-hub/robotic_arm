@@ -42,10 +42,6 @@ public:
     [[nodiscard]] float angleFromSteps(uint8_t axis) const;
     // Góc khớp theo encoder (chỉ có nghĩa sau khi đã set home).
     [[nodiscard]] float angleFromEncoder(uint8_t axis);
-    // Góc trục động cơ trực tiếp theo bước máy.
-    [[nodiscard]] float actuatorAngleFromSteps(uint8_t axis) const;
-    // Góc trục động cơ trực tiếp theo encoder.
-    [[nodiscard]] float actuatorAngleFromEncoder(uint8_t axis);
     // Góc thô tuyệt đối từ encoder (raw accumulated, không cần home) — homing dùng.
     [[nodiscard]] float rawEncoder(uint8_t axis);
 
@@ -64,8 +60,7 @@ public:
     [[nodiscard]] uint8_t homedCount() const noexcept;
     [[nodiscard]] bool allPositioningHomed() const noexcept; // J1..J4
 
-    // So sánh step-count vs encoder. Trả về true NẾU phát hiện lệch quá ngưỡng (latch fault).
-    bool updateDriftCheck(uint8_t axis);
+    // Drift watchdog disabled; retain fault-clear encoder resync behavior.
     [[nodiscard]] bool hasDriftFault(uint8_t axis) const noexcept { return axis < NUM_MOTORS && driftFault[axis]; }
     [[nodiscard]] bool hasAnyDriftFault() const noexcept;
     void clearDriftFault(uint8_t axis) { if (axis < NUM_MOTORS) driftFault[axis] = false; }
@@ -95,8 +90,6 @@ private:
     bool homed[NUM_MOTORS]{};
     bool restored[NUM_MOTORS]{};
     bool driftFault[NUM_MOTORS]{};
-    uint32_t lastRunningMs[NUM_MOTORS]{};
-    uint8_t driftFailCount[NUM_MOTORS]{};
 
     // Hiệu chuẩn đo được (thay hằng số cố định khi đã home). Static: 1 instance duy nhất.
     static float s_encSign[NUM_MOTORS];      // dấu encoder (±1)

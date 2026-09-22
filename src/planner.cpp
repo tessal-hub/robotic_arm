@@ -146,7 +146,7 @@ bool Planner::startMoveTo(float x, float y, float z, float feedMmS) {
     // J6 chỉ roll quanh trục tool nên không tham gia Cartesian/Draw.
     for (uint8_t i = 0; i < CARTESIAN_AXIS_COUNT; ++i) {
         if (!jm->isHomed(i)) { stop(); return false; }
-        const float curDeg = jm->actuatorAngleFromSteps(i);
+        const float curDeg = jm->angleFromSteps(i);
         deltaAct[i] = target[i] - curDeg;
         steps[i] = JointModel::degreesToSteps(i, fabsf(deltaAct[i]));
         if (steps[i] > 0) anyMove = true;

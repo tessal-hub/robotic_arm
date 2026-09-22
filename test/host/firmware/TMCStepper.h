@@ -5,10 +5,12 @@ public:
     bool CRCerror = false, direction = false, readOK = true, writeOK = true;
     int reads = 0, failReadAt = 0;
     uint8_t off = 4;
+    uint8_t ifcnt = 0;
     TMC2209Stepper(HardwareSerial*, float, uint8_t) {}
     bool shaft() { CRCerror = !readOK || ++reads == failReadAt; return CRCerror ? false : direction; }
-    void shaft(bool b) { if (writeOK) direction = b; }
-    uint8_t version() { return readOK ? 0x21 : 0; }
+    void shaft(bool b) { if (writeOK) { direction = b; ++ifcnt; } }
+    uint8_t version() { CRCerror = !readOK; return readOK ? 0x21 : 0; }
+    uint8_t IFCNT() { CRCerror = !readOK; return readOK ? ifcnt : 0; }
     void begin() {}
     void toff(uint8_t v) { if (writeOK) off = v; }
     uint8_t toff() { return off; }
