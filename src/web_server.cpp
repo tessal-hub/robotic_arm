@@ -2211,7 +2211,6 @@ void webBegin(WebServer& server, ArmController* arm, WifiManager* wifi,
     server.on("/api/release/j1-j4", HTTP_POST, handleReleaseJ1J4);
     server.on("/api/enable/j1-j4", HTTP_POST, handleEnableJ1J4);
     server.on("/api/showoff", HTTP_POST, handleShowOff);
-    server.on("/api/showoff", HTTP_GET, handleShowOff);
     server.on("/api/teach/save", HTTP_POST, handleTeachSave);
     server.on("/api/teach/play", HTTP_POST, handleTeachPlay);
     server.on("/api/teach/clear", HTTP_POST, handleTeachClear);

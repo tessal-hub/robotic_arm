@@ -300,13 +300,13 @@ tr:hover td{background:#243247}
       <div class="body">
         Một class cho cả hai loại driver (<code>isTmc()</code> phân biệt).<br>
         <span class="tag">gpio init</span> Gọi <code>gpio_reset_pin()</code> cho toàn bộ chân STEP/DIR (đặc biệt GPIO 38–42, 47) tách triệt để peripheral matrix (JTAG MTDO/MTCK, boot ROM) sang GPIO thuần push-pull 40mA.<br>
-        <span class="tag">step engine</span> esp_timer độc lập từng trục mang nhãn riêng (label), kiểm tra mã lỗi khởi tạo và kích hoạt; phát xung bước trực tiếp trong IRAM với hồ sơ gia tốc S-curve trapezoidal.<br>
+        <span class="tag">step engine</span> esp_timer độc lập từng trục mang nhãn riêng (label), kiểm tra mã lỗi khởi tạo và kích hoạt; thiếu timer hoặc re-arm timer lỗi thì xóa trạng thái running để không báo chuyển động ảo. Phát xung bước trực tiếp trong IRAM với hồ sơ gia tốc S-curve trapezoidal.<br>
         <span class="tag">fail-fast e-stop</span> Đầu Step ISR kiểm tra <code>safety_->isEStop()</code> (inject <code>SafetyManager*</code> qua <code>setSafetyManager()</code>) — dừng phát xung tức thì trong $\le 20\,\mu\text{s}$ mà không phụ thuộc RTOS context switch, không đọc global.<br>
         <span class="tag">position</span> <code>absSteps</code> atomic int64, tăng/giảm theo hướng mỗi xung — nguồn chân lý vị trí.<br>
         <span class="tag">direction</span> A4988: chân DIR (enable trả true). TMC2209 không DIR: đọc register <code>shaft()</code> trước, chỉ ghi khi giá trị khác mong đợi; sau ghi flush RX rồi <b>đọc lại xác nhận</b> (read-back verify); CRCerror hoặc verified != mong đợi → <code>setDirection()</code> trả <code>false</code>, <code>Motor::run()</code> từ chối phát xung để tránh chạy sai chiều khi UART mất datagram. Cache <code>dirCW</code> chỉ cập nhật sau read-back thành công.<br>
         <span class="tag">config TMC</span> rms_current, microsteps, spreadCycle (+pwm_autoscale off), ihold/iholddelay, toff=4 luôn enable, pdn_disable, mstep_reg_select.<br>
         <span class="tag">UART test</span> Project độc lập <code>tools/uart_loopback</code> hiện test một TMC2209 địa chỉ 0: Serial/GPIO/baud từ config.h, init 700mA/SpreadCycle/microstep16/hold8 như standalone cũ. Giữ STEP LOW, không phát bước; UART có mutex timeout 50ms. In IFCNT trước/sau một ghi và version mỗi giây; PASS khi version=0x21 và không lỗi đọc. Tháo cầu loopback, nối driver thật với MS1/MS2 LOW, cấp VM/VIO và GND chung. Nạp lại firmware chính sau test.<br>
-        <span class="tag">diag</span> <code>testUART()</code> (version phải 0x21) in <code>[TMC UART READ]</code>: địa chỉ, version thực đọc và <code>readError</code>. TMCStepper 0.7.3 dùng CRCerror cho cả timeout và CRC lỗi, không phân biệt hai nguyên nhân. Khi boot, <code>[TMC UART WRITE]</code> in IFCNT trước/sau lệnh <code>shaft(false)</code> có sẵn, delta modulo 256 kỳ vọng = 1; chỉ diễn giải delta khi cả hai readError = 0. Các giao dịch giữ mutex UART, không thêm lệnh chuyển động hay thay đổi safety gate. <code>getSGResult()</code>. API diagnostic không có caller đã được loại bỏ.
+        <span class="tag">diag</span> <code>testUART()</code> chỉ pass khi lấy được mutex, version = 0x21 và không có CRCerror; <code>enable()</code> cũng yêu cầu đọc version/TOFF không lỗi. TMCStepper 0.7.3 dùng CRCerror cho cả timeout và CRC lỗi, không phân biệt hai nguyên nhân. Khi boot, <code>[TMC UART WRITE]</code> in IFCNT trước/sau lệnh <code>shaft(false)</code> có sẵn, delta modulo 256 kỳ vọng = 1; chỉ diễn giải delta khi cả hai readError = 0. Các giao dịch giữ mutex UART, không thêm lệnh chuyển động hay thay đổi safety gate. <code>getSGResult()</code>. API diagnostic không có caller đã được loại bỏ.
       </div>
     </details>
 
@@ -455,7 +455,7 @@ tr:hover td{background:#243247}
         Front-end: nút hành động (home/move/draw/sethome/wifi) tự disable ngay khi request pending, và tiếp tục disable khi arm busy hoặc FAULT; toast phản hồi
         thành công/lỗi; cảnh báo "MẤT KẾT NỐI" khi poll lỗi ≥3 lần liên tiếp.<br>
         Validation đầu vào dùng parser strict (không để chuỗi lỗi tự thành 0): jog/home/sethome/clearcalib axis, move/draw/WorkPlane coordinate, radius và feed đều bắt buộc finite; WorkPlane toggle chỉ nhận <code>en=0|1</code>; feed chỉ hợp lệ trong (1;200) mm/s; ssid ≤ 32, pass ≤ 64 ký tự.<br>
-        Toàn bộ handler chỉ tạo <code>ArmCommand</code> và enqueue — trừ <code>/api/clearcalib</code>
+        <code>/api/showoff</code> chỉ nhận POST; GET không khởi động chuyển động. Toàn bộ handler chỉ tạo <code>ArmCommand</code> và enqueue — trừ <code>/api/clearcalib</code>
         (gọi trực tiếp forgetHome, an toàn vì chỉ xoá dữ liệu calib) và wifi save (restart).
       </div>
     </details>
@@ -791,6 +791,7 @@ tr:hover td{background:#243247}
 
   <div class="card">
     <h2>Checklist commissioning (khi có hardware)</h2>
+    <p><b>Gate phát hành:</b> cần cold boot tại mức chờ UART 1000 ms, xác nhận PCA9548A/AS5600, STOP/endstop, J5 dry-run, MG90 và render Web trên thiết bị thật. Theo lựa chọn của owner, Web giữ cách dùng đơn giản hiện tại: API không yêu cầu đăng nhập, AP dùng mật khẩu mặc định. Chi tiết phép thử ở <code>docs/HW_REGRESSION_CHECKLIST.md</code>.</p>
     <p><b>MG90:</b> dây signal → GPIO13; V+ → nguồn servo riêng phù hợp model (không lấy từ GPIO/3V3), GND nguồn servo nối chung GND ESP32. Thử không tải quanh góc lệnh 90° trước, rồi hiệu chỉnh <code>GRIPPER_MIN/MAX_PULSE_US</code> và <code>GRIPPER_MIN/MAX_DEG</code> theo tay gắp thật; chưa xác nhận dải góc cơ khí của servo này. Giữ vật thử nhẹ khi kiểm tra STOP ALL/Release/FAULT: ngắt xung có thể làm mất lực giữ, không đảm bảo dừng tức thời servo. Chưa flash/commissioning MG90.</p>
     <table>
       <tr><th>#</th><th>Việc</th><th>Trạng thái</th></tr>
@@ -817,6 +818,8 @@ tr:hover td{background:#243247}
 </div>
 
 <div class="footer">
+   Generated 2026-09-29 — Owner giữ Web đơn giản như hiện tại, không thêm đăng nhập hay đổi cơ chế AP; gate còn lại là kiểm chứng trên robot thật.<br>
+   Generated 2026-09-29 — Motor không giữ running khi thiếu timer hoặc re-arm thất bại; UART test/Enable kiểm tra CRCerror; bỏ GET gây chuyển động ở /api/showoff. Build và host regressions pass, commissioning còn chờ.<br>
    Generated 2026-09-22 — Viết lại README tiếng Việt theo luồng build/nạp → kết nối → vận hành, bổ sung MG90 và liên kết tài liệu; đối chiếu thông số với source hiện tại, bỏ mô tả DDA/vi sai/watchdog không còn đúng.<br>
    Generated 2026-09-22 — Ponytail cleanup API/config không dùng; thêm servo MG90 GPIO13, LEDC 50 Hz/14-bit, POST /api/gripper qua queue và control góc trong tab Jog. Boot không phát xung; STOP ALL/Release/FAULT ngắt PWM. Teach vẫn chỉ lưu J1–J6. Host tests pass; commissioning và render UI còn chờ.<br>
    Generated 2026-09-17 — Giảm chờ đầu firmware chính từ 1500ms xuống 1000ms theo owner. Log hardware ở 1500ms đã xác nhận J1–J4 version=0x21 và IFCNT tăng 1; mức 1000ms chờ kiểm chứng. PCA9548A vẫn NACK trong log đó.<br>

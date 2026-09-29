@@ -88,3 +88,12 @@ Chạy trên phần cứng thật sau thay đổi an toàn / homing / endstop (2
 - [ ] Clear và reboot: các slot đã xóa không xuất hiện lại. Khi có lỗi NVS, UI hiển thị lỗi và phản ánh đúng từng slot còn hợp lệ; không coi HTTP 200 enqueue là bằng chứng đã ghi flash thành công.
 - [ ] Khởi động thiếu một encoder: khớp đó không được restore home từ góc mặc định 0°. Kiểm tra lại sau khi kết nối encoder ổn định.
 - [ ] Với robot đứng yên, ngắt UART rồi yêu cầu Jog TMC đổi chiều: không phát STEP sai chiều. Khôi phục UART và xác nhận chiều thực tế trước khi chạy pose dài.
+
+## 11. Gate phát hành trên robot thật
+
+- [ ] Cold boot ở mức chờ UART 1000 ms: J1–J4 đều trả version 0x21, readError=0; mất UART phải từ chối Jog/Home J4, không phát STEP sai chiều.
+- [ ] PCA9548A và cả sáu AS5600 đọc ổn định; rút thử một encoder thì khớp đó không được restore home/Teach Play.
+- [ ] Thử lỗi timer hoặc mất nguồn driver có quan sát STEP, trạng thái Web và dừng an toàn; host test chỉ chứng minh nhánh logic, không đo xung thật.
+- [ ] Kiểm tra STOP ALL, endstop, Release/Enable, Teach, J5 dry-run và HELLO theo các mục trên; lưu log/ảnh/kết quả đo vào IMPLEMENTATION_LOG.
+- [ ] MG90: nguồn riêng, chung GND, thử không tải 90°, đo dải xung/góc cơ khí và phản ứng STOP/Release/FAULT.
+- [ ] Kiểm tra Web UI trên điện thoại và máy tính thật. Xác nhận robot chỉ dùng trong mạng do operator kiểm soát; theo lựa chọn của owner, API không yêu cầu đăng nhập và AP dùng mật khẩu mặc định.

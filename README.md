@@ -55,6 +55,8 @@ Firmware thử kết nối WiFi đã lưu trong NVS; nếu chưa có hoặc kế
 | Mật khẩu AP | `12345678` |
 | Địa chỉ Web | IP in trong log serial; hoặc `http://robot-arm.local` nếu mDNS hoạt động |
 
+Theo lựa chọn của owner, Web giữ cách dùng đơn giản: không có bước đăng nhập. Chỉ kết nối robot vào mạng do operator kiểm soát vì người truy cập được Web có thể gửi lệnh điều khiển.
+
 Kết nối máy tính/điện thoại vào cùng mạng với robot rồi mở địa chỉ trên. Nhập WiFi của bạn qua phần WiFi trong Web UI; thông tin được lưu vào NVS và ESP32 khởi động lại. Không đưa SSID/mật khẩu mạng riêng vào source.
 
 ## Vận hành trên Web

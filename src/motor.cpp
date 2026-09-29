@@ -138,7 +138,10 @@ void IRAM_ATTR Motor::onStepTimer(void* arg) {
         return;
     }
 
-    esp_timer_start_once(self->stepTimer, nextInterval);
+    if (esp_timer_start_once(self->stepTimer, nextInterval) != ESP_OK) {
+        self->running.store(false, std::memory_order_release);
+        self->stepsRemaining.store(0, std::memory_order_relaxed);
+    }
 }
 
 bool Motor::takeUart(uint32_t timeoutMs) {
@@ -162,11 +165,14 @@ void Motor::flushUartRx() {
 
 bool Motor::testUART() {
     if (!isTMC) return true; // A4988 ko có UART
-    if (!takeUart(50)) return uartOk;
+    if (!takeUart(50)) {
+        uartOk = false;
+        return false;
+    }
     flushUartRx();
     driverVersion = driver->version();
-    uartOk = (driverVersion == 0x21);
     const bool readError = driver->CRCerror;
+    uartOk = (driverVersion == 0x21) && !readError;
     giveUart();
     Serial.printf("[TMC UART READ] %s addr=%u version=0x%02X expected=0x21 readError=%u (timeout/CRC)\n",
                   label, address, driverVersion, readError);
@@ -356,6 +362,9 @@ void Motor::run(bool cw, uint32_t steps) {
             Serial.printf("[MOTOR LOI] %s esp_timer_start_once that bai: %d\n", label, timerErr);
         }
     } else {
+        running.store(false, std::memory_order_release);
+        stepsRemaining.store(0, std::memory_order_relaxed);
+        targetSteps.store(0, std::memory_order_relaxed);
         Serial.printf("[MOTOR LOI] %s stepTimer null, khong the phat xung!\n", label);
     }
 }
@@ -392,6 +401,9 @@ void Motor::runContinuous(bool cw) {
             Serial.printf("[MOTOR LOI] %s esp_timer_start_once that bai: %d\n", label, timerErr);
         }
     } else {
+        running.store(false, std::memory_order_release);
+        stepsRemaining.store(0, std::memory_order_relaxed);
+        targetSteps.store(0, std::memory_order_relaxed);
         Serial.printf("[MOTOR LOI] %s stepTimer null, khong the phat xung!\n", label);
     }
 }
@@ -479,9 +491,10 @@ bool Motor::enable(bool en) {
     driver->toff(expectedToff);
     flushUartRx();
     driverVersion = driver->version();
-    uartOk = (driverVersion == 0x21);
+    uartOk = (driverVersion == 0x21) && !driver->CRCerror;
     flushUartRx();
-    const bool ok = uartOk && driver->toff() == expectedToff;
+    const bool matched = driver->toff() == expectedToff;
+    const bool ok = uartOk && !driver->CRCerror && matched;
     giveUart();
     if (ok) enabled.store(en, std::memory_order_release);
     return ok;

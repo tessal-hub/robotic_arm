@@ -58,6 +58,10 @@ struct Rig {
 static void direction_failure_stops_all_start_paths() {
     Rig r;
     auto& m = r.motors[0]; auto* driver = m.getDriver();
+    assert(m.testUART());
+    fakeMutexOK = false;
+    assert(!m.testUART()); // J4 homing must not reuse a stale UART success.
+    fakeMutexOK = true;
     assert(m.setDirection(true));
     driver->writeOK = false;
     assert(!m.setDirection(false));
@@ -79,6 +83,28 @@ static void direction_failure_stops_all_start_paths() {
     fakeMutexOK = false;
     assert(!m.setDirection(true));
     fakeMutexOK = true;
+}
+
+static void missing_timer_cannot_report_running() {
+    Rig r;
+    auto& m = r.motors[4];
+    esp_timer_delete(m.stepTimer);
+    m.stepTimer = nullptr;
+    m.run(true, 10);
+    assert(!m.isRunning() && m.getTargetSteps() == 0);
+    m.runContinuous(true);
+    assert(!m.isRunning() && m.getTargetSteps() == 0);
+}
+
+static void timer_rearm_failure_cannot_leave_motor_running() {
+    Rig r;
+    auto& m = r.motors[4];
+    m.run(true, 10);
+    assert(m.isRunning());
+    fakeTimerOK = false;
+    Motor::onStepTimer(&m);
+    assert(!m.isRunning() && m.stepsRemaining.load() == 0);
+    fakeTimerOK = true;
 }
 
 static void clear_fault_and_resync_require_stopped_motors() {
@@ -271,6 +297,8 @@ static void gripper_queue_limits_and_stop() {
 int main() {
     gripper_queue_limits_and_stop();
     direction_failure_stops_all_start_paths();
+    missing_timer_cannot_report_running();
+    timer_rearm_failure_cannot_leave_motor_running();
     clear_fault_and_resync_require_stopped_motors();
     sensor_health_requires_a_published_sample_and_task();
     teach_frame_is_bound_to_home_across_reboot();

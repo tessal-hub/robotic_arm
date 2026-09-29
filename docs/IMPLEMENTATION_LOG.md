@@ -4654,3 +4654,36 @@ Log cho thấy J3 homing thất bại 2/2 lần liên tiếp với 2 root cause 
 - `pio run` → SUCCESS; RAM 50,204 bytes, Flash 963,753 bytes (build incremental, không đổi firmware).
 - Kiểm tra 19 liên kết/anchor README, code fences, đường dẫn portable và `git diff --check` → PASS.
 - Không chạy lại host tests vì chỉ sửa tài liệu; không flash hoặc commit.
+
+---
+
+## 2026-09-29 — Rà gate production và sửa lỗi timer/UART/Web
+
+### Việc đã làm
+- What: `src/motor.cpp` xóa trạng thái chạy khi thiếu timer hoặc re-arm thất bại; `testUART()` từ chối khi không lấy được mutex/CRC lỗi; `enable()` yêu cầu cả version và TOFF read-back không lỗi. `src/web_server.cpp` bỏ GET `/api/showoff`, chỉ còn POST cho lệnh chuyển động.
+- Why: tránh báo chuyển động ảo, dùng kết quả UART cũ khi bus bận, và khởi động Show Off bằng GET. Thêm regression trong `test/host/test_firmware_regression.cpp`.
+- How: giữ các đường lệnh và safety gate hiện có; cập nhật `docs/SYSTEM_OVERVIEW.html` và gate còn thiếu trong `docs/HW_REGRESSION_CHECKLIST.md`.
+
+### Build gate
+- `pio run` → SUCCESS; RAM 50,204 bytes, Flash 963,777 bytes.
+- `tools/run_host_tests.sh` → ALL HOST TESTS PASSED (gồm kinematics và firmware failure regressions).
+- Chưa flash hoặc chạy trên robot thật.
+
+### Việc còn lại
+- Cold boot với UART delay 1000 ms; kiểm tra PCA9548A/AS5600, J5/drawing, MG90, STOP/endstop/Teach, Web render trên thiết bị thật và ghi bằng chứng vào checklist/log.
+- API Web chưa xác thực, AP dùng mật khẩu mặc định. Cần chốt chính sách truy cập trước khi kết nối mạng vận hành; chưa thể tuyên bố production ready.
+
+---
+
+## 2026-09-29 — Chốt cách dùng Web đơn giản
+
+### Việc đã làm
+- What: giữ nguyên Web/API không đăng nhập và AP mặc định theo lựa chọn của owner; cập nhật README, SYSTEM_OVERVIEW và checklist phần cứng để mô tả đúng cách vận hành.
+- Why: owner muốn Web đơn giản như cũ, không cần nâng mức bảo mật. Entry trước là trạng thái tại thời điểm rà soát; quyết định này thay thế hạng mục chờ chốt chính sách truy cập.
+
+### Build gate
+- Chỉ sửa tài liệu; firmware không đổi. Build và host tests đã pass ở entry ngay trước.
+- `git diff --check` → PASS.
+
+### Việc còn lại
+- Chưa flash/commissioning robot thật; cần hoàn thành các phép thử trong HW_REGRESSION_CHECKLIST trước khi xác nhận production ready.
