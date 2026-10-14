@@ -221,8 +221,8 @@ tr:hover td{background:#243247}
     <table>
       <tr><th>Tên</th><th>Core</th><th>Prio</th><th>Chu kỳ</th><th>Stack</th><th>Trách nhiệm</th></tr>
       <tr>
-        <td><code>SensorScanTask</code></td><td>0</td><td>4</td><td>20 ms (50 Hz)</td><td>4096 B</td>
-        <td>Quét 6× AS5600 qua PCA9548A trên Core 0 (I2C 40kHz Low-Speed mode, chống nhiễu tối đa cho cáp dài J5/J6): chọn kênh → đọc ANGLE reg (Repeated Start) → lọc EMA α=0.2, cập nhật accumulated angle + turn count. Nếu <b>cả 6</b> sensor lỗi → tự phục hồi I2C bus (9 xung SCL) rate-limit 1 lần/5s, đồng thời cấu hình lại PCA9548A và AS5600. Đã đăng ký <b>Task WDT</b> (feed mỗi vòng quét).</td>
+        <td><code>SensorScanTask</code></td><td>0</td><td>4</td><td>35 ms (~28.5 Hz)</td><td>4096 B</td>
+        <td>Quét 6× AS5600 qua PCA9548A trên Core 0 (I2C 20kHz Low-Speed mode, chống nhiễu tối đa cho cáp dài J5/J6): chọn kênh → đọc ANGLE reg (Repeated Start) → lọc EMA α=0.2, cập nhật accumulated angle + turn count. Nếu <b>cả 6</b> sensor lỗi → tự phục hồi I2C bus (9 xung SCL) rate-limit 1 lần/5s, đồng thời cấu hình lại PCA9548A và AS5600. Đã đăng ký <b>Task WDT</b> (feed mỗi vòng quét).</td>
       </tr>
       <tr>
         <td><code>arm_motion</code></td><td>1</td><td>3</td><td>10 ms (100 Hz)</td><td>5120 B</td>
@@ -313,7 +313,7 @@ tr:hover td{background:#243247}
     <details class="mod">
       <summary>sensor.* — AS5600 × 6 qua PCA9548A <span class="file">src/sensor.h/.cpp</span></summary>
       <div class="body">
-        <span class="tag">scan</span> 20 ms (50 Hz) trên Core 0: I2C 40kHz Low-Speed mode (triệt tiêu méo xung cáp dài), chọn kênh PCA9548A → đọc 2 byte reg 0x0E (Repeated Start) → <code>filter()</code>.<br>
+        <span class="tag">scan</span> 35 ms (~28.5 Hz) trên Core 0: I2C 20kHz Low-Speed mode (triệt tiêu méo xung cáp dài), chọn kênh PCA9548A → đọc 2 byte reg 0x0E (Repeated Start) → <code>filter()</code>.<br>
         <span class="tag">filter</span> EMA α=0.2 có xử lý wrap 360°; đồng thời delta raw (wrap-corrected) cộng vào
         <code>accumulated_angles</code> và đếm <code>turn_counts</code> — cho phép theo dõi góc vượt 1 vòng.<br>
         <span class="tag">CONF</span> hysteresis 2 LSB, slow filter 16x, analog output, PWM off.<br>
@@ -651,15 +651,15 @@ tr:hover td{background:#243247}
       <line x1="128" y1="86" x2="204" y2="86" stroke="#fcd34d" stroke-width="1.4" marker-end="url(#ad)"/>
       <text x="146" y="78" fill="#fcd34d" font-size="12">125 (=16+109)</text>
       <circle cx="214" cy="96" r="6" fill="#a78bfa"/><text x="175" y="120" fill="#a78bfa" font-size="11">wrist J5 (125, 0, 365)</text>
-      <!-- J5 -> J6 (45mm) -->
-      <line x1="214" y1="96" x2="248" y2="96" stroke="#38bdf8" stroke-width="4"/>
-      <circle cx="248" cy="96" r="5" fill="#a78bfa"/><text x="240" y="120" fill="#a78bfa" font-size="10">J6 (170,0,365)</text>
+      <!-- J5 -> J6 (55mm) -->
+      <line x1="214" y1="96" x2="255" y2="96" stroke="#38bdf8" stroke-width="4"/>
+      <circle cx="255" cy="96" r="5" fill="#a78bfa"/><text x="247" y="120" fill="#a78bfa" font-size="10">J6 (180,0,365)</text>
       <!-- pen tool (30mm) -->
-      <line x1="248" y1="96" x2="270" y2="96" stroke="#4ade80" stroke-width="4"/>
-      <line x1="249" y1="86" x2="268" y2="86" stroke="#fcd34d" stroke-width="1.2" marker-end="url(#ad)"/>
-      <text x="254" y="74" fill="#fcd34d" font-size="11">30</text>
-      <circle cx="270" cy="96" r="5" fill="#f8fafc"/><text x="278" y="100" fill="#f8fafc" font-size="11" font-weight="bold">TCP (200, 0, 365)</text>
-      <text x="278" y="118" fill="#64748b" font-size="10">tool z-axis nằm ngang +x tại home</text>
+      <line x1="255" y1="96" x2="278" y2="96" stroke="#4ade80" stroke-width="4"/>
+      <line x1="256" y1="86" x2="276" y2="86" stroke="#fcd34d" stroke-width="1.2" marker-end="url(#ad)"/>
+      <text x="262" y="74" fill="#fcd34d" font-size="11">30</text>
+      <circle cx="278" cy="96" r="5" fill="#f8fafc"/><text x="286" y="100" fill="#f8fafc" font-size="11" font-weight="bold">TCP (210, 0, 365)</text>
+      <text x="286" y="118" fill="#64748b" font-size="10">tool z-axis nằm ngang +x tại home</text>
       <!-- note -->
       <text x="420" y="180" fill="#94a3b8" font-size="12">Tại home: chuỗi 139+138+88 thẳng đứng,</text>
       <text x="420" y="198" fill="#94a3b8" font-size="12">Gập → J5: 125mm (=16+109mm) — khớp</text>
@@ -682,16 +682,16 @@ tr:hover td{background:#243247}
       <tr><td>3</td><td>138</td><td>0</td><td>0</td><td>0 ✅</td><td>Elbow pitch</td></tr>
       <tr><td>4</td><td>88</td><td>−90</td><td><b>125</b></td><td>0 ⚠️ chưa xác nhận</td><td>Điểm gập → J5 (16mm + 109mm)</td></tr>
       <tr><td>5</td><td>0</td><td>+90</td><td>0</td><td>0 ⚠️</td><td>Khớp quay độc lập J5</td></tr>
-      <tr><td>6</td><td>0</td><td>−90</td><td><b>45</b></td><td>0 ⚠️</td><td>Khớp quay độc lập J6 (J5 → J6)</td></tr>
+      <tr><td>6</td><td>0</td><td>−90</td><td><b>55</b></td><td>0 ⚠️</td><td>Khớp quay độc lập J6 (J5 → J6)</td></tr>
       <tr><td>TCP</td><td>—</td><td>—</td><td><b>30</b></td><td>—</td><td>Bút vẽ đồng trục J6 (D_TOOL=30 mm)</td></tr>
     </table>
-    <p class="desc">Chuyển đổi: <code>theta_DH(i) = theta_encoder(i) + OFFSET(i)</code>. Khâu hiệu dụng từ J5 đến đầu bút TCP là <code>D_TOOL_EFFECTIVE = 45 + 30 = 75 mm</code>.</p>
+    <p class="desc">Chuyển đổi: <code>theta_DH(i) = theta_encoder(i) + OFFSET(i)</code>. Khâu hiệu dụng từ J5 đến đầu bút TCP là <code>D_TOOL_EFFECTIVE = 55 + 30 = 85 mm</code>.</p>
   </div>
 
   <div class="card">
     <h2>IK closed-form pen-down (kin::ikPenDown)</h2>
     <ol>
-      <li>Tâm J5: <code>Z_J5 = Z_TCP + D6 + D_TOOL = Z_TCP + 75</code> khi bút thẳng đứng; <code>D_TOOL=30 mm</code> tính từ J6 đến TCP.</li>
+      <li>Tâm J5: <code>Z_J5 = Z_TCP + D6 + D_TOOL = Z_TCP + 85</code> khi bút thẳng đứng; <code>D_TOOL=30 mm</code> tính từ J6 đến TCP.</li>
       <li>Base yaw: <code>t1 = atan2(Cy, Cx)</code></li>
       <li>Mặt phẳng 2 khâu: <code>(r,h)</code> polar của C quanh vai; kiểm tra reach:
           <code>|A2 − L_FORE| ≤ dist ≤ A2 + L_FORE</code> với A2=138, L_FORE=152.87</li>
@@ -704,7 +704,7 @@ tr:hover td{background:#243247}
     </ol>
     <div class="ok-box">Kiểm chứng: roundtrip IK→FK 2590/2590 pose random sai số ≤ 0.5 mm (test host
     <code>test/kinematics/test_kinematics.cpp</code>, runner <code>tools/run_kin_tests.sh</code>).
-    FK home tái tạo đúng wrist (125, 0, 365) và TCP (200, 0, 365). IK Pen-Down dùng chiều dài hiệu dụng J5→TCP 75 mm. Từ chối đúng các điểm ngoài vùng với.</div>
+    FK home tái tạo đúng wrist (125, 0, 365) và TCP (210, 0, 365). IK Pen-Down dùng chiều dài hiệu dụng J5→TCP 85 mm. Từ chối đúng các điểm ngoài vùng với.</div>
     <div class="warn-box"><b>Cảnh báo mô hình:</b> roundtrip chỉ chứng minh closed-form ≡ bảng DH — KHÔNG chứng minh
     bảng DH ≡ cơ khí thật nếu hướng trục của thiết kế J5/J6 mới khác Craig MDH hiện tại.
     Cần đối chiếu hướng trục bằng jog góc nhỏ trước khi tin độ chính xác Cartesian.</div>
@@ -818,6 +818,8 @@ tr:hover td{background:#243247}
 </div>
 
 <div class="footer">
+   Generated 2026-10-14 — Tăng khoảng cách J5–J6 thêm 10mm (D6: 45mm → 55mm, D_TOOL_EFFECTIVE: 75mm → 85mm); đồng bộ config.h, kinematics, web visualizer twin, Python twin, docs và host tests.<br>
+   Generated 2026-10-04 — Chuyển I2C Bus sang 20kHz Low-Speed mode và Sensor Task 35ms (~28.5Hz), timeout 50ms để triệt tiêu méo xung/mất ACK trên tuyến cáp dài J5/J6; đồng bộ config.h, README và SYSTEM_OVERVIEW.<br>
    Generated 2026-09-29 — Owner giữ Web đơn giản như hiện tại, không thêm đăng nhập hay đổi cơ chế AP; gate còn lại là kiểm chứng trên robot thật.<br>
    Generated 2026-09-29 — Motor không giữ running khi thiếu timer hoặc re-arm thất bại; UART test/Enable kiểm tra CRCerror; bỏ GET gây chuyển động ở /api/showoff. Build và host regressions pass, commissioning còn chờ.<br>
    Generated 2026-09-22 — Viết lại README tiếng Việt theo luồng build/nạp → kết nối → vận hành, bổ sung MG90 và liên kết tài liệu; đối chiếu thông số với source hiện tại, bỏ mô tả DDA/vi sai/watchdog không còn đúng.<br>

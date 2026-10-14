@@ -704,7 +704,7 @@ body.setup-mode .jog-controls { display: none; }
         <div class="stat-row"><span class="k">D1 (Trụ đế)</span><span class="v">139.0 mm</span></div>
         <div class="stat-row"><span class="k">A2 (Cánh tay dưới)</span><span class="v">138.0 mm</span></div>
         <div class="stat-row"><span class="k">A3 + D4 (Cẳng tay)</span><span class="v">88.0 + 125.0 mm (L=152.87mm)</span></div>
-        <div class="stat-row"><span class="k">D6 + Tool (Bút vẽ)</span><span class="v">45.0 + 30.0 mm (D_eff=75.0mm)</span></div>
+        <div class="stat-row"><span class="k">D6 + Tool (Bút vẽ)</span><span class="v">55.0 + 30.0 mm (D_eff=85.0mm)</span></div>
         <div class="stat-row"><span class="k">Bộ truyền động</span><span class="v">J1-J4: TMC2209 | J5-J6: A4988</span></div>
         <div class="stat-row"><span class="k">Cảm biến vị trí</span><span class="v">AS5600 × 6 (PCA9548A I2C)</span></div>
       </section>
@@ -720,7 +720,7 @@ body.setup-mode .jog-controls { display: none; }
    1. HARDWARE CONSTANTS & CRAIG MODIFIED DH PARAMETERS (src/config.h)
 ============================================================================= */
 const CURRENT_TWIN = {
-  geometry: [139.0, 138.0, 88.0, 125.0, 45.0, 30.0],
+  geometry: [139.0, 138.0, 88.0, 125.0, 55.0, 30.0],
   offsets: [-90.0, 0.0],
   limits: [[-90,90],[-90,90],[0,90],[-75,75],[-90,90],[-360,360]]
 };

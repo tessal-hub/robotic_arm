@@ -19,7 +19,7 @@ static bool near(float a, float b, float tol) { return fabsf(a - b) <= tol; }
 // FK tai Home (tat ca encoder = 0):
 //   THETA5_OFFSET = 0 -> th5_DH = 0 -> J5 nam ngang -> TCP theo +X tu wrist.
 //   Wrist: (125, 0, 365) theo ARM_GEOMETRY.md muc 5.
-//   TCP  : (125 + 75, 0, 365) = (200, 0, 365).
+//   TCP  : (125 + 85, 0, 365) = (210, 0, 365).
 static void testFkHome() {
     const float home[6] = {0, 0, 0, 0, 0, 0};
     const kin::FkResult r = kin::forward(home);
@@ -29,12 +29,12 @@ static void testFkHome() {
     CHECK(near(r.wristCenter.x, 125.0f, 1e-3f), "wrist x");
     CHECK(near(r.wristCenter.y,   0.0f, 1e-3f), "wrist y");
     CHECK(near(r.wristCenter.z, 365.0f, 1e-3f), "wrist z");
-    CHECK(near(r.tcp.x, 200.0f, 1e-3f), "tcp x (J5=0, tool along +X)");
+    CHECK(near(r.tcp.x, 210.0f, 1e-3f), "tcp x (J5=0, tool along +X)");
     CHECK(near(r.tcp.y,   0.0f, 1e-3f), "tcp y");
     CHECK(near(r.tcp.z, 365.0f, 1e-3f), "tcp z (J5 horizontal)");
 }
 
-// IK pen-down tai (100, 0, 50): wrist=(100,0,225), dist=132mm, trong vung voi.
+// IK pen-down tai (100, 0, 50): wrist=(100,0,135), trong vung voi.
 // THETA5_OFFSET=0: e5 = -q23_deg, ket qua phai nam trong soft-limit [-90, 90].
 static void testIkPenDownReachable() {
     float enc[6];

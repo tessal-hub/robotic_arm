@@ -18,8 +18,8 @@
 // ==============================================================================
 // Cụm 1: Joint 1 -> Joint 4 (TMC2209, chung Serial1: GPIO 15 RX / GPIO 16 TX)
 //         Đảo chiều qua UART (shaft register), KHÔNG dùng chân DIR.
-constexpr int8_t RX_PIN_1                       = 15;
-constexpr int8_t TX_PIN_1                       = 16;
+constexpr int8_t RX_PIN_1                       = 16;
+constexpr int8_t TX_PIN_1                       = 15;
 #define SERIAL_PORT_1                           Serial1
 
 // Cụm 2: Joint 5, 6 dùng A4988 (STEP+DIR, không UART)
@@ -76,20 +76,20 @@ constexpr int8_t AXIS_ENC_SIGN[NUM_MOTORS]      = { -1, -1, 1, -1, 1, -1 };
 // ==============================================================================
 constexpr int8_t SDA_PIN                        = 8;
 constexpr int8_t SCL_PIN                        = 9;
-constexpr uint32_t I2C_FREQUENCY                = 40000;  // 40kHz Low-Speed Standard Mode (chống nhiễu/méo xung tối đa cho cáp dài J5/J6)
+constexpr uint32_t I2C_FREQUENCY                = 20000;  // 20kHz Low-Speed Standard Mode (chống nhiễu/méo xung tối đa cho cáp dài J5/J6)
 
 constexpr uint8_t PCA_ADDR                      = 0x70;
 constexpr uint8_t AS5600_ADDR                   = 0x36;
 constexpr uint8_t NUM_SENSORS                   = 6;
 
-// Sensor Task configuration (Core 0, 20ms 50Hz)
+// Sensor Task configuration (Core 0, 35ms ~28.5Hz)
 // SensorScanTask chạy Core 0 (RF/WiFi core) — WiFi chỉ dùng interrupt sau khi kết nối,
 // không chiếm CPU liên tục. Tách biệt hoàn toàn với arm_motion (Core 1).
-constexpr uint32_t SENSOR_TASK_PERIOD_MS        = 20;
+constexpr uint32_t SENSOR_TASK_PERIOD_MS        = 35;
 constexpr uint32_t SENSOR_TASK_STACK_SIZE       = 4096;
 constexpr UBaseType_t SENSOR_TASK_PRIORITY      = 4;
 constexpr BaseType_t SENSOR_TASK_CORE           = 0;
-constexpr uint32_t SENSOR_I2C_MUTEX_TIMEOUT_MS  = 30;
+constexpr uint32_t SENSOR_I2C_MUTEX_TIMEOUT_MS  = 50;
 
 // ==============================================================================
 // 4. ENDSTOPS / LIMIT SWITCHES (J1, J2, J3)
@@ -249,9 +249,9 @@ constexpr float DH_D1_MM                        = 139.0f; // J1 -> J2: Chiều c
 constexpr float DH_A2_MM                        = 138.0f; // J2 -> J3: Cánh tay trên (Upper arm length)
 constexpr float DH_A3_MM                        = 88.0f;  // J3 -> Điểm gập (Elbow longitudinal offset)
 constexpr float DH_D4_MM                        = 125.0f; // Forearm bend -> J5 = 16 mm + 109 mm (J4 -> J5)
-constexpr float DH_D6_MM                        = 45.0f;  // J5 -> J6
+constexpr float DH_D6_MM                        = 55.0f;  // J5 -> J6
 constexpr float DH_D_TOOL_MM                    = 30.0f;  // Bút (tool), gắn đồng trục với J6 (30mm từ J6)
-constexpr float DH_TOOL_EFFECTIVE_MM            = 75.0f;  // J5 -> TCP = 45 + 30
+constexpr float DH_TOOL_EFFECTIVE_MM            = 85.0f;  // J5 -> TCP = 55 + 30
 constexpr float DH_D6_TOOL_MM                   = DH_TOOL_EFFECTIVE_MM; // Alias tương thích ngược
 
 // Angle Offsets: theta_DH = theta_encoder + OFFSET

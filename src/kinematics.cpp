@@ -62,7 +62,7 @@ FkResult forward(const float enc[6]) {
     // constexpr local (C++11-compatible init)
     static const DhRow DH[6] = {
         {0.0f, 0.0f, 139.0f}, {0.0f, -90.0f, 0.0f}, {138.0f, 0.0f, 0.0f},
-        {88.0f, -90.0f, 125.0f}, {0.0f, 90.0f, 0.0f}, {0.0f, -90.0f, 45.0f},
+        {88.0f, -90.0f, 125.0f}, {0.0f, 90.0f, 0.0f}, {0.0f, -90.0f, 55.0f},
     };
 
     Mat4 T = Mat4::identity();
@@ -85,7 +85,7 @@ FkResult forward(const float enc[6]) {
 }
 
 bool ikPenDown(const Pose& target, float outEnc[6]) {
-    // Wrist center (J5): bút chỉ xuống => cao hơn TCP D_TOOL_EFFECTIVE (45 + 30 = 75mm)
+    // Wrist center (J5): bút chỉ xuống => cao hơn TCP D_TOOL_EFFECTIVE (55 + 30 = 85mm)
     const float cx = target.x;
     const float cy = target.y;
     const float cz = target.z + D_TOOL_EFFECTIVE;

@@ -4687,3 +4687,44 @@ Log cho thấy J3 homing thất bại 2/2 lần liên tiếp với 2 root cause 
 
 ### Việc còn lại
 - Chưa flash/commissioning robot thật; cần hoàn thành các phép thử trong HW_REGRESSION_CHECKLIST trước khi xác nhận production ready.
+
+---
+
+## 2026-10-04 — Chuyển I2C Bus sang 20kHz Low-Speed Mode cho Cáp Dài & Điều chỉnh Sensor Task
+
+### Việc đã làm
+- What: Cấu hình `I2C_FREQUENCY = 20000` (20kHz), tăng `SENSOR_TASK_PERIOD_MS = 35` (~28.5Hz) và `SENSOR_I2C_MUTEX_TIMEOUT_MS = 50`.
+- Why:
+  - Khắc phục lỗi đọc IC (encoder AS5600 qua mux PCA9548A) do cáp tín hiệu đi dọc thân cánh tay 6 trục (khớp J4/J5/J6) quá dài, sinh ra điện dung ký sinh lớn ($C_{bus} > 400\,\text{pF}$) làm méo dạng sóng, vát cạnh lên (rise time $t_r$) gây sụt áp logic và mất xung ACK ở tần số 40kHz.
+  - Tần số 20kHz tăng gấp đôi thời gian chu kỳ ($T=50\,\mu\text{s}$), đảm bảo sườn xung I2C đạt mức logic HIGH an toàn trước thời điểm lấy mẫu (sampling).
+  - Chu kỳ đọc trọn vẹn 6 kênh AS5600 ở 20kHz mất ~23–25ms; tăng `SENSOR_TASK_PERIOD_MS` lên 35ms (~28.5Hz) cung cấp biên độ nghỉ ~10–12ms mỗi vòng quét cho Core 0, ngăn ngừa Task WDT starve và tránh tình trạng `vTaskDelayUntil` chạy back-to-back 100% CPU.
+  - Tăng `SENSOR_I2C_MUTEX_TIMEOUT_MS` lên 50ms đảm bảo an toàn lock giữa task scan và web diagnostics.
+- How: Cập nhật `src/config.h`, đồng bộ `README.md`, `docs/SYSTEM_OVERVIEW.html`.
+
+### Build gate
+- `pio run` (PlatformIO v4.11.0 / ESP32-S3) → **SUCCESS** (RAM: 15.3% - 50,204 B, Flash: 28.8% - 963,777 B).
+
+### Việc còn lại
+- Nạp firmware lên ESP32-S3 và kiểm tra log serial khởi tạo cảm biến `[SENSOR] Ch0..5` cùng độ ổn định góc trên robot thật.
+
+---
+
+## 2026-10-14 — Tăng khoảng cách khớp J5 – J6 thêm 10mm (D6: 45mm → 55mm)
+
+### Việc đã làm
+- What:
+  - Cập nhật thông số DH `DH_D6_MM` từ 45.0f lên 55.0f và `DH_TOOL_EFFECTIVE_MM` từ 75.0f lên 85.0f (`src/config.h`).
+  - Đồng bộ hằng số kinematics `D6 = 55.0f`, `D_TOOL_EFFECTIVE = 85.0f` và bảng DH trong `kin::forward()` (`src/kinematics.h`, `src/kinematics.cpp`).
+  - Cập nhật kỳ vọng kiểm thử FK home TCP X từ 200.0mm lên 210.0mm (`test/kinematics/test_kinematics.cpp`).
+  - Đồng bộ 3D Digital Twin trong giao diện web `CURRENT_TWIN.geometry` (`src/web_server.cpp`) và Python offline twin `tools/digital_twin.py`.
+  - Cập nhật tài liệu hình học `docs/ARM_GEOMETRY.md` và bản đồ hệ thống `docs/SYSTEM_OVERVIEW.html`.
+- Why: Yêu cầu của owner: "tăng khoảng cách j5 - j6 dài thêm 10mm nữa".
+- How: Tuân thủ quy tắc bất biến mục 1 và 4 trong `AGENTS.md`: khi thay đổi thông số hình học do owner yêu cầu, đồng bộ đồng thời các nơi (`config.h`, `kinematics.h`, `kinematics.cpp`, test host) cùng digital twins và tài liệu liên quan.
+
+### Build gate
+- `pio run` → **SUCCESS** (RAM: 15.3% — 50,204 bytes, Flash: 28.8% — 963,777 bytes).
+- `tools/run_kin_tests.sh` (`tools/run_host_tests.sh`) → **ALL HOST TESTS PASSED** (kinematics FK/IK roundtrip 2752/2752 ok, drawing workspace, joint logic, work plane, trajectory validator, homing logic, safety manager, web validation, firmware regression).
+
+### Việc còn lại (nếu có)
+- Kiểm tra trực quan bằng Digital Twin hoặc nạp lên robot thật để đối chiếu tọa độ vẽ thực tế.
+

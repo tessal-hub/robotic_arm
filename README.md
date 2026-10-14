@@ -112,7 +112,7 @@ Bảng dưới đối chiếu với [src/config.h](src/config.h). J1–J4 đảo
 | Kết nối khác | GPIO / cấu hình |
 |---|---|
 | UART1 chung J1–J4 | RX **15**, TX **16** · 115200 baud |
-| I2C encoder | SDA **8**, SCL **9** · cấu hình hiện tại **40 kHz** |
+| I2C encoder | SDA **8**, SCL **9** · cấu hình hiện tại **20 kHz** |
 | PCA9548A → AS5600 ×6 | Mux `0x70`; kênh 0–5 tương ứng J1–J6, mỗi sensor `0x36` |
 | Endstop J1 | MIN **6**, MAX **5** |
 | Endstop J2 | MIN **7**, MAX **10** |

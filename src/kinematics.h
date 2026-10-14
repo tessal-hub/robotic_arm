@@ -24,9 +24,9 @@ constexpr float D1 = 139.0f;
 constexpr float A2 = 138.0f;
 constexpr float A3 = 88.0f;
 constexpr float D4 = 125.0f;
-constexpr float D6 = 45.0f;
+constexpr float D6 = 55.0f;
 constexpr float D_TOOL = 30.0f;
-constexpr float D_TOOL_EFFECTIVE = 75.0f;        // D6 + D_TOOL (45 + 30)
+constexpr float D_TOOL_EFFECTIVE = 85.0f;        // D6 + D_TOOL (55 + 30)
 constexpr float L_FORE = 152.8692f;              // sqrt(88^2+125^2)
 constexpr float DELTA_WRIST = 54.8545f;           // atan2(125, 88) deg
 
