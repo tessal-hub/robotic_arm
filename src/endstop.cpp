@@ -60,6 +60,16 @@ void Endstops::begin(Motor** motors) {
         }
     }
     clearAllLatches(); // Xoá mọi latch cũ — endstop pressed at boot không phải fault
+#ifdef ARDUINO
+    for (uint8_t a = 0; a < 3; ++a) {
+        const bool minPres = hasPin(a, EndstopWhich::MIN) && isPhysicallyPressed(a, EndstopWhich::MIN);
+        const bool maxPres = hasPin(a, EndstopWhich::MAX) && isPhysicallyPressed(a, EndstopWhich::MAX);
+        Serial.printf("[ENDSTOP] J%u: MIN(pin %d)=%s, MAX(pin %d)=%s\n",
+                      a + 1,
+                      minCh[a].pin, minCh[a].pin >= 0 ? (minPres ? "PRESSED" : "OPEN") : "DIS",
+                      maxCh[a].pin, maxCh[a].pin >= 0 ? (maxPres ? "PRESSED" : "OPEN") : "DIS");
+    }
+#endif
     initialized.store(true, std::memory_order_release);
 }
 
@@ -88,12 +98,24 @@ void IRAM_ATTR Endstops::isrHandler(void* arg) {
     if (!c->enabled.load(std::memory_order_relaxed)) return;
 
 #ifdef ARDUINO
+#if defined(ESP_PLATFORM)
+#include <esp_rom_sys.h>
+#endif
     // Khử nhiễu phần cứng (Hardware EMI Glitch Rejection):
     // Xung nhiễu cảm ứng từ motor PWM chỉ tồn tại vài chục ns đến vài µs.
-    // Nếu là xung nhiễu thì chân đã trở lại mức HIGH khi ISR thực thi.
-    // Chỉ công tắc cơ khí thật bị đè thì chân mới giữ mức LOW (ENDSTOP_ACTIVE_STATE).
-    if (c->pin >= 0 && gpio_get_level(static_cast<gpio_num_t>(c->pin)) != ENDSTOP_ACTIVE_STATE) {
-        return;
+    // Kiểm tra nhiều mẫu liên tiếp (cách nhau 10µs, tổng ~30µs) để đảm bảo
+    // chân giữ mức LOW ổn định (công tắc cơ khí thật bị đè) trước khi gọi stopFromISR.
+    if (c->pin >= 0) {
+        const auto pinNum = static_cast<gpio_num_t>(c->pin);
+        for (int sample = 0; sample < 3; ++sample) {
+            if (gpio_get_level(pinNum) != ENDSTOP_ACTIVE_STATE) {
+                return;
+            }
+            esp_rom_delay_us(10);
+        }
+        if (gpio_get_level(pinNum) != ENDSTOP_ACTIVE_STATE) {
+            return;
+        }
     }
 #endif
 

@@ -203,8 +203,8 @@ tr:hover td{background:#243247}
       <tr><td>STEP J5 / DIR J5</td><td><code>38</code> / <code>39</code></td><td>A4988</td></tr>
       <tr><td>STEP J6 / DIR J6</td><td><code>40</code> / <code>47</code></td><td>A4988</td></tr>
       <tr><td>I2C SDA / SCL</td><td><code>8</code> / <code>9</code></td><td>400 kHz Fast-Mode, timeout 3ms</td></tr>
-      <tr><td>Endstop J1 MIN/MAX</td><td><code>6</code> / <code>5</code></td><td rowspan="3">INPUT_PULLUP, active LOW, ISR cạnh FALLING, debounce phần mềm 50 ms</td></tr>
-      <tr><td>Endstop J2 MIN/MAX</td><td><code>10</code> / <code>7</code></td></tr>
+      <tr><td>Endstop J1 MIN/MAX</td><td><code>6</code> / <code>5</code></td><td rowspan="3">INPUT_PULLUP, active LOW, ISR FALLING + lọc nhiễu đa mẫu 30µs, debounce phần mềm 50 ms. Log boot in rõ trạng thái PRESSED/OPEN từng cữ.</td></tr>
+      <tr><td>Endstop J2 MIN/MAX</td><td><code>7</code> / <code>10</code></td></tr>
       <tr><td>Endstop J3 MIN/MAX</td><td><code>12</code> / <code>11</code></td></tr>
       <tr><td>Servo tay gắp MG90</td><td><code>13</code></td><td>LEDC channel 0, 50 Hz, 14-bit; mặc định 1000–2000 µs tương ứng góc lệnh 0–180°. Boot không phát xung. Nguồn servo riêng, chung GND với ESP32.</td></tr>
       <tr><td>Dự phòng còn trống</td><td colspan="2"><code>14</code>, <code>17</code>, <code>18</code>, <code>48</code></td></tr>
@@ -326,7 +326,7 @@ tr:hover td{background:#243247}
     <details class="mod">
       <summary>endstop.* — công tắc hành trình an toàn <span class="file">src/endstop.h/.cpp</span></summary>
       <div class="body">
-        6 kênh (J1–J3 × MIN/MAX). <code>isPhysicallyPressed()</code> đọc GPIO không phụ thuộc mask ngắt; <code>isPressed()</code> giữ semantics chỉ đọc kênh enabled. ISR FALLING cắt ngay xung của đúng motor bằng <code>stopFromISR()</code>, rồi ghi <code>pending=true</code> + <code>isrTime=esp_timer_get_time()</code>; <b>không</b> <code>delay</code>; ISR đọc <code>gpio_get_level</code> và bỏ cạnh nếu chân đã trở lại mức không nhấn.<br>
+        6 kênh (J1–J3 × MIN/MAX). <code>isPhysicallyPressed()</code> đọc GPIO không phụ thuộc mask ngắt; <code>isPressed()</code> giữ semantics chỉ đọc kênh enabled. ISR FALLING lọc nhiễu phần cứng qua 3 mẫu liên tiếp (~30µs) bằng <code>esp_rom_delay_us(10)</code>; chỉ khi tín hiệu giữ mức LOW ổn định mới cắt xung motor tương ứng bằng <code>stopFromISR()</code>, rồi ghi <code>pending=true</code> + <code>isrTime=esp_timer_get_time()</code>; bỏ qua các xung cảm ứng EMI ngắn micro-giây.<br>
         <code>SafetyManager::pollEndstops()</code> @100Hz trên <code>arm_motion</code> vẫn thực hiện debounce 50 ms + xác nhận mức LOW mới latch <code>E_STOP</code> (nếu không ở <code>HOMING</code>). Glitch chỉ gây một safe-stop, không thành fault latch.<br>
         Lệnh <code>CLEAR_FAULT</code>: <b>chỉ chấp nhận khi robot đứng yên</b> (<code>!busy()</code> — không motor nào chạy, queue rỗng, không homing/planner/teach đang hoạt động) → <code>SafetyManager::tryClearFault()</code>: yêu cầu tất cả endstop đã nhả vật lý (không còn bị đè); lệnh acknowledge drift latch, resync step counter theo encoder rồi clear latch và về <code>NORMAL</code>. Khi đang FAULT/E_STOP, Jog thủ công hợp lệ tự acknowledge lỗi: nếu có endstop đang nhấn thì chỉ đúng khớp đó và đúng hướng rời cữ được chạy; interrupt của cữ đó được mask tới khi jog hữu hạn kết thúc để bounce không cắt xung. Kết thúc mà GPIO vẫn nhấn thì firmware re-arm và giữ FAULT; đã nhả thì trở về điều khiển bình thường. Cartesian/Draw/Home vẫn khóa.<br>
         Endstop pressed at boot (arm resting against switch) = OK, không fault — endstop chỉ là protection khi đang chuyển động. Toàn bộ trạng thái latch/pending do <code>SafetyManager</code> làm single owner.
@@ -344,6 +344,7 @@ tr:hover td{background:#243247}
         <span class="tag">encoder scaling</span> J1–J3/J5/J6 đọc trực tiếp trục khớp (1:1); riêng J4 encoder gắn trên trục motor 4:1 được tự động chia tỷ số truyền <code>GEAR_RATIO_J4 = 4.0</code> khi quy đổi sang góc khớp.<br>
         <span class="tag">resyncFromEncoder</span> Đồng bộ bước theo góc encoder tương đối: <code>absSteps = AXIS_STEP_SIGN × degreesToSteps(relEncDeg)</code>; trả <code>false</code> nếu axis/motor/sensor/home chưa sẵn sàng để caller fail closed.<br>
         <span class="tag">restoreFromNVS</span> lúc boot: record raw home phải finite trong [0;360), nạp calibration hợp lệ trước, rồi tính <code>delta = encSign × wrap180(raw_now − raw_saved)</code>. Mọi delta hữu hạn trong miền single-turn ±180° đều được restore để operator có thể nắn arm khi mất điện; firmware set <code>absSteps = AXIS_STEP_SIGN × degreesToSteps(delta)</code>, khôi phục <code>encZeroRef</code> và đánh dấu <code>restored</code>. Validation record NVS, calibration và sensor health vẫn bắt buộc. J6 chỉ khôi phục được vị trí modulo 360° do AS5600 single-turn.<br>
+        <span class="tag">soft limits</span> Giới hạn phần mềm độc lập từng khớp: J1 ±90°, J2 ±90°, J3 -90°..+90° (mở giới hạn âm cho phép jog âm linh hoạt sau homing / khôi phục NVS), J4 ±75°, J5 ±90°, J6 ±360°.<br>
         <span class="tag">drift watchdog</span> Đã vô hiệu hóa theo yêu cầu người dùng: vị trí bước máy (open-loop step counting) là nguồn chân lý vận hành, loại bỏ hoàn toàn các lỗi false-FAULT khóa cánh tay.
       </div>
     </details>
@@ -352,7 +353,7 @@ tr:hover td{background:#243247}
       <summary>safety_manager.* — single owner an toàn &amp; debounce <span class="file">src/safety_manager.h/.cpp</span></summary>
       <div class="body">
         <span class="tag">Single Owner</span> Duy nhất <code>SafetyManager</code> sở hữu <code>SafetyState {NORMAL, E_STOP, HOMING, FAULT}</code> và toàn bộ latch/pending endstop — xóa <code>g_emergencyStop/g_homingActive</code>.<br>
-        <span class="tag">ISR</span> <code>isrNotify(axis,which,isrTime)</code> ghi <code>pending+timestamp</code> (&lt;3µs).<br>
+        <span class="tag">ISR</span> <code>isrNotify(axis,which,isrTime)</code> dùng <code>exchange(true)</code> để tránh Starvation Debounce: chỉ ghi nhận thời gian cạnh ngắt đầu tiên, không reset bộ đếm 50ms khi có chuỗi gai nhiễu liên tiếp.<br>
         <span class="tag">poll</span> <code>pollEndstops(nowUs)</code> @100Hz: nếu <code>pending && now-isrTime>50ms && digitalRead==LOW</code> → latch + <code>E_STOP</code> (nếu không <code>HOMING</code>); glitch HIGH → chỉ clear pending.<br>
         <span class="tag">HOMING</span> <code>assertHoming(true)</code> cho phép latch mà không E_STOP — homing tự xử lý cữ.<br>
       </div>
@@ -818,7 +819,7 @@ tr:hover td{background:#243247}
 </div>
 
 <div class="footer">
-   Generated 2026-10-16 — Ponytail audit cleanup: loại bỏ mã test J3 tạm thời trong main.cpp (thu gọn 360 dòng), đơn giản hóa khởi tạo GPIO push-pull; bỏ .fill dư thừa và chuyển type-punning sang memcpy trực tiếp trong Sensor; chuyển handleDrawProfiles/handleDrawPreset vào anonymous namespace loại bỏ forward declarations và math.h. Build SUCCESS RAM 15.3% Flash 28.8%; 10/10 host tests pass.<br>
+   Generated 2026-10-17 — Kích hoạt lại toàn bộ 6 công tắc Endstop vật lý (J1 6/5, J2 7/10, J3 12/11) có kiểm soát an toàn: bổ sung boot log chẩn đoán trạng thái PRESSED/OPEN từng cữ; duy trì chuỗi an toàn: lọc nhiễu đa mẫu 30µs trong ISR, sửa Starvation Debounce trong SafetyManager, giám sát isLatched() chỉ trên motor đang chạy, mở giới hạn âm J3. Build SUCCESS RAM 15.3% Flash 28.9%; 10/10 host tests pass.<br>
    Generated 2026-10-16 — Đồng bộ chẩn đoán TMC2209 từ tools/j3_test vào firmware chính: xử lý triệt để echo byte UART 1-wire (flush TX + settling delay), chống chốt lỗi cầu H (toff 0→4 tại begin), tăng timeout lock UART lên 50ms và delay khởi động cho J1–J4; bảo đảm J3 chạy đồng bộ và an toàn.<br>
    Generated 2026-10-14 — Tăng khoảng cách J5–J6 thêm 10mm (D6: 45mm → 55mm, D_TOOL_EFFECTIVE: 75mm → 85mm); đồng bộ config.h, kinematics, web visualizer twin, Python twin, docs và host tests.<br>
    Generated 2026-10-04 — Chuyển I2C Bus sang 20kHz Low-Speed mode và Sensor Task 35ms (~28.5Hz), timeout 50ms để triệt tiêu méo xung/mất ACK trên tuyến cáp dài J5/J6; đồng bộ config.h, README và SYSTEM_OVERVIEW.<br>

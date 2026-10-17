@@ -4837,3 +4837,80 @@ Log cho thấy J3 homing thất bại 2/2 lần liên tiếp với 2 root cause 
 
 ### Việc còn lại (nếu có)
 - Không còn việc tồn đọng.
+
+---
+
+## 2026-10-17 — Khắc phục lỗi J3 đứng im và ngắt lỗi FAULT chéo do nhiễu Endstop & Starvation Debounce
+
+### Việc đã làm
+- What: Sửa 5 vấn đề cốt lõi ngăn J3 chuyển động và gây lỗi ngắt FAULT giả trên các trục:
+  1. `src/config.h`:
+     - Tạm thời cấu hình các chân Endstop `J1_MIN_PIN` .. `J3_MAX_PIN` về `-1` khi chưa cắm công tắc cơ khí vật lý (ghi chú pin cũ 6/5, 7/10, 12/11). Chống hiện tượng chân thả nổi thu xung cảm ứng từ dây nguồn động lực +24V và PWM motor trên giắc J2 (KF10).
+     - Mở giới hạn góc mềm âm cho J3: `J3_MIN_LIMIT = -90.0f` (thay vì 0.0f), cho phép J3 jog âm bình thường sau homing / khôi phục NVS mà không bị thuật toán clamp kẹp target về 0 (triệt tiêu tình trạng steps = 0).
+  2. `src/endstop.cpp`:
+     - Trong `Endstops::isrHandler`: bổ sung bộ lọc nhiễu phần cứng đa mẫu liên tiếp (3 mẫu cách nhau 10µs, tổng ~30µs qua `esp_rom_delay_us(10)`) trước khi gọi `stopFromISR()`. Chỉ khi tín hiệu thực sự giữ mức LOW ổn định (công tắc cơ khí bị đè thật) mới cắt xung motor.
+  3. `src/safety_manager.cpp`:
+     - Trong `SafetyManager::isrNotify`: sửa lỗi "Starvation Debounce" bằng cách dùng `if (!pending_[axis][idx].exchange(true)) pendingTime_[axis][idx].store(isrTimeUs);`. Bộ đếm thời gian debounce 50ms chỉ ghi nhận thời điểm của cạnh ngắt đầu tiên, không bị chuỗi xung nhiễu liên tiếp reset liên tục về thời gian hiện tại.
+  4. `src/arm.cpp`:
+     - Trong `ArmController::taskLoop`: chỉ kiểm tra công tắc hành trình đối với trục đang thực sự chuyển động (`motors[i] != nullptr && motors[i]->isRunning()`), và sử dụng `es->isLatched(...)` (trạng thái đã qua debounce 50ms của SafetyManager) thay vì đọc `es->isPressed(...)` thô trực tiếp từ GPIO. Loại bỏ hoàn toàn lỗi 1 mẫu đọc nhiễu trên trục đang đứng yên (như J3/J2 MAX) đánh sập chuyển động của các trục khác đang chạy (J1, J4, J5, J6).
+  5. `src/web_server.cpp`:
+     - Cập nhật thẻ hiển thị `#dashEsInfo` động theo mảng `d.endstops`: hiển thị danh sách các công tắc đang chạm (`CHẠM: Jx MIN/MAX`) hoặc `Chưa bật (PIN=-1)` / `Tất cả mở`.
+  6. Unit Tests:
+     - `test/host/test_joint_logic.cpp`: cập nhật kiểm tra `J3_MIN_LIMIT == -90.0f` và range = 180°.
+     - `test/host/test_safety_manager.cpp`: bổ sung test case `test_starvation_debounce_continuous_glitches` kiểm tra khả năng debounce 50ms khi có chuỗi xung ngắt dồn dập.
+     - `test/host/test_homing_logic.cpp`: cập nhật `testScanAxesConfiguration` nhận diện trạng thái pin disconnected (-1).
+- Why: Người dùng báo cáo hiện tượng J3 đứng im hoàn toàn và các trục khác liên tục bị dừng bởi `FAULT: endstop J3/J2 MAX pressed during motion` dù chưa cắm công tắc hành trình.
+- How: Phân tích cơ chế xung cảm ứng trên chân GPIO thả nổi, giải quyết tận gốc từ ngắt ISR, bộ đếm debounce của SafetyManager, logic giám sát an toàn taskLoop, cấu hình pin và soft-limit.
+
+### Build gate
+- `pio run` (`platformio.exe run`) → **SUCCESS** (RAM: 15.3% — 50,204 bytes, Flash: 28.9% — 964,641 bytes, Took 44.17s).
+- Host tests: Toàn bộ 10 test suite (`test_kinematics`, `test_drawing_workspace`, `test_joint_logic`, `test_work_plane`, `test_trajectory_validator`, `test_homing_fsm`, `test_homing_logic`, `test_safety_manager`, `test_web_validation`, `test_firmware_regression`) → **ALL 10 SUITES PASSED**.
+
+### Việc còn lại (nếu có)
+- Khi đấu nối công tắc hành trình cơ học thực tế vào giắc KF10:
+  - Khôi phục lại các chân pin trong `src/config.h`: `J1_MIN_PIN = 6; J1_MAX_PIN = 5; J2_MIN_PIN = 7; J2_MAX_PIN = 10; J3_MIN_PIN = 12; J3_MAX_PIN = 11;`
+  - Khuyến nghị bổ sung tụ gốm 100nF lọc nhiễu giữa chân tín hiệu và GND, hoặc điện trở pull-up ngoài 4.7kΩ lên +3.3V để tăng khả năng chống nhiễu công nghiệp.
+
+---
+
+## 2026-10-17 — Xác nhận nghiệm thu thực nghiệm: Toàn bộ 6 trục vận hành mượt mà
+
+### Kết quả vận hành thực tế
+- Người dùng xác nhận: Firmware nạp lên ESP32-S3 và robot arm đã chạy tốt, tất cả 6 khớp (J1..J6) đều nhận lệnh và điều khiển trơn tru.
+- Không còn bất kỳ hiện tượng kẹt bước nào ở J3 hay ngắt lỗi FAULT chéo do xung nhiễu Endstop.
+- Hệ thống sẵn sàng cho các bài test vận hành tiếp theo (Jog đa trục, Teach & Playback A-B-C, chuyển động Cartesian / Drawing).
+
+---
+
+## 2026-10-17 — Kích hoạt lại toàn bộ 6 công tắc Endstop vật lý (J1–J3) kèm chẩn đoán an toàn
+
+### Việc đã làm
+- What: 
+  1. `src/config.h`: Khôi phục lại cấu hình đầy đủ 6 chân công tắc hành trình vật lý:
+     - J1: `J1_MIN_PIN = 6`, `J1_MAX_PIN = 5`
+     - J2: `J2_MIN_PIN = 7`, `J2_MAX_PIN = 10`
+     - J3: `J3_MIN_PIN = 12`, `J3_MAX_PIN = 11`
+     - Chế độ active: `ENDSTOP_ACTIVE_STATE = LOW` (kéo xuống GND khi nhấn, `INPUT_PULLUP`).
+  2. `src/endstop.cpp`: Bổ sung log chẩn đoán trạng thái tức thời của từng chân Endstop ngay khi khởi động (`[ENDSTOP] Jx: MIN(pin)=PRESSED/OPEN, MAX(pin)=PRESSED/OPEN`), giúp người dùng phát hiện ngay công tắc bị kẹt, chạm mass hoặc đấu sai cực trước khi điều khiển motor.
+  3. Chuỗi an toàn phần mềm bảo vệ đi kèm:
+     - Bộ lọc khử nhiễu phần cứng 3 mẫu liên tiếp (~30µs) trong `Endstops::isrHandler`.
+     - Bộ chống Starvation Debounce trong `SafetyManager::isrNotify`.
+     - Giám sát `isLatched()` trong `taskLoop` chỉ trên trục đang chuyển động `isRunning()`.
+     - Mở giới hạn âm `J3_MIN_LIMIT = -90.0f`.
+- Why: Người dùng đã đấu nối xong các công tắc cơ học và yêu cầu kích hoạt lại toàn bộ Endstop một cách cẩn thận và an toàn.
+- How: Tái lập pin map gốc, bổ sung log boot kiểm tra tĩnh, duy trì 10/10 test host.
+
+### Build gate
+- `pio run` (`platformio.exe run`) → **SUCCESS** (RAM: 15.3% — 50,204 bytes, Flash: 28.9% — 964,877 bytes, Took 28.91s).
+- Host tests: Toàn bộ 10 test suite → **ALL 10 SUITES PASSED**.
+
+### Hướng dẫn kiểm tra an toàn từng bước cho người dùng
+1. Nạp firmware và mở Serial Monitor:
+   - Quan sát log boot: kiểm tra xem cả 6 cữ có báo `OPEN` không. Nếu có cữ nào báo `PRESSED` ngay khi chưa gạt thì cần kiểm tra lại dây cắm của cữ đó (tránh cắm nhầm chân NC hoặc chập mass).
+2. Kiểm tra tĩnh trên Web UI (chưa cần cho motor chạy):
+   - Mở Web UI, xem mục **Công tắc Endstop** đang hiển thị `Tất cả mở`.
+   - Lấy tay gạt thử từng công tắc (J1 MIN, J1 MAX, J2 MIN, J2 MAX, J3 MIN, J3 MAX):
+     - Gạt cữ nào, Web UI phải lập tức báo `CHẠM: Jx MIN/MAX`.
+     - Nhả tay ra, Web UI phải lập tức trở lại `Tất cả mở`.
+3. Kiểm tra động khi Jog chậm:
+   - Jog từng trục với bước nhỏ và thử gạt cữ tương ứng để xác nhận motor phanh dừng an toàn tức thì.

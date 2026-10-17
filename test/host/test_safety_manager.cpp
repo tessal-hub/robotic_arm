@@ -199,6 +199,28 @@ static void test_debounce_exact_boundary_and_glitch_recovery() {
   else CHECK(false, "debounce_exact_boundary_and_glitch_recovery");
 }
 
+static void test_starvation_debounce_continuous_glitches() {
+  MockEndstops es; es.setGpio(0, EndstopWhich::MIN, false); // LOW = pressed
+  MockJointModel jm;
+  SafetyManager sm(&es, &jm);
+
+  // Xung ngat dau tien luc t = 1,000,000
+  sm.isrNotify(0, EndstopWhich::MIN, 1000000);
+
+  // Cac xung ngat tiep theo ban lien tuc moi 10ms
+  sm.isrNotify(0, EndstopWhich::MIN, 1010000);
+  sm.isrNotify(0, EndstopWhich::MIN, 1020000);
+  sm.isrNotify(0, EndstopWhich::MIN, 1030000);
+  sm.isrNotify(0, EndstopWhich::MIN, 1040000);
+
+  // Poll sau 51ms ke tu xung dau tien (t = 1,051,000)
+  // Neu khong bi starvation debounce, pendingTime_ van giu 1,000,000 va delta = 51ms >= 50ms => phai latch!
+  sm.pollEndstops(1051000);
+  bool ok = (sm.state() == SafetyState::E_STOP) && sm.anyLatched();
+  if (ok) PASS("starvation_debounce_continuous_glitches");
+  else CHECK(false, "starvation_debounce_continuous_glitches: should latch after 50ms from first edge");
+}
+
 int main() {
   test_pending_high_no_latch();
   test_low_before_50ms_no_latch();
@@ -212,6 +234,7 @@ int main() {
   test_isMotionAllowed_matrix();
   test_anyLatched_and_assertEStop();
   test_debounce_exact_boundary_and_glitch_recovery();
+  test_starvation_debounce_continuous_glitches();
 
   if (g_fail==0) {
     std::printf("ALL PASSED (%d tests)\n", g_pass);

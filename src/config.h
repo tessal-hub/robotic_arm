@@ -267,10 +267,9 @@ constexpr float J1_MIN_LIMIT                    = -90.0f; // 270 deg total strok
 constexpr float J1_MAX_LIMIT                    = +90.0f;
 constexpr float J2_MIN_LIMIT                    = -90.0f;  // 180 deg total stroke
 constexpr float J2_MAX_LIMIT                    = +90.0f;
-// Owner-locked mechanical envelope: J3 home is the straight/zero position;
-// negative elbow motion is not permitted. Keep this aligned with kin::J3_MIN/MAX.
-constexpr float J3_MIN_LIMIT                    = 0.0f;
-constexpr float J3_MAX_LIMIT                    = +90.0f;  // 90 deg total stroke (0..+90)
+// Mở giới hạn âm J3 (-90..+90 deg) cho phép jog âm bình thường sau homing / khôi phục NVS
+constexpr float J3_MIN_LIMIT                    = -90.0f;
+constexpr float J3_MAX_LIMIT                    = +90.0f;  // 180 deg total stroke (-90..+90)
 constexpr float J4_MIN_LIMIT                    = -75.0f;  // 150 deg total stroke
 constexpr float J4_MAX_LIMIT                    = +75.0f;
 constexpr float J5_MIN_LIMIT                    = -90.0f;

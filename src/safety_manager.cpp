@@ -31,8 +31,12 @@ void SafetyManager::pollEndstops() {
 void SafetyManager::isrNotify(uint8_t axis, EndstopWhich which, int64_t isrTimeUs) {
   if (axis >= NUM_MOTORS) return;
   uint8_t idx = (which == EndstopWhich::MIN) ? 0 : 1;
-  pending_[axis][idx].store(true, std::memory_order_relaxed);
-  pendingTime_[axis][idx].store(isrTimeUs, std::memory_order_relaxed);
+  // Tranh Starvation Debounce: chi ghi nhan isrTimeUs cua xung dau tien
+  // khi pending_[axis][idx] chuyen tu false -> true.
+  // Cac xung nhiễu lien tiep se khong reset bo dem debounce 50ms.
+  if (!pending_[axis][idx].exchange(true, std::memory_order_acq_rel)) {
+    pendingTime_[axis][idx].store(isrTimeUs, std::memory_order_release);
+  }
 }
 
 void SafetyManager::pollEndstops(uint64_t nowUs) {

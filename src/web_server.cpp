@@ -1706,6 +1706,22 @@ function updateUI(d){
   if(wifiInfo) wifiInfo.textContent = `${(d.wifi.mode||'').toUpperCase()} · RSSI ${d.wifi.rssi || 0} dBm`;
   const commandLatency = document.getElementById('dashCommandLatency');
   if(commandLatency) commandLatency.textContent = `${((d.commandLatencyUs || 0) / 1000).toFixed(1)} ms`;
+  const esInfo = document.getElementById('dashEsInfo');
+  if(esInfo && d.endstops){
+    const pressedList = [];
+    d.endstops.forEach((es, i) => {
+      if(es.min && (es.min.pressed || es.min.latched)) pressedList.push(`J${i+1} MIN`);
+      if(es.max && (es.max.pressed || es.max.latched)) pressedList.push(`J${i+1} MAX`);
+    });
+    if(pressedList.length === 0){
+      const hasAnyPin = d.endstops.some(es => es.min !== null || es.max !== null);
+      esInfo.textContent = hasAnyPin ? 'Tất cả mở' : 'Chưa bật (PIN=-1)';
+      esInfo.className = 'v';
+    } else {
+      esInfo.textContent = 'CHẠM: ' + pressedList.join(', ');
+      esInfo.className = 'v text-danger';
+    }
+  }
   const teachStatus = document.getElementById('teachStatus');
   if(d.gripper){
     const g = d.gripper;

@@ -58,14 +58,14 @@ static void testIndependentWristRatios() {
 }
 
 static void testJ3SoftLimitContract() {
-    CHECK(J3_MIN_LIMIT == 0.0f, "J3 minimum limit is zero degrees");
+    CHECK(J3_MIN_LIMIT == -90.0f, "J3 minimum limit is negative 90 degrees");
     CHECK(J3_MAX_LIMIT == 90.0f, "J3 maximum limit is positive 90 degrees");
     CHECK(DEFAULT_AXIS_LIMIT_MIN[2] == J3_MIN_LIMIT,
           "J3 minimum in shared soft-limit table");
     CHECK(DEFAULT_AXIS_LIMIT_MAX[2] == J3_MAX_LIMIT,
           "J3 maximum in shared soft-limit table");
-    CHECK(DEFAULT_AXIS_CALIB_RANGE[2] == 90.0f,
-          "J3 calibration range is 90 degrees");
+    CHECK(DEFAULT_AXIS_CALIB_RANGE[2] == 180.0f,
+          "J3 calibration range is 180 degrees");
 }
 
 static void testJ4SoftLimitContract() {

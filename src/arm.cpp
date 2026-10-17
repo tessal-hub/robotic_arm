@@ -261,9 +261,9 @@ void ArmController::taskLoop() {
                 }
                 if (anyMotorRunning) {
                     for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
-                        if (es->hasPin(i, EndstopWhich::MIN) && es->isPressed(i, EndstopWhich::MIN)) {
-                            const bool movingAway = (motors[i] != nullptr && motors[i]->isRunning() &&
-                                                     motors[i]->getDirCW() == JointModel::cwForDelta(i, +1.0f));
+                        if (motors[i] == nullptr || !motors[i]->isRunning()) continue;
+                        if (es->hasPin(i, EndstopWhich::MIN) && es->isLatched(i, EndstopWhich::MIN)) {
+                            const bool movingAway = (motors[i]->getDirCW() == JointModel::cwForDelta(i, +1.0f));
                             if (!movingAway) {
                                 if (pl != nullptr) pl->stop();
                                 for (uint8_t j = 0; j < NUM_MOTORS; ++j) {
@@ -275,9 +275,8 @@ void ArmController::taskLoop() {
                                 break;
                             }
                         }
-                        if (es->hasPin(i, EndstopWhich::MAX) && es->isPressed(i, EndstopWhich::MAX)) {
-                            const bool movingAway = (motors[i] != nullptr && motors[i]->isRunning() &&
-                                                     motors[i]->getDirCW() == JointModel::cwForDelta(i, -1.0f));
+                        if (es->hasPin(i, EndstopWhich::MAX) && es->isLatched(i, EndstopWhich::MAX)) {
+                            const bool movingAway = (motors[i]->getDirCW() == JointModel::cwForDelta(i, -1.0f));
                             if (!movingAway) {
                                 if (pl != nullptr) pl->stop();
                                 for (uint8_t j = 0; j < NUM_MOTORS; ++j) {

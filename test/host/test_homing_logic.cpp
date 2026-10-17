@@ -53,9 +53,17 @@ static int64_t j3StepsBack(bool firstSideIsMin, int64_t contactSpan,
 }
 
 static void testScanAxesConfiguration() {
-    CHECK(isDualEndstopAxis(0) == true, "J1 is dual endstop axis");
-    CHECK(isDualEndstopAxis(1) == true, "J2 is dual endstop axis");
-    CHECK(isDualEndstopAxis(2) == true, "J3 is dual endstop axis");
+    // Khi tat ca pin tam thoi ve -1 do chua dau cong tac vat ly:
+    const bool allDisabled = (AXIS_MIN_PINS[0] < 0 && AXIS_MIN_PINS[1] < 0 && AXIS_MIN_PINS[2] < 0);
+    if (allDisabled) {
+        CHECK(isDualEndstopAxis(0) == false, "J1 endstops temporarily disconnected (-1)");
+        CHECK(isDualEndstopAxis(1) == false, "J2 endstops temporarily disconnected (-1)");
+        CHECK(isDualEndstopAxis(2) == false, "J3 endstops temporarily disconnected (-1)");
+    } else {
+        CHECK(isDualEndstopAxis(0) == true, "J1 is dual endstop axis");
+        CHECK(isDualEndstopAxis(1) == true, "J2 is dual endstop axis");
+        CHECK(isDualEndstopAxis(2) == true, "J3 is dual endstop axis");
+    }
     CHECK(isDualEndstopAxis(3) == false, "J4 is single/stallguard axis (no physical dual endstops)");
     CHECK(isDualEndstopAxis(4) == false, "J5 has no auto-homing endstops");
     CHECK(isDualEndstopAxis(5) == false, "J6 has no auto-homing endstops");
