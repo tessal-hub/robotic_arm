@@ -43,8 +43,6 @@ void setup() {
         const uint8_t sp = g_motors[i].getStepPin();
         const uint8_t dp = g_motors[i].getDirPin();
         gpio_reset_pin(static_cast<gpio_num_t>(sp));
-        pinMode(sp, OUTPUT);
-        digitalWrite(sp, LOW);
         gpio_config_t cfg = {};
         cfg.pin_bit_mask = (1ULL << sp);
         cfg.mode = GPIO_MODE_OUTPUT;
@@ -57,8 +55,6 @@ void setup() {
 
         if (dp != PIN_UNSET && dp != 255) {
             gpio_reset_pin(static_cast<gpio_num_t>(dp));
-            pinMode(dp, OUTPUT);
-            digitalWrite(dp, LOW);
             gpio_config_t dirCfg = {};
             dirCfg.pin_bit_mask = (1ULL << dp);
             dirCfg.mode = GPIO_MODE_OUTPUT;
@@ -80,6 +76,7 @@ void setup() {
 
     // 2) UART chung cho 4x TMC2209 + mutex
     SERIAL_PORT_1.begin(TMC_UART_BAUD, SERIAL_8N1, RX_PIN_1, TX_PIN_1);
+    delay(50); // Cho bus UART và driver ổn định (như trong tools/j3_test)
     g_uartMutex = xSemaphoreCreateMutex();
 
     // 3) Motors (set mutex TRƯỚC begin)
@@ -88,6 +85,7 @@ void setup() {
         g_motors[i].setUartMutex(&g_uartMutex);
     }
     for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+        delay(10);
         g_motors[i].begin(DEFAULT_AXIS_RUN_CURRENTS[i], DEFAULT_MICROSTEPS,
                           false, DEFAULT_HOLD_SCALE);
     }
@@ -130,4 +128,10 @@ void setup() {
 
 void loop() {
     g_server.handleClient();
+    while (Serial.available()) {
+        const char c = static_cast<char>(Serial.read());
+        if (c == ' ' || c == 's' || c == 'x') {
+            (void)g_arm.submit({ArmCommand::STOP_ALL});
+        }
+    }
 }

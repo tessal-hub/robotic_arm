@@ -84,6 +84,7 @@ public:
 struct HardwareSerial {
     int available() { return 0; }
     int read() { return -1; }
+    void flush() {}
     void println(const char*) {}
     void print(char) {}
     template<class... T> void printf(const char*, T...) {}

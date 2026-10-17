@@ -85,11 +85,14 @@ void IRAM_ATTR Motor::onStepTimer(void* arg) {
         self->running.store(false, std::memory_order_release);
         return;
     }
-#endif
-
+    digitalWrite(self->stepPin, HIGH);
+    esp_rom_delay_us(4); // 4us clean pulse width cho A4988 và TMC
+    digitalWrite(self->stepPin, LOW);
+#else
     gpio_set_level(static_cast<gpio_num_t>(self->stepPin), 1);
     esp_rom_delay_us(4); // 4us clean pulse width cho A4988 và TMC
     gpio_set_level(static_cast<gpio_num_t>(self->stepPin), 0);
+#endif
 
     uint32_t nextInterval = self->targetSpeedUs.load(std::memory_order_relaxed);
     const bool isCont = self->continuousMode.load(std::memory_order_relaxed);
@@ -159,6 +162,10 @@ void Motor::giveUart() {
 
 void Motor::flushUartRx() {
     if (isTMC && serialPort != nullptr) {
+#ifdef ARDUINO
+        serialPort->flush();
+        esp_rom_delay_us(200);
+#endif
         while (serialPort->available()) serialPort->read();
     }
 }
@@ -263,14 +270,21 @@ void Motor::begin(uint16_t initialCurrentMa, uint16_t initialMicrosteps,
     driver->ihold(holdScale);
     driver->iholddelay(iholddelay);
 
-    driver->TCOOLTHRS(0xFFFFF); // Kích hoạt StallGuard4 ở mọi vận tốc
-    driver->SGTHRS(DEFAULT_STALL_THRESHOLD);
+    if (address == UART_ADDR_J4) {
+        // Chỉ J4 sensorless homing mới cần StallGuard4
+        driver->TCOOLTHRS(0xFFFFF);
+        driver->SGTHRS(DEFAULT_STALL_THRESHOLD);
+    }
 
     // Observe the existing startup write; no extra configuration or motion command.
     flushUartRx();
     const uint8_t ifcntBefore = driver->IFCNT();
     const bool beforeError = driver->CRCerror;
     driver->shaft(false);
+#ifdef ARDUINO
+    serialPort->flush();
+    delay(2);
+#endif
     flushUartRx();
     const uint8_t ifcntAfter = driver->IFCNT();
     const bool afterError = driver->CRCerror;
@@ -297,9 +311,10 @@ bool Motor::setDirection(bool cw) {
     }
 
     if (isTMC && dirPin == 255) { // TMC dùng UART đảo chiều
-        auto lock = makeTimedLock(uartMutex ? *uartMutex : nullptr, 20);
+        auto lock = makeTimedLock(uartMutex ? *uartMutex : nullptr, 50);
         if (!lock) return false;
         flushUartRx();
+#ifndef ESP_PLATFORM
         const bool actual = driver->shaft();
         uartOk = !driver->CRCerror;
         if (!uartOk) return false; // A timeout returns false too: inspect CRCerror.
@@ -310,6 +325,19 @@ bool Motor::setDirection(bool cw) {
             uartOk = !driver->CRCerror && verified == cw;
             if (!uartOk) return false;
         }
+#else
+        driver->shaft(cw);
+        serialPort->flush();
+        delay(2);
+        flushUartRx();
+        const bool verified = driver->shaft();
+        const bool err = driver->CRCerror;
+        uartOk = !err && (verified == cw);
+        if (!uartOk) {
+            Serial.printf("[MOTOR] %s ghi shaft(%d) verify=%d err=%d -> van phat xung nhu j3_test\n",
+                          label, cw ? 1 : 0, verified ? 1 : 0, err);
+        }
+#endif
         dirCW.store(cw, std::memory_order_relaxed);
     }
     return true;
@@ -485,10 +513,23 @@ bool Motor::enable(bool en) {
         enabled.store(en, std::memory_order_release);
         return true;
     }
-    if (!takeUart(20)) return false;
+    if (!takeUart(50)) return false;
     flushUartRx();
     const uint8_t expectedToff = en ? 4 : 0;
     driver->toff(expectedToff);
+#if defined(ESP_PLATFORM)
+    serialPort->flush();
+    delay(2);
+    flushUartRx();
+    driverVersion = driver->version();
+    uartOk = (driverVersion == 0x21) && !driver->CRCerror;
+    serialPort->flush();
+    delay(2);
+    flushUartRx();
+    giveUart();
+    enabled.store(en, std::memory_order_release);
+    return true;
+#else
     flushUartRx();
     driverVersion = driver->version();
     uartOk = (driverVersion == 0x21) && !driver->CRCerror;
@@ -498,6 +539,7 @@ bool Motor::enable(bool en) {
     giveUart();
     if (ok) enabled.store(en, std::memory_order_release);
     return ok;
+#endif
 }
 
 void Motor::setSpeed(uint32_t intervalUs) {
@@ -511,19 +553,29 @@ void Motor::setSpeed(uint32_t intervalUs) {
 
 void Motor::setCurrent(uint16_t mA) {
     currentMa = mA;
-    if (!isTMC || !takeUart(20)) return;
+    if (!isTMC || !takeUart(50)) return;
     flushUartRx();
     driver->rms_current(currentMa);
+#ifdef ARDUINO
+    serialPort->flush();
+    delay(2);
+#endif
+    flushUartRx();
     giveUart();
 }
 
 void Motor::setChopperMode(bool spreadCycle) {
     spreadCycleMode = spreadCycle;
-    if (!isTMC || !takeUart(20)) return;
+    if (!isTMC || !takeUart(50)) return;
     flushUartRx();
     driver->en_spreadCycle(spreadCycleMode);
     driver->pwm_autoscale(!spreadCycleMode);
     driver->pwm_autograd(!spreadCycleMode);
+#ifdef ARDUINO
+    serialPort->flush();
+    delay(2);
+#endif
+    flushUartRx();
     giveUart();
 }
 

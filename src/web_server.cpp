@@ -1,6 +1,5 @@
 #include "web_server.h"
 #include "web_validation.h"
-#include <math.h>
 #include "arm.h"
 #include "config.h"
 #include "drawing_workspace.h"
@@ -8,9 +7,6 @@
 #include "nvs_store.h"
 #include "wifi_manager.h"
 #include "work_plane.h"
-
-void handleDrawProfiles();
-void handleDrawPreset();
 
 const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
@@ -2185,45 +2181,6 @@ void handleWorkPlaneStatus() {
     sendJson(200, buf);
 }
 
-} // namespace
-
-void webBegin(WebServer& server, ArmController* arm, WifiManager* wifi,
-              JointModel* joints, NvsStore* nvs, WorkPlane* workPlane) {
-    srv = &server;
-    armPtr = arm;
-    wifiPtr = wifi;
-    jointsPtr = joints;
-    nvsPtr = nvs;
-    workPlanePtr = workPlane;
-
-    server.on("/", HTTP_GET, handleRoot);
-    server.on("/api/status", HTTP_GET, handleStatus);
-    server.on("/api/jog", HTTP_POST, handleJog);
-    server.on("/api/stop", HTTP_POST, handleStop);
-    server.on("/api/gripper", HTTP_POST, handleGripper);
-    server.on("/api/move", HTTP_POST, handleMove);
-    server.on("/api/draw", HTTP_POST, handleDraw);
-    server.on("/api/draw/presets", HTTP_GET, handleDrawProfiles);
-    server.on("/api/draw/preset", HTTP_POST, handleDrawPreset);
-    server.on("/api/home/all", HTTP_POST, handleHomeAll);
-    server.on("/api/home/axis", HTTP_POST, handleHomeAxis);
-    server.on("/api/sethome", HTTP_POST, handleSetHome);
-    server.on("/api/release/j1-j4", HTTP_POST, handleReleaseJ1J4);
-    server.on("/api/enable/j1-j4", HTTP_POST, handleEnableJ1J4);
-    server.on("/api/showoff", HTTP_POST, handleShowOff);
-    server.on("/api/teach/save", HTTP_POST, handleTeachSave);
-    server.on("/api/teach/play", HTTP_POST, handleTeachPlay);
-    server.on("/api/teach/clear", HTTP_POST, handleTeachClear);
-    server.on("/api/clearcalib", HTTP_POST, handleClearCalib);
-    server.on("/api/wifi", HTTP_POST, handleWifiSave);
-    server.on("/api/workplane/calib", HTTP_POST, handleWorkPlaneCalib);
-    server.on("/api/workplane/toggle", HTTP_POST, handleWorkPlaneToggle);
-    server.on("/api/workplane/status", HTTP_GET, handleWorkPlaneStatus);
-
-    server.begin();
-    Serial.printf("[WEB] HTTP server on port %u\n", WEB_SERVER_PORT);
-}
-
 void handleDrawProfiles() {
     if (workPlanePtr != nullptr && workPlanePtr->isEnabled()) {
         sendJson(409, "{\"error\":\"WORKPLANE_ENABLED\"}");
@@ -2322,4 +2279,43 @@ void handleDrawPreset() {
     } else {
         srv->send(503, "text/plain", "busy");
     }
+}
+
+} // namespace
+
+void webBegin(WebServer& server, ArmController* arm, WifiManager* wifi,
+              JointModel* joints, NvsStore* nvs, WorkPlane* workPlane) {
+    srv = &server;
+    armPtr = arm;
+    wifiPtr = wifi;
+    jointsPtr = joints;
+    nvsPtr = nvs;
+    workPlanePtr = workPlane;
+
+    server.on("/", HTTP_GET, handleRoot);
+    server.on("/api/status", HTTP_GET, handleStatus);
+    server.on("/api/jog", HTTP_POST, handleJog);
+    server.on("/api/stop", HTTP_POST, handleStop);
+    server.on("/api/gripper", HTTP_POST, handleGripper);
+    server.on("/api/move", HTTP_POST, handleMove);
+    server.on("/api/draw", HTTP_POST, handleDraw);
+    server.on("/api/draw/presets", HTTP_GET, handleDrawProfiles);
+    server.on("/api/draw/preset", HTTP_POST, handleDrawPreset);
+    server.on("/api/home/all", HTTP_POST, handleHomeAll);
+    server.on("/api/home/axis", HTTP_POST, handleHomeAxis);
+    server.on("/api/sethome", HTTP_POST, handleSetHome);
+    server.on("/api/release/j1-j4", HTTP_POST, handleReleaseJ1J4);
+    server.on("/api/enable/j1-j4", HTTP_POST, handleEnableJ1J4);
+    server.on("/api/showoff", HTTP_POST, handleShowOff);
+    server.on("/api/teach/save", HTTP_POST, handleTeachSave);
+    server.on("/api/teach/play", HTTP_POST, handleTeachPlay);
+    server.on("/api/teach/clear", HTTP_POST, handleTeachClear);
+    server.on("/api/clearcalib", HTTP_POST, handleClearCalib);
+    server.on("/api/wifi", HTTP_POST, handleWifiSave);
+    server.on("/api/workplane/calib", HTTP_POST, handleWorkPlaneCalib);
+    server.on("/api/workplane/toggle", HTTP_POST, handleWorkPlaneToggle);
+    server.on("/api/workplane/status", HTTP_GET, handleWorkPlaneStatus);
+
+    server.begin();
+    Serial.printf("[WEB] HTTP server on port %u\n", WEB_SERVER_PORT);
 }

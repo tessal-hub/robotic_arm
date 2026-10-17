@@ -5,38 +5,17 @@
 #include <cstring>
 
 Sensor::Sensor() {
-    filtered_angles.fill(0.0f);
-    last_raw_angles.fill(0.0f);
-    accumulated_angles.fill(0.0f);
-    turn_counts.fill(0);
-    initialized.fill(false);
     for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
         sensor_error[i].store(true, std::memory_order_relaxed);
     }
-    read_fail_counts.fill(0);
-    for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
-        published_angles[i].store(floatToBits(0.0f), std::memory_order_relaxed);
-        published_accumulated[i].store(floatToBits(0.0f), std::memory_order_relaxed);
-        published_turn_counts[i].store(0, std::memory_order_relaxed);
-    }
-}
-
-uint32_t Sensor::floatToBits(float value) {
-    uint32_t bits = 0;
-    static_assert(sizeof(bits) == sizeof(value), "float must be 32-bit");
-    memcpy(&bits, &value, sizeof(bits));
-    return bits;
-}
-
-float Sensor::bitsToFloat(uint32_t bits) {
-    float value = 0.0f;
-    memcpy(&value, &bits, sizeof(value));
-    return value;
 }
 
 void Sensor::publishSample(uint8_t ch) {
-    published_angles[ch].store(floatToBits(filtered_angles[ch]), std::memory_order_relaxed);
-    published_accumulated[ch].store(floatToBits(accumulated_angles[ch]), std::memory_order_relaxed);
+    uint32_t a = 0, acc = 0;
+    memcpy(&a, &filtered_angles[ch], sizeof(a));
+    memcpy(&acc, &accumulated_angles[ch], sizeof(acc));
+    published_angles[ch].store(a, std::memory_order_relaxed);
+    published_accumulated[ch].store(acc, std::memory_order_relaxed);
     published_turn_counts[ch].store(turn_counts[ch], std::memory_order_relaxed);
 }
 
@@ -328,7 +307,10 @@ float Sensor::getAngle(uint8_t ch) {
     // (đọc float 32-bit aligned trên ESP32 không bị rách, đừng block caller).
     auto lock = makeTimedLock(dataMutex, 5);
     if (lock) return filtered_angles[ch];
-    return bitsToFloat(published_angles[ch].load(std::memory_order_relaxed));
+    const uint32_t bits = published_angles[ch].load(std::memory_order_relaxed);
+    float val = 0.0f;
+    memcpy(&val, &bits, sizeof(val));
+    return val;
 }
 
 float Sensor::getAccumulatedAngle(uint8_t ch) {
@@ -336,7 +318,10 @@ float Sensor::getAccumulatedAngle(uint8_t ch) {
 
     auto lock = makeTimedLock(dataMutex, 5);
     if (lock) return accumulated_angles[ch];
-    return bitsToFloat(published_accumulated[ch].load(std::memory_order_relaxed));
+    const uint32_t bits = published_accumulated[ch].load(std::memory_order_relaxed);
+    float val = 0.0f;
+    memcpy(&val, &bits, sizeof(val));
+    return val;
 }
 
 bool Sensor::isSensorOK(uint8_t ch) {

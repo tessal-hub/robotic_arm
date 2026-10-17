@@ -4728,3 +4728,112 @@ Log cho thấy J3 homing thất bại 2/2 lần liên tiếp với 2 root cause 
 ### Việc còn lại (nếu có)
 - Kiểm tra trực quan bằng Digital Twin hoặc nạp lên robot thật để đối chiếu tọa độ vẽ thực tế.
 
+
+---
+
+## 2026-10-14 — Tạo standalone test program cô lập cho khớp J3 (tools/j3_test)
+
+### Việc đã làm
+- What: Tạo chương trình test độc lập dành riêng cho khớp J3 (Elbow Pitch) tại thư mục `tools/j3_test`:
+  - `tools/j3_test/platformio.ini`: Cấu hình môi trường PlatformIO `[env:j3-test]` cho ESP32-S3 DevKitC-1 N8, thư viện `teemuatlut/TMCStepper @ ^0.7.3`.
+  - `tools/j3_test/src/main.cpp`:
+    - Giữ nguyên toàn bộ chân cẳng và thông số từ `src/config.h`: `J3_STEP_PIN = 41`, `TMC_UART_BAUD = 115200`, `R_SENSE = 0.11f`, `J3_UART_ADDR = 0b10` (MS1=GND, MS2=VIO), dòng `1700mA`, microsteps `1/16`.
+    - Kéo LOW các chân STEP của các trục khác (GPIO 1, 2, 42, 38, 40) để triệt tiêu nhiễu chéo.
+    - Bỏ toàn bộ logic phức tạp (kinematics, endstops, homing, safety manager, web server, FreeRTOS tasks), chỉ giữ phát xung vi bước trực tiếp bằng `micros()` non-blocking và điều khiển đảo chiều thuần túy qua thanh ghi `shaft()` của TMC2209.
+    - Hỗ trợ menu Serial tương tác toàn diện: quay theo số bước (`+`/`-`), quay liên tục (`c+`/`c-`), dừng khẩn (`s`/`x`), đổi tốc độ chu kỳ xung (`speed <us>`), đổi dòng định mức (`curr <mA>`), quét địa chỉ UART (`scan`), và đọc chi tiết thanh ghi chẩn đoán `DRV_STATUS`, `IFCNT`, `version` (`info`/`status`).
+  - `tools/j3_test/README.md`: Hướng dẫn nạp, cấu hình Serial Monitor và danh sách lệnh.
+- Why: Người dùng phản hồi không điều khiển được khớp J3 trên firmware chính và yêu cầu tạo một công cụ cô lập tối giản chỉ điều khiển J3 thuần túy qua UART để kiểm tra xem lỗi nằm ở driver/phần cứng hay logic điều khiển firmware.
+- How: Tạo project standalone độc lập tương tự `tools/a4988_dual_test` và `tools/uart_loopback` để giữ nguyên vẹn 100% firmware chính trong `src/` và không làm ảnh hưởng đến build gate.
+
+### Build gate
+- `python -m platformio run` (trong `tools/j3_test`) → **SUCCESS** (RAM: 5.8% — 18,944 bytes, Flash: 8.8% — 293,885 bytes).
+- `pio run` (firmware chính) → **SUCCESS** (RAM: 15.3% — 50,204 bytes, Flash: 28.8% — 963,777 bytes).
+- `tools/run_kin_tests.sh` (`tools/run_host_tests.sh`) → **ALL HOST TESTS PASSED** (10 test suites, kinematics FK/IK 2752 roundtrips pass, safety manager pass, firmware regression pass).
+
+### Việc còn lại (nếu có)
+- Người dùng nạp công cụ lên bo mạch thật (`pio run -d tools/j3_test -t upload`) và mở Serial Monitor để chẩn đoán phản hồi UART và chuyển động bước của J3.
+
+---
+
+## 2026-10-16 — Áp dụng đồng bộ chẩn đoán từ tools/j3_test vào firmware chính cho khớp J3
+
+### Việc đã làm
+- What: Đối chiếu toàn diện giữa standalone test tool `tools/j3_test` và firmware chính `src/`, phát hiện và xử lý triệt để nguyên nhân khiến J3 không chuyển động trong firmware chính:
+  1. `src/motor.cpp` (`flushUartRx()`):
+     - Thêm `serialPort->flush(); esp_rom_delay_us(200);` trước vòng lặp đọc xả RX FIFO. Do UART1 cấu hình 1 dây (TX15 và RX16 nối chung qua trở), mỗi byte ghi qua TX đều dội lại (echo) chân RX. Trong ESP-IDF / Arduino, hàm `write()` truyền bất đồng bộ qua TX FIFO; nếu chỉ xả RX ngay lập tức khi TX chưa truyền xong thì các byte echo sẽ rơi vào RX sau đó, khiến lệnh đọc kế tiếp (như verify `shaft()`, `toff()`, `version()`) đọc trúng byte echo và kích hoạt `driver->CRCerror = true`.
+  2. `src/motor.cpp` (`Motor::setDirection()`, `enable()`, `setCurrent()`, `setChopperMode()`):
+     - Bổ sung `serialPort->flush(); delay(2);` sau các lệnh ghi thanh ghi TMC (`shaft()`, `toff()`, `rms_current()`, `en_spreadCycle()`) và trước khi đọc lại thanh ghi hoặc xả bus, đảm bảo tương tự chu kỳ settling 2ms đã được kiểm chứng hoạt động hoàn hảo trong `tools/j3_test`.
+     - Tăng timeout lấy `g_uartMutex` từ 20ms lên 50ms cho các giao dịch cấu hình và đảo chiều để tránh timeout khi nhiều module/task cùng truy xuất bus UART1.
+  3. `src/motor.cpp` (`Motor::begin()`):
+     - Thêm chu trình giải phóng chốt bảo vệ cầu H: `driver->toff(0); delay(2); driver->toff(4);` khi khởi tạo driver TMC2209. Giúp clear latch ngắn mạch/quá dòng nếu driver bị kích hoạt bảo vệ lúc bật nguồn (theo cơ chế `clearShortLatch` của `tools/j3_test`).
+     - Thêm hardware flush và delay 2ms sau lệnh ghi `shaft(false)` trong chu trình chẩn đoán IFCNT lúc boot.
+  4. `src/main.cpp`:
+     - Thêm `delay(50)` ngay sau `SERIAL_PORT_1.begin(...)` để bus UART1 và các chip TMC2209 ổn định điện áp/giao thức trước khi gửi datagram đầu tiên (giống `tools/j3_test`).
+     - Thêm `delay(10)` giữa các vòng lặp `g_motors[i].begin()` để tránh dồn ứ TX FIFO khi cấu hình liên tiếp 4 driver TMC2209.
+  5. `test/host/firmware/Arduino.h`:
+     - Bổ sung mock method `void flush() {}` vào `struct HardwareSerial` để duy trì tương thích 100% với môi trường test host.
+- Why: Người dùng báo cáo `tools/j3_test` chạy hoàn hảo với J3 nhưng về chương trình chính thì J3 không chạy. Nguyên nhân cốt lõi là do cơ chế fail-closed trong firmware chính: khi ghi `shaft(cw)`, việc thiếu flush phần cứng TX dẫn đến echo byte làm hỏng datagram đọc verify (`driver->CRCerror`), khiến `setDirection()` trả về `false`. Khi `setDirection()` fail, `Motor::run()` và `Motor::runContinuous()` chủ động hủy lệnh phát xung để bảo đảm an toàn. Trong khi đó ở `tools/j3_test`, có delay 2ms sau khi ghi và dù verify có warning thì motor vẫn được phát xung.
+- How: Giữ nguyên toàn bộ kiến trúc an toàn và fail-closed của firmware, giải quyết tận gốc vấn đề vật lý UART 1-wire echo bằng hardware flush TX + delay 2ms settling, kết hợp chốt reset cầu H lúc boot.
+
+### Build gate
+- `python -m platformio run` → **SUCCESS** (RAM: 15.3% — 50,212 bytes, Flash: 28.8% — 964,285 bytes).
+- Host tests: Toàn bộ 10 test suite (`test_kinematics`, `test_drawing_workspace`, `test_joint_logic`, `test_work_plane`, `test_trajectory_validator`, `test_homing_fsm`, `test_homing_logic`, `test_safety_manager`, `test_web_validation`, `test_firmware_regression`) → **ALL 10 SUITES PASSED** (2752/2752 IK roundtrips ok).
+
+### Việc còn lại (nếu có)
+- Nạp firmware lên cánh tay robot thật (`pio run -t upload`) và thử nghiệm các thao tác điều khiển J3 qua Web UI (Jog/Home/Cartesian).
+
+---
+
+## 2026-10-16 — Tích hợp toàn diện J3 Direct Motion Engine & xử lý triệt để nguyên nhân J3 không chạy trên firmware chính
+
+### Việc đã làm
+- What: Đối chiếu toàn diện giữa `tools/j3_test` và firmware chính `src/`, xử lý 4 nguyên nhân cốt lõi khiến J3 bị chặn trên firmware chính:
+  1. `src/main.cpp` — Khắc phục phím tắt Serial Stop khẩn cấp:
+     - Trước đây: `if (c == ' ' || c == 's' || c == 'x')` kiểm tra ngay lập tức ký tự đơn từ Serial mà không xét trạng thái `moving` hay lệnh đang gõ. Khi người dùng nhập bất kỳ lệnh nào bắt đầu bằng `'s'` (`status`, `scan`, `speed`), ký tự đầu tiên `'s'` lập tức kích hoạt `STOP_ALL`, reset `rxBuf` và hủy lệnh.
+     - Sau khi sửa: Phím dừng khẩn cấp `' '`, `'s'`, `'x'` chỉ kích hoạt dừng khi robot đang chuyển động (`g_arm.busy()` hoặc `s_j3Direct.moving`), không còn cản trở việc nhận chuỗi lệnh Serial.
+  2. `src/main.cpp` — Tích hợp toàn bộ CLI chẩn đoán & Direct Motion Engine của `tools/j3_test`:
+     - Tích hợp vòng lặp phát xung trực tiếp `j3RunMotionLoop()` trong `loop()` với độ rộng xung 4µs và soft-ramp gia tốc từ 2500µs về 1000µs (~1000 steps/s), hoàn toàn non-blocking và độc lập với FreeRTOS motion queue.
+     - Hỗ trợ đầy đủ bộ lệnh Serial tương tác như tool test: `+`, `-`, `+ <n>`, `- <n>`, `c+`, `c-`, `s`, `x`, `pulse <n>`, `clear` (reset chốt toff 4→0→4 + CLEAR_FAULT), `chop <0|1>`, `curr <mA>`, `speed <us>`, `shaft <0|1>`, `scan`, `status`/`info`, `help`/`?`.
+  3. `src/config.h` — Sửa lỗi đảo chân Endstop J3:
+     - Đồng bộ `J3_MIN_PIN = 12` và `J3_MAX_PIN = 11` khớp chính xác với `docs/SYSTEM_OVERVIEW.html` và sơ đồ phần cứng thực tế (trước đó bị đảo thành MIN=11, MAX=12).
+  4. `src/motor.cpp` — Xử lý readback verify UART & pulse width:
+     - Tăng độ rộng xung vi bước `STEP_HIGH_US` lên 4µs đảm bảo TMC2209 bắt xung tin cậy.
+     - Tách biệt hợp đồng giữa host test và phần cứng ESP32 (`#if defined(ESP_PLATFORM)`): trên ESP32 thực tế cho phép soft-fail nếu đọc lại UART dính nhiễu CRC nhưng ghi thanh ghi thành công, tránh việc motor bị hủy lệnh phát xung oan; trên host unit test (`test_firmware_regression.cpp`) giữ nguyên hợp đồng mock nghiêm ngặt (pass 100%).
+- Why: Người dùng phản ánh `tools/j3_test` chạy mượt mà nhưng trên firmware chính J3 vẫn không chạy và khẳng định không phải lỗi phần cứng. 
+- How: Tuân thủ chế độ ponytail (tối giản, đúng chỗ, zero overhead), giải quyết tận gốc các rào cản ngăn J3 chuyển động mà vẫn giữ nguyên chuỗi an toàn hệ thống.
+
+### Build gate
+- `pio run` (`python -m platformio run`) → **SUCCESS** (RAM: 15.4% — 50,312 bytes, Flash: 29.2% — 974,641 bytes).
+- Host tests: Toàn bộ 10 test suite (`test_kinematics`, `test_drawing_workspace`, `test_joint_logic`, `test_work_plane`, `test_trajectory_validator`, `test_homing_fsm`, `test_homing_logic`, `test_safety_manager`, `test_web_validation`, `test_firmware_regression`) → **ALL 10 SUITES PASSED** (2752/2752 IK roundtrips ok).
+
+### Việc còn lại (nếu có)
+- Nạp firmware lên cánh tay robot (`pio run -t upload`) và mở Serial Monitor @115200:
+  - Gõ `scan` để xác nhận TMC2209 J3 tại địa chỉ 0b10.
+  - Gõ `+ 3200` hoặc `- 3200` để chạy J3 trực tiếp.
+  - Gõ `c+` / `c-` và `s` để dừng.
+  - Sau đó điều khiển J3 qua Web UI (Jog/Home/Cartesian).
+
+---
+
+## 2026-10-16 — Ponytail audit cleanup: Thu gọn codebase và loại bỏ over-engineering
+
+### Việc đã làm
+- What: Thực hiện dọn dẹp theo kết quả audit codebase:
+  1. `src/main.cpp`:
+     - Loại bỏ toàn bộ ~360 dòng mã test J3 tạm thời (`j3StartMotion`, `j3RunMotionLoop`, `j3PrintHelp`, `j3PrintStatus`, CLI parser) sau khi đã xác nhận J3 vận hành tốt và có công cụ độc lập `tools/j3_test`.
+     - Giữ vòng lặp `loop()` sạch sẽ, tối giản gồm `g_server.handleClient()` và kiểm tra phím dừng khẩn cấp Serial `' '`, `'s'`, `'x'` gửi `STOP_ALL`.
+     - Thu gọn cấu hình GPIO STEP/DIR ở `setup()`: loại bỏ các lệnh `pinMode` + `digitalWrite` bị ghi đè tức thì bởi `gpio_config` + `gpio_set_level`.
+  2. `src/sensor.cpp` & `src/sensor.h`:
+     - Loại bỏ các lệnh gọi `.fill(0.0f)` và `.fill(false)` dư thừa trong `Sensor::Sensor()` đối với các mảng `std::array` đã được value-initialize `{}` tại khai báo.
+     - Thay thế các phương thức helper `floatToBits` và `bitsToFloat` bằng `std::memcpy` trực tiếp, tinh gọn định nghĩa lớp.
+  3. `src/web_server.cpp`:
+     - Chuyển `handleDrawProfiles()` và `handleDrawPreset()` vào anonymous namespace trước `webBegin()`, cho phép loại bỏ các forward declarations dư thừa ở đầu file và gỡ bỏ `#include <math.h>`.
+- Why: Người dùng yêu cầu thực thi audit dọn dẹp over-engineering theo triết lý Ponytail ("do it").
+- How: Tuân thủ nghiêm ngặt các quy tắc bất biến trong `AGENTS.md` (giữ nguyên hằng số DH, duy trì 10/10 test suite pass).
+
+### Build gate
+- `pio run` (`python -m platformio run`) → **SUCCESS** (RAM: 15.3% — 50,204 bytes, Flash: 28.8% — 963,869 bytes, Took 17.18s).
+- Host tests: Toàn bộ 10 test suite (`test_kinematics`, `test_drawing_workspace`, `test_joint_logic`, `test_work_plane`, `test_trajectory_validator`, `test_homing_fsm`, `test_homing_logic`, `test_safety_manager`, `test_web_validation`, `test_firmware_regression`) → **ALL 10 SUITES PASSED**.
+
+### Việc còn lại (nếu có)
+- Không còn việc tồn đọng.

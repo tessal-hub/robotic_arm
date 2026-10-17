@@ -101,8 +101,8 @@ constexpr int8_t J1_MIN_PIN                     = 6;
 constexpr int8_t J1_MAX_PIN                     = 5;
 constexpr int8_t J2_MIN_PIN                     = 7;
 constexpr int8_t J2_MAX_PIN                     = 10;
-constexpr int8_t J3_MIN_PIN                     = 11;
-constexpr int8_t J3_MAX_PIN                     = 12;
+constexpr int8_t J3_MIN_PIN                     = 12;
+constexpr int8_t J3_MAX_PIN                     = 11;
 
 constexpr int AXIS_MIN_PINS[NUM_MOTORS] = { J1_MIN_PIN, J2_MIN_PIN, J3_MIN_PIN, -1, -1, -1 };
 constexpr int AXIS_MAX_PINS[NUM_MOTORS] = { J1_MAX_PIN, J2_MAX_PIN, J3_MAX_PIN, -1, -1, -1 };

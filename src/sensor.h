@@ -47,8 +47,6 @@ private:
     uint16_t readRaw();
     float filter(uint8_t ch, uint16_t raw);
     void publishSample(uint8_t ch);
-    [[nodiscard]] static uint32_t floatToBits(float value);
-    [[nodiscard]] static float bitsToFloat(uint32_t bits);
     void scanOnce();                    // Quét toàn bộ NUM_SENSORS 1 lần
     void configureAS5600();             // Ghi CONF register
     void recoverI2CBus();               // Khôi phục I2C bus khi bị treo
