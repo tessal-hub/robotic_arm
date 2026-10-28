@@ -83,7 +83,7 @@ Nếu thay đổi chỉ là docs/tài liệu nhưng chạm quyết định thi�
    (`DH_D1_MM`, `DH_A2_MM`, `DH_D4_MM`, `DH_D6_TOOL_MM`, theta offsets) nếu thiếu phép đo
    thực nghiệm do owner cung cấp. Nếu đổi (có bằng chứng): phải đồng bộ cả 3 nơi —
    `config.h`, `kinematics.cpp`, test host — rồi log vào IMPLEMENTATION_LOG.
-2. **KHÔNG tái nhập** `atan2(110,88)=51.34°`, `d4=110`, hay số liệu cũ `d4=126` — mô hình chuẩn đã được owner xác nhận là `d4=125` (gồm 16mm điểm gập→J4 + 109mm J4→J5), `δ=atan2(125,88)=54.85°`, `d6=45`, `d_tool=30` (`d_tool_eff=75`). Chi tiết: `docs/ARM_GEOMETRY.md`. Chỉ owner mới được phê duyệt đổi mô hình.
+2. **KHÔNG tái nhập** `atan2(110,88)=51.34°`, `d4=110`, hay số liệu cũ `d4=126` — mô hình chuẩn đã được owner xác nhận là `d4=125` (gồm 16mm điểm gập→J4 + 109mm J4→J5), `δ=atan2(125,88)=54.85°`, `d6=55` (owner tăng từ 45→55mm ngày 2026-10-14), `d_tool=30` (`d_tool_eff=85`). Chi tiết: `docs/ARM_GEOMETRY.md`. Chỉ owner mới được phê duyệt đổi mô hình.
 3. **WiFi credentials CHỈ qua NVS** (`wifi_manager.provision()` → trang `/api/wifi`).
    Không secrets.h, không hardcode SSID/pass thật vào source.
 4. **Web handler không đụng hardware trực tiếp** — chỉ enqueue `ArmCommand` qua
@@ -165,9 +165,9 @@ platformio.ini          env esp32-s3-devkitc-1, lib TMCStepper, C++17
 src/config.h            MỌI hằng số: pin, gear, DH, limit, motion, network
 src/main.cpp            wiring khởi tạo + loop (chỉ handleClient)
 src/motor.*             stepper engine (esp_timer, S-curve, absSteps atomic)
-src/sensor.*            AS5600×6 qua PCA9548A (task core0 @200Hz)
+src/sensor.*            AS5600×6 qua PCA9548A (task core0 @35ms ~28.5Hz)
 src/endstop.*           ISR endstop + latch an toàn
-src/joint_model.*       deg<->step, home/NVS restore, drift watchdog
+src/joint_model.*       deg<->step, home/NVS restore (drift fault: state dự phòng, chưa wire)
 src/homing.*            FSM homing J1->J4 (endstop+stallguard fusion)
 src/planner.*           Cartesian POINT/LINE/CIRCLE, segment sync 6 trục
 src/kinematics.*        FK ma trận Modified-DH + IK closed-form pen-down

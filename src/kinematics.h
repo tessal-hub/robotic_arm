@@ -30,13 +30,18 @@ constexpr float D_TOOL_EFFECTIVE = 85.0f;        // D6 + D_TOOL (55 + 30)
 constexpr float L_FORE = 152.8692f;              // sqrt(88^2+125^2)
 constexpr float DELTA_WRIST = 54.8545f;           // atan2(125, 88) deg
 
+// Cấu hình chiều dài bút (tool length) động khi chạy
+void setToolLength(float toolMm);
+float getToolLength();
+float getEffectiveToolLength();
+
 constexpr float THETA2_OFFSET = -90.0f;
 constexpr float THETA5_OFFSET = 0.0f;   // J5: offset = 0, enc=0 là pen-down; ARM_GEOMETRY §4
 
 // Giới hạn mềm khớp khi chọn nghiệm IK (độ, theo encoder home)
 constexpr float J1_MIN = -90.0f, J1_MAX = 90.0f;
 constexpr float J2_MIN = -90.0f, J2_MAX = 90.0f;
-constexpr float J3_MIN = 0.0f,   J3_MAX = 90.0f;
+constexpr float J3_MIN = -20.0f, J3_MAX = 90.0f;
 constexpr float J5_MIN = -90.0f, J5_MAX = 90.0f;
 
 // FK: encoder(deg) -> TCP + wrist center. Luôn khả thi.

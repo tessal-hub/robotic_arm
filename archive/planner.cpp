@@ -27,9 +27,18 @@ bool Planner::submit(const Job& job) {
     if (job.shape == Shape::NONE) return false;
     if (!syncJ5Feedback()) return false;
 
+    // Resync các trục định vị đã home và có encoder khỏe trước khi bắt đầu job mới
+    for (uint8_t i = 0; i < CARTESIAN_AXIS_COUNT; ++i) {
+        if (jm->isHomed(i) && jm->encOK(i)) {
+            (void)jm->resyncFromEncoder(i);
+        }
+    }
+
     // Vị trí Cartesian xuất phát = TCP hiện tại theo FK (hoặc UCS nếu WorkPlane bật)
     float enc[6];
-    for (uint8_t i = 0; i < NUM_MOTORS; ++i) enc[i] = jm->angleFromSteps(i);
+    for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+        enc[i] = (jm->isHomed(i) && jm->encOK(i)) ? jm->angleFromEncoder(i) : jm->angleFromSteps(i);
+    }
     const kin::FkResult fkNow = kin::forward(enc);
     if (workPlane != nullptr && workPlane->isEnabled()) {
         const Point3D ucsNow = workPlane->fromRobotXYZ({fkNow.tcp.x, fkNow.tcp.y, fkNow.tcp.z});
@@ -162,7 +171,9 @@ bool Planner::startMoveTo(float x, float y, float z, float feedMmS) {
     float segLenMm = DRAW_SEGMENT_MM;
     {
         float enc[6];
-        for (uint8_t i = 0; i < NUM_MOTORS; ++i) enc[i] = jm->angleFromSteps(i);
+        for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+            enc[i] = (jm->isHomed(i) && jm->encOK(i)) ? jm->angleFromEncoder(i) : jm->angleFromSteps(i);
+        }
         const kin::FkResult fkNow = kin::forward(enc);
         const float dx = rx - fkNow.tcp.x;
         const float dy = ry - fkNow.tcp.y;

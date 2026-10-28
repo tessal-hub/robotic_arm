@@ -2,6 +2,7 @@
 #define HOMING_H
 
 #include <Arduino.h>
+#include <atomic>
 #include "config.h"
 #include "endstop.h"
 
@@ -57,10 +58,10 @@ public:
 
     void tick();
 
-    [[nodiscard]] bool isActive() const noexcept { return active_; }
-    [[nodiscard]] bool lastRunOK() const noexcept { return lastOk_; }
-    [[nodiscard]] uint8_t currentAxis() const noexcept { return curAxis_; }
-    [[nodiscard]] HomePhase phase() const noexcept { return phase_; }
+    [[nodiscard]] bool isActive() const noexcept { return active_.load(std::memory_order_acquire); }
+    [[nodiscard]] bool lastRunOK() const noexcept { return lastOk_.load(std::memory_order_relaxed); }
+    [[nodiscard]] uint8_t currentAxis() const noexcept { return curAxis_.load(std::memory_order_relaxed); }
+    [[nodiscard]] HomePhase phase() const noexcept { return phase_.load(std::memory_order_relaxed); }
 
     String toJson() const;
 
@@ -99,14 +100,14 @@ private:
     JointModel* jm{nullptr};
     SafetyManager* safety_{nullptr};
 
-    bool active_{false};
-    bool lastOk_{true};
+    std::atomic<bool> active_{false};
+    std::atomic<bool> lastOk_{true};
     uint8_t seq_[4]{};
     uint8_t seqLen_{0};
     uint8_t seqIdx_{0};
     uint8_t attempt_{0};       // số lần đã thử khớp hiện tại (retry trước khi hủy chuỗi)
-    uint8_t curAxis_{0};
-    HomePhase phase_{HomePhase::IDLE};
+    std::atomic<uint8_t> curAxis_{0};
+    std::atomic<HomePhase> phase_{HomePhase::IDLE};
     uint32_t phaseStartMs_{0};
     uint32_t lastPollMs_{0};
     uint32_t lastSgPollMs_{0};
@@ -114,6 +115,7 @@ private:
     uint16_t lastSgResult_{1023};
     uint16_t minSgResult_{1023};
     uint16_t maxSgResult_{0};
+    uint8_t sg1023Consecutive_{0};
 
     // Scan state (J1..J4)
     float encFirstRaw_{0.0f};   // raw encoder tại cữ ĐẦU TIÊN (chạm chậm)

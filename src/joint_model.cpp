@@ -63,7 +63,8 @@ float JointModel::angleFromSteps(uint8_t axis) const {
 float JointModel::angleFromEncoder(uint8_t axis) {
     if (axis >= NUM_MOTORS || sensor == nullptr || !homed[axis]) return 0.0f;
     const float rawDiff = sensor->getAccumulatedAngle(axis) - encZeroRef[axis];
-    return s_encSign[axis] * rawDiff;
+    const float scale = (axis < NUM_MOTORS) ? AXIS_ENC_SCALE[axis] : 1.0f;
+    return s_encSign[axis] * rawDiff * scale;
 }
 
 float JointModel::rawEncoder(uint8_t axis) {
@@ -78,7 +79,11 @@ void JointModel::setHomeHere(uint8_t axis) {
     motors[axis]->setAbsoluteSteps(0);
     if (sensor != nullptr && sensor->isSensorOK(axis)) {
         const float encAngle = sensor->getAccumulatedAngle(axis);
-        const float rawDeg = sensor->getAngle(axis);
+        // SỬA LỖI: Tính rawDeg [0, 360) trực tiếp từ encAngle thay vì getAngle() (bị trễ EMA)
+        // để mốc lưu NVS khớp 100% với encZeroRef trong RAM.
+        float rawDeg = fmodf(encAngle, 360.0f);
+        if (rawDeg < 0.0f) rawDeg += 360.0f;
+
         homeRawDeg_[axis] = rawDeg;
         encZeroRef[axis] = encAngle;
         bool nvsSaved = false;
@@ -105,7 +110,8 @@ bool JointModel::resyncFromEncoder(uint8_t axis) {
     if (axis >= NUM_MOTORS) return false;
     if (motors[axis] == nullptr || sensor == nullptr || !sensor->isSensorOK(axis) || !homed[axis]) return false;
     if (motors[axis]->isRunning()) return false;
-    const float relEncDeg = (sensor->getAccumulatedAngle(axis) - encZeroRef[axis]) * s_encSign[axis];
+    const float scale = (axis < NUM_MOTORS) ? AXIS_ENC_SCALE[axis] : 1.0f;
+    const float relEncDeg = (sensor->getAccumulatedAngle(axis) - encZeroRef[axis]) * s_encSign[axis] * scale;
     motors[axis]->setAbsoluteSteps(AXIS_STEP_SIGN[axis] * degreesToSteps(axis, relEncDeg));
     return true;
 }
@@ -177,18 +183,23 @@ uint8_t JointModel::restoreFromNVS() {
             continue;
         }
 
-        const float now = sensor->getAngle(a);
+        const float accNow = sensor->getAccumulatedAngle(a);
+        float now = fmodf(accNow, 360.0f);
+        if (now < 0.0f) now += 360.0f;
         homeRawDeg_[a] = h.rawDeg;
-        const float delta = s_encSign[a] * wrap180(now - h.rawDeg);
+
+        const float scale = (a < NUM_MOTORS) ? AXIS_ENC_SCALE[a] : 1.0f;
+        const float rawDiff = wrap180(now - h.rawDeg);
+        const float delta = s_encSign[a] * rawDiff * scale;
 
         motors[a]->setAbsoluteSteps(AXIS_STEP_SIGN[a] * degreesToSteps(a, delta));
-        encZeroRef[a] = sensor->getAccumulatedAngle(a) - delta / s_encSign[a];
+        encZeroRef[a] = accNow - rawDiff;
         driftFault[a] = false;
         restored[a] = true;
         homed[a] = true;
         ++okCount;
-        Serial.printf("[JM] J%u: restore NVS rawSaved=%.1f rawNow=%.1f -> %+.2f deg (encZeroRef=%.1f)\n",
-                      a + 1, h.rawDeg, now, delta, encZeroRef[a]);
+        Serial.printf("[JM] J%u: restore NVS rawSaved=%.1f rawNow=%.1f -> %+.2f deg (encZeroRef=%.1f, scale=%.3f)\n",
+                      a + 1, h.rawDeg, now, delta, encZeroRef[a], scale);
     }
     Serial.printf("[JM] Restore xong: %u/%u khop\n", okCount, NUM_MOTORS);
     return okCount;
@@ -213,6 +224,11 @@ bool JointModel::hasMeasuredCalibration(uint8_t axis) noexcept {
 }
 
 bool JointModel::hasAnyDriftFault() const noexcept {
+    // Hiện CHƯA có đường nào set driftFault = true (drift watchdog chưa wire -
+    // quét mảng để sẵn sàng khi wire; hiện luôn trả false như trước).
+    for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
+        if (driftFault[i]) return true;
+    }
     return false;
 }
 

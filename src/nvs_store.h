@@ -41,17 +41,10 @@ public:
     bool saveCalib(uint8_t axis, float encSign, float stepsPerDeg);
     void clearCalib(uint8_t axis);
 
-    struct TeachPoint {
-        struct Axis {
-            float deg{0.0f};
-            float homeRawDeg{0.0f};
-            float encSign{1.0f};
-        } axes[NUM_MOTORS];
-        bool valid{false};
-    };
-    [[nodiscard]] TeachPoint loadTeachPoint(uint8_t slot) const;
-    bool saveTeachPoint(uint8_t slot, const TeachPoint& point);
-    [[nodiscard]] bool clearTeachPoints();
+    // --- Teach trajectory persistence (NVS blob) ---
+    bool saveTeachTrajectory(const void* data, size_t size);
+    size_t loadTeachTrajectory(void* data, size_t maxSize) const;
+    bool clearTeachTrajectory();
 
 private:
     mutable Preferences prefs_;

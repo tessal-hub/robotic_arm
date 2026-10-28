@@ -464,7 +464,7 @@ def self_test():
     validate(CURRENT)
     points = forward(CURRENT, [0.0] * 6)
     tcp = points[-1]
-    assert all(abs(a - b) < 1e-6 for a, b in zip(tcp, (200.0, 0.0, 365.0))), tcp
+    assert all(abs(a - b) < 1e-6 for a, b in zip(tcp, (210.0, 0.0, 365.0))), tcp
     for kind in ("Line", "Circle", "HELLO"):
         path = drawing_path(kind, 112.5, 0, DRAW_PLANE_Z_MM, 80)
         assert path and all(ik_pen_down(CURRENT, *point) is not None for point, _drawing in path), kind

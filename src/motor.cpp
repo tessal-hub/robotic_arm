@@ -1,4 +1,5 @@
 #include "motor.h"
+#include <algorithm>
 #include "driver/gpio.h"
 #include "rtos_guard.h"
 #ifdef ARDUINO
@@ -16,7 +17,7 @@ Motor::Motor(HardwareSerial* serial, float rSense, uint8_t uartAddress,
       address(uartAddress),
       label(motorLabel),
       running(false),
-      dirCW(true),
+      dirCW(-1),
       targetSpeedUs(DEFAULT_STEP_INTERVAL_US),
       currentSpeedUs(MAX_STEP_INTERVAL_US),
       startSpeedUs(MAX_STEP_INTERVAL_US),
@@ -85,9 +86,27 @@ void IRAM_ATTR Motor::onStepTimer(void* arg) {
         self->running.store(false, std::memory_order_release);
         return;
     }
-    digitalWrite(self->stepPin, HIGH);
+#endif
+    // Guard race: stopFromISR() nổ giữa lệnh stepsRemaining.store() và
+    // running.store(true) của run()/runContinuous() để lại running==true với
+    // stepsRemaining==0 (continuousMode cũng bị ISR reset). Không có guard này,
+    // callback rơi qua cả hai nhánh đếm bước nhưng vẫn phát xung + tự re-arm
+    // vô hạn trong khi absSteps đóng băng (mô hình vị trí lệch hoàn toàn).
+    const bool isCont = self->continuousMode.load(std::memory_order_relaxed);
+    uint32_t remaining = self->stepsRemaining.load(std::memory_order_relaxed);
+    if (!isCont && (remaining == 0 || remaining == 0xFFFFFFFF)) {
+        if (self->isHighPin) GPIO.out1_w1tc.val = self->stepPinMaskHigh;
+        else GPIO.out_w1tc = self->stepPinMaskLow;
+        self->running.store(false, std::memory_order_release);
+        return;
+    }
+
+#ifdef ARDUINO
+    if (self->isHighPin) GPIO.out1_w1ts.val = self->stepPinMaskHigh;
+    else GPIO.out_w1ts = self->stepPinMaskLow;
     esp_rom_delay_us(4); // 4us clean pulse width cho A4988 và TMC
-    digitalWrite(self->stepPin, LOW);
+    if (self->isHighPin) GPIO.out1_w1tc.val = self->stepPinMaskHigh;
+    else GPIO.out_w1tc = self->stepPinMaskLow;
 #else
     gpio_set_level(static_cast<gpio_num_t>(self->stepPin), 1);
     esp_rom_delay_us(4); // 4us clean pulse width cho A4988 và TMC
@@ -95,13 +114,25 @@ void IRAM_ATTR Motor::onStepTimer(void* arg) {
 #endif
 
     uint32_t nextInterval = self->targetSpeedUs.load(std::memory_order_relaxed);
-    const bool isCont = self->continuousMode.load(std::memory_order_relaxed);
-    uint32_t remaining = self->stepsRemaining.load(std::memory_order_relaxed);
 
     if (!isCont && remaining > 0 && remaining != 0xFFFFFFFF) {
+        if (!self->running.load(std::memory_order_acquire)) {
+            if (self->isHighPin) GPIO.out1_w1tc.val = self->stepPinMaskHigh;
+            else GPIO.out_w1tc = self->stepPinMaskLow;
+            self->stepsRemaining.store(0, std::memory_order_relaxed);
+            return;
+        }
         const uint32_t counter = self->stepCounter.fetch_add(1, std::memory_order_relaxed) + 1;
+        const uint32_t prevRem = self->stepsRemaining.load(std::memory_order_relaxed);
+        if (prevRem == 0 || prevRem == 0xFFFFFFFF) {
+            if (self->isHighPin) GPIO.out1_w1tc.val = self->stepPinMaskHigh;
+            else GPIO.out_w1tc = self->stepPinMaskLow;
+            self->running.store(false, std::memory_order_release);
+            self->stepsRemaining.store(0, std::memory_order_relaxed);
+            return;
+        }
         remaining = self->stepsRemaining.fetch_sub(1, std::memory_order_relaxed) - 1;
-        self->absSteps.fetch_add(self->dirCW.load(std::memory_order_relaxed) ? 1 : -1,
+        self->absSteps.fetch_add((self->dirCW.load(std::memory_order_relaxed) > 0) ? 1 : -1,
                                  std::memory_order_relaxed);
 
         if (counter < self->accelSteps) {
@@ -113,12 +144,14 @@ void IRAM_ATTR Motor::onStepTimer(void* arg) {
         self->currentSpeedUs.store(nextInterval, std::memory_order_relaxed);
 
         if (remaining == 0) {
+            if (self->isHighPin) GPIO.out1_w1tc.val = self->stepPinMaskHigh;
+            else GPIO.out_w1tc = self->stepPinMaskLow;
             self->running.store(false, std::memory_order_release);
             return;
         }
     } else if (isCont) {
         const uint32_t counter = self->stepCounter.fetch_add(1, std::memory_order_relaxed) + 1;
-        self->absSteps.fetch_add(self->dirCW.load(std::memory_order_relaxed) ? 1 : -1,
+        self->absSteps.fetch_add((self->dirCW.load(std::memory_order_relaxed) > 0) ? 1 : -1,
                                  std::memory_order_relaxed);
         if (counter < self->accelSteps) {
             nextInterval = calculateSCurveInterval(counter, self->accelSteps, self->startSpeedUs, self->targetSpeedUs.load(std::memory_order_relaxed));
@@ -137,11 +170,15 @@ void IRAM_ATTR Motor::onStepTimer(void* arg) {
     estop = (self->safety_ && self->safety_->isEStop());
 #endif
     if (!self->running.load(std::memory_order_acquire) || estop) {
+        if (self->isHighPin) GPIO.out1_w1tc.val = self->stepPinMaskHigh;
+        else GPIO.out_w1tc = self->stepPinMaskLow;
         self->running.store(false, std::memory_order_release);
         return;
     }
 
     if (esp_timer_start_once(self->stepTimer, nextInterval) != ESP_OK) {
+        if (self->isHighPin) GPIO.out1_w1tc.val = self->stepPinMaskHigh;
+        else GPIO.out_w1tc = self->stepPinMaskLow;
         self->running.store(false, std::memory_order_release);
         self->stepsRemaining.store(0, std::memory_order_relaxed);
     }
@@ -251,8 +288,6 @@ void Motor::begin(uint16_t initialCurrentMa, uint16_t initialMicrosteps,
     driver->mstep_reg_select(true);
 
     currentMa = initialCurrentMa;
-    driver->rms_current(currentMa);
-
     microstepsVal = initialMicrosteps;
     driver->microsteps(microstepsVal);
 
@@ -267,7 +302,8 @@ void Motor::begin(uint16_t initialCurrentMa, uint16_t initialMicrosteps,
     }
 
     holdScale = initialHoldScale;
-    driver->ihold(holdScale);
+    const float holdMult = std::min(1.0f, static_cast<float>(holdScale) / 31.0f);
+    driver->rms_current(currentMa, holdMult);
     driver->iholddelay(iholddelay);
 
     if (address == UART_ADDR_J4) {
@@ -281,6 +317,7 @@ void Motor::begin(uint16_t initialCurrentMa, uint16_t initialMicrosteps,
     const uint8_t ifcntBefore = driver->IFCNT();
     const bool beforeError = driver->CRCerror;
     driver->shaft(false);
+    dirCW.store(0, std::memory_order_relaxed); // Dong bo trang thai shaft=false (CCW) vao RAM
 #ifdef ARDUINO
     serialPort->flush();
     delay(2);
@@ -303,14 +340,18 @@ void Motor::begin(uint16_t initialCurrentMa, uint16_t initialMicrosteps,
 }
 
 bool Motor::setDirection(bool cw) {
+    const int8_t targetDir = cw ? 1 : 0;
     if (dirPin != 255) { // A4988 hoặc TMC có chân DIR vật lý
-        dirCW.store(cw, std::memory_order_relaxed);
+        dirCW.store(targetDir, std::memory_order_relaxed);
         digitalWrite(dirPin, cw ? HIGH : LOW);
         gpio_set_level(static_cast<gpio_num_t>(dirPin), cw ? 1 : 0);
         return true;
     }
 
     if (isTMC && dirPin == 255) { // TMC dùng UART đảo chiều
+        if (uartOk && dirCW.load(std::memory_order_relaxed) == targetDir) {
+            return true;
+        }
         auto lock = makeTimedLock(uartMutex ? *uartMutex : nullptr, 50);
         if (!lock) return false;
         flushUartRx();
@@ -326,19 +367,31 @@ bool Motor::setDirection(bool cw) {
             if (!uartOk) return false;
         }
 #else
-        driver->shaft(cw);
-        serialPort->flush();
-        delay(2);
-        flushUartRx();
-        const bool verified = driver->shaft();
-        const bool err = driver->CRCerror;
-        uartOk = !err && (verified == cw);
-        if (!uartOk) {
-            Serial.printf("[MOTOR] %s ghi shaft(%d) verify=%d err=%d -> van phat xung nhu j3_test\n",
-                          label, cw ? 1 : 0, verified ? 1 : 0, err);
+        bool verifiedOk = false;
+        for (uint8_t retry = 0; retry < 2; ++retry) {
+            driver->shaft(cw);
+            serialPort->flush();
+            delay(2);
+            flushUartRx();
+            const bool verified = driver->shaft();
+            const bool err = driver->CRCerror;
+            if (!err && (verified == cw)) {
+                verifiedOk = true;
+                uartOk = true;
+                break;
+            }
+            delay(3);
+            flushUartRx();
+        }
+        if (!verifiedOk) {
+            uartOk = false;
+            // Theo contract motor.h: chiều vật lý không xác định được => caller phải bỏ lệnh chạy
+            Serial.printf("[MOTOR] %s ghi shaft(%d) that bai (err=1/timeout) -> bo lenh\n",
+                          label, cw ? 1 : 0);
+            return false;
         }
 #endif
-        dirCW.store(cw, std::memory_order_relaxed);
+        dirCW.store(targetDir, std::memory_order_relaxed);
     }
     return true;
 }
@@ -353,7 +406,10 @@ void Motor::run(bool cw, uint32_t steps) {
     preparedRun.store(false, std::memory_order_relaxed);
     coordinatedMode.store(false, std::memory_order_relaxed);
 
-    if (!enabled.load(std::memory_order_relaxed) && !enable(true)) return;
+    if (!enabled.load(std::memory_order_relaxed) && !enable(true)) {
+        Serial.printf("[MOTOR] %s bo qua run: enable UART that bai\n", label);
+        return;
+    }
     if (!setDirection(cw)) {
         Serial.printf("[MOTOR] %s bo qua run: khong doi duoc chieu UART\n", label);
         return;
@@ -403,7 +459,10 @@ void Motor::runContinuous(bool cw) {
     preparedRun.store(false, std::memory_order_relaxed);
     coordinatedMode.store(false, std::memory_order_relaxed);
 
-    if (!enabled.load(std::memory_order_relaxed) && !enable(true)) return;
+    if (!enabled.load(std::memory_order_relaxed) && !enable(true)) {
+        Serial.printf("[MOTOR] %s bo qua runContinuous: enable UART that bai\n", label);
+        return;
+    }
     if (!setDirection(cw)) {
         Serial.printf("[MOTOR] %s bo qua runContinuous: khong doi duoc chieu UART\n", label);
         return;
@@ -457,9 +516,9 @@ bool Motor::prepareCoordinatedRun(bool cw, uint32_t steps, uint32_t intervalUs,
     stepsRemaining.store(steps, std::memory_order_relaxed);
     stepCounter.store(0, std::memory_order_relaxed);
     // Same ramp fraction and interval ratio on every axis preserve coordination.
-    accelSteps = rampStartIntervalUs > intervalUs ? steps / 4 : 0;
+    accelSteps = (rampStartIntervalUs > intervalUs && steps >= 4) ? (steps / 4) : 0;
     decelSteps = accelSteps;
-    startSpeedUs = rampStartIntervalUs > intervalUs ? rampStartIntervalUs : intervalUs;
+    startSpeedUs = (accelSteps > 0) ? rampStartIntervalUs : intervalUs;
     targetSpeedUs.store(intervalUs, std::memory_order_relaxed);
     currentSpeedUs.store(startSpeedUs, std::memory_order_relaxed);
     preparedRun.store(true, std::memory_order_release);
@@ -503,8 +562,7 @@ void IRAM_ATTR Motor::stopFromISR() {
     coordinatedMode.store(false, std::memory_order_relaxed);
     stepsRemaining.store(0, std::memory_order_relaxed);
     targetSteps = 0;
-    if (isHighPin) GPIO.out1_w1tc.val = stepPinMaskHigh;
-    else GPIO.out_w1tc = stepPinMaskLow;
+    gpio_set_level(static_cast<gpio_num_t>(stepPin), 0);
 }
 
 bool Motor::enable(bool en) {
@@ -527,8 +585,11 @@ bool Motor::enable(bool en) {
     delay(2);
     flushUartRx();
     giveUart();
-    enabled.store(en, std::memory_order_release);
-    return true;
+    // Đồng bộ với nhánh host: verify UART fail => báo fail để caller (RELEASE/
+    // ENABLE J1-J4, resumeManualRelease) biết driver không đáp ứng thay vì
+    // luôn nhận "OK" trong khi mô-men giữ chưa chắc đã đổi.
+    if (uartOk) enabled.store(en, std::memory_order_release);
+    return uartOk;
 #else
     flushUartRx();
     driverVersion = driver->version();
@@ -555,7 +616,22 @@ void Motor::setCurrent(uint16_t mA) {
     currentMa = mA;
     if (!isTMC || !takeUart(50)) return;
     flushUartRx();
-    driver->rms_current(currentMa);
+    const float holdMult = std::min(1.0f, static_cast<float>(holdScale) / 31.0f);
+    driver->rms_current(currentMa, holdMult);
+#ifdef ARDUINO
+    serialPort->flush();
+    delay(2);
+#endif
+    flushUartRx();
+    giveUart();
+}
+
+void Motor::setHoldCurrentScale(uint8_t iholdVal) {
+    holdScale = iholdVal;
+    if (!isTMC || !takeUart(50)) return;
+    flushUartRx();
+    const float holdMult = std::min(1.0f, static_cast<float>(holdScale) / 31.0f);
+    driver->rms_current(currentMa, holdMult);
 #ifdef ARDUINO
     serialPort->flush();
     delay(2);
@@ -595,7 +671,7 @@ String Motor::toJson() const {
              "\"spreadCycle\":%s,\"microsteps\":%u,\"uartOk\":%s,\"version\":%u,\"isTMC\":%s,"
              "\"absSteps\":%lld}",
              running.load(std::memory_order_relaxed) ? "true" : "false",
-             dirCW.load(std::memory_order_relaxed) ? "cw" : "ccw",
+             dirCW.load(std::memory_order_relaxed) > 0 ? "cw" : "ccw",
              stepsRemaining.load(std::memory_order_relaxed),
              targetSteps.load(std::memory_order_relaxed),
              targetSpeedUs.load(std::memory_order_relaxed),

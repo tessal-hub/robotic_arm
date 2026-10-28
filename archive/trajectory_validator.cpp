@@ -27,10 +27,8 @@ ValidationResult validateTrajectory(const Planner::Job& job, const WorkPlane* wo
         return {true, -1, "OK"};
     }
 
-    if (workPlane != nullptr && workPlane->isEnabled()) {
-        return {false, 0, "WORKPLANE_ENABLED"};
-    }
-    if (fabsf(job.z - DRAW_PLANE_Z_MM) > 0.01f) {
+    const bool wpActive = (workPlane != nullptr && workPlane->isEnabled());
+    if (!wpActive && (job.z < 0.0f || job.z > 150.0f)) {
         return {false, 0, "WRONG_DRAW_PLANE"};
     }
 
@@ -56,29 +54,30 @@ ValidationResult validateTrajectory(const Planner::Job& job, const WorkPlane* wo
         return {true, -1, "OK"};
     }
 
-    // CIRCLE: 4 quadrants around circle
+    // CIRCLE: 16 points around circumference at both draw height and pen-lift height
     if (job.shape == Planner::Shape::CIRCLE) {
-        float cx = job.x1;
-        float cy = job.y1;
-        float r = job.r;
-        float z = job.z;
+        const float cx = job.x1;
+        const float cy = job.y1;
+        const float r = job.r;
+        const float z = job.z;
         if (r <= 0.0f) {
             return {false, 0, "BAD_RADIUS"};
         }
-        // 4 quadrants: (cx+r,cy), (cx,cy+r), (cx-r,cy), (cx,cy-r) at height z
-        kin::Pose q1{cx + r, cy, z};
-        kin::Pose q2{cx, cy + r, z};
-        kin::Pose q3{cx - r, cy, z};
-        kin::Pose q4{cx, cy - r, z};
-        if (!checkPose(q1, 0.0f, workPlane)) return {false, 0, "OUT_OF_REACH"};
-        if (!checkPose(q2, 0.0f, workPlane)) return {false, 1, "OUT_OF_REACH"};
-        if (!checkPose(q3, 0.0f, workPlane)) return {false, 2, "OUT_OF_REACH"};
-        if (!checkPose(q4, 0.0f, workPlane)) return {false, 3, "OUT_OF_REACH"};
+        constexpr uint8_t CIRCLE_SAMPLES = 16;
+        constexpr float TWO_PI_F = 6.28318530717958647692f;
+        for (uint8_t i = 0; i < CIRCLE_SAMPLES; ++i) {
+            const float ang = (TWO_PI_F * static_cast<float>(i)) / static_cast<float>(CIRCLE_SAMPLES);
+            const float px = cx + r * cosf(ang);
+            const float py = cy + r * sinf(ang);
+            const kin::Pose pDraw{px, py, z};
+            if (!checkPose(pDraw, 0.0f, workPlane)) return {false, static_cast<int>(i), "OUT_OF_REACH"};
+            const kin::Pose pLift{px, py, z + PEN_LIFT_MM};
+            if (!checkPose(pLift, PEN_LIFT_MM, workPlane)) return {false, static_cast<int>(CIRCLE_SAMPLES + i), "OUT_OF_REACH"};
+        }
         return {true, -1, "OK"};
     }
 
-    // SQUARE: 4 corners + midpoint of each side. Planner will
-    // still verify every ~1mm segment; this is the fast HTTP pre-flight gate.
+    // SQUARE: 4 corners + 4 side midpoints at both draw height and pen-lift height
     if (job.shape == Planner::Shape::SQUARE) {
         if (job.r <= 0.0f) return {false, 0, "BAD_RADIUS"};
         const float half = job.r * 0.5f;
@@ -92,8 +91,11 @@ ValidationResult validateTrajectory(const Planner::Job& job, const WorkPlane* wo
             {job.x1 - half, job.y1 + half, job.z},
             {job.x1 - half, job.y1,        job.z},
         };
-        for (uint8_t i = 0; i < sizeof(perimeter) / sizeof(perimeter[0]); ++i) {
+        const uint8_t nPoints = sizeof(perimeter) / sizeof(perimeter[0]);
+        for (uint8_t i = 0; i < nPoints; ++i) {
             if (!checkPose(perimeter[i], 0.0f, workPlane)) return {false, static_cast<int>(i), "OUT_OF_REACH"};
+            const kin::Pose pLift{perimeter[i].x, perimeter[i].y, perimeter[i].z + PEN_LIFT_MM};
+            if (!checkPose(pLift, PEN_LIFT_MM, workPlane)) return {false, static_cast<int>(nPoints + i), "OUT_OF_REACH"};
         }
         return {true, -1, "OK"};
     }

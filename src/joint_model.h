@@ -12,7 +12,9 @@ class NvsStore;
 /**
  * Mô hình vị trí khớp tuyệt đối (đơn vị: độ, gốc tại HOME đã calib).
  * - Nguồn chính: bộ đếm step tuyệt đối trong Motor (motor.getAbsoluteSteps()).
- * - Nguồn tham chiếu: encoder AS5600 (zeroRef chụp lúc set home) để phát hiện drift.
+ * - Nguồn tham chiếu: encoder AS5600 (zeroRef chụp lúc set home). Drift fault
+ *   là state dự phòng — drift watchdog hiện CHƯA wire (không đường nào set
+ *   driftFault=true; hasAnyDriftFault() luôn trả false).
  * - Quy đổi: stepsPerDegree = FULL_STEPS * microstep * gearRatio / 360.
  *   Khi đã home bằng kiến trúc quét Min/Max, bước/độ và dấu encoder được ĐO thực tế
  *   (s_encSign / s_measuredSpd) và áp dụng thay hằng số cố định.

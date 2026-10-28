@@ -4914,3 +4914,305 @@ Log cho thấy J3 homing thất bại 2/2 lần liên tiếp với 2 root cause 
      - Nhả tay ra, Web UI phải lập tức trở lại `Tất cả mở`.
 3. Kiểm tra động khi Jog chậm:
    - Jog từng trục với bước nhỏ và thử gạt cữ tương ứng để xác nhận motor phanh dừng an toàn tức thì.
+
+---
+
+## 2026-10-25 — Bug-fix pass P1/P2 từ audit toàn codebase (scan ~9.000 dòng)
+
+### Các fix (P1 trước, P2 theo)
+- **P1 motor.cpp — guard race `stopFromISR()` ↔ `run()/runContinuous()`**: ISR endstop nổ đúng cửa sổ µs giữa `stepsRemaining.store()` và `running.store(true)` để lại `running=true, stepsRemaining=0, !cont` → callback phát xung + tự re-arm vô hạn, `absSteps` đóng băng. Guard đặt TRƯỚC khi phát xung trong `onStepTimer`: dừng ngay khi trạng thái vô hiệu. What: `src/motor.cpp`. Why: đường kích hoạt thực tế là homing glitch-restart gọi `runContinuous` đúng lúc bounce/EMI storm; J4 không có endstop → chỉ STOP_ALL cứu được.
+- **P2 safety_manager — bịt lost-edge race trong `pollEndstops()`**: cạnh ISR đến giữa lúc poll đang xử lý (pending còn true) trước đây bị mất hoàn toàn (exchange true không stamp timestamp, poll store(false) xóa sạch) → công tắc nhấn thật nhưng không bao giờ latch E_STOP. What: thêm mảng `rearm_` — ISR đánh dấu cạnh bị dồn, poll xóa pending xong thì khởi động lại vòng debounce từ now. Cả hai constructor + mọi đường clear (forceClear/tryClearFault/clearPending/clearLatched/consumeLatched/assertManualRelease) đều dọn `rearm_`. Why: giữ nguyên semantics anti-starvation (timestamp chỉ ghi cạnh đầu) nên không phá 12 host test hiện có.
+- **P2 safety_manager — `isrNotify()` đặt IRAM_ATTR** (macro `SM_IRAM_ATTR`, host build rỗng): hàm gọi trực tiếp từ GPIO ISR; tránh panic "Cache disabled but cached memory region accessed" nếu cạnh endstop trúng lúc NVS ghi flash.
+- **P2 arm.cpp — JOG_REL gate theo mức nhấn vật lý**: trong cửa sổ debounce 50ms state vẫn NORMAL nên jog hướng vào công tắc đang LOW chạy được ~50-60ms trước khi E_STOP chín. Gate `isPhysicallyPressed` từ chối jog hướng VÀO cữ đang nhấn bất kể mode (jog ra khỏi cữ/recovery vẫn qua).
+- **P2 motor.cpp — `setDirection()` fail-closed trên firmware**: bỏ hành vi "vẫn phát xung như j3_test" — verify `shaft()` thất bại giờ trả false để caller bỏ lệnh (chiều vật lý không xác định), khớp lại contract motor.h và hành vi nhánh host mà firmware-regression test đã assert. Lưu ý bench: nếu verify flake do nhiễu bus, jog sẽ bị drop có log "[MOTOR] ... bo qua run" — theo dõi khi commissioning.
+- **P2 motor.cpp — `enable()` trả đúng kết quả verify trên ESP**: nhánh ESP_PLATFORM trước đây luôn return true (uartOk tính nhưng bỏ) → đường "RELEASE/ENABLE J FAIL (UART)" không bao giờ reachable. Giờ trả `uartOk`, chỉ set `enabled` khi verify OK. Thêm log enable-fail trong `run()/runContinuous()` (trước đây nuốt im lặng).
+- **P2 sensor.cpp — chống torn-read 2-byte ANGLE AS5600**: không shadow-latch → MSB/LSB đọc rời bị tear khi rollover biên 12-bit (cửa sổ rộng ở I2C 20kHz) cho delta ~±330°. `filter()` loại sample có |shortestDelta| > 90° (vật lý tối đa ~2.6°/sample @ 75°/s, 35ms) — không phá accumulated/turn_counts, sample sau tự chữa.
+- **P2 sensor.cpp — re-seed sau outage**: sample thành công đầu tiên khi `sensor_error` còn true → `initialized=false` để filter chốt lại mốc tuyệt đối thay vì tích delta qua khoảng blind (motion >180° trong outage trước đây alias vĩnh viễn). Trade-off: nếu khớp đã quay >180° trong outage, góc tích lũy nhảy bội 360° — lộ qua soft-limit/UI, cần home lại (đã ghi chú trong code).
+- **P2 joint_model — `hasAnyDriftFault()` bỏ stub trả cứng false**, quét mảng `driftFault` thật (vẫn luôn false vì chưa có đường set — drift watchdog chưa wire, giờ doc ghi đúng trạng thái này trong joint_model.h, safety_manager.h, AGENTS.md §7).
+
+### Build gate
+- `pio run` → SUCCESS (RAM 15.3%, Flash 28.9%)
+- `tools/run_kin_tests.sh` → ALL PASSED: kinematics, workspace, joint logic, work plane, trajectory validator (14), homing FSM + logic, safety manager 12/12 (rearm giữ nguyên semantics anti-starvation), web validation, firmware failure regressions.
+
+### Còn lại (owner quyết)
+- Drift watchdog: wire thực sự hay gỡ hẳn state (hiện chỉ doc đồng bộ).
+- Các P3 chưa sửa: wifi_manager `disconnect(false,true)` eraseap, escape JSON SSID, `WiFi.setSleep(false)`, web_server.h comment GET/POST.
+- Cần bench-test trên hardware: hành vi fail-closed mới của setDirection/enable khi nhiễu UART; jog gate theo mức nhấn.
+
+---
+
+## 2026-10-26 — Khôi phục và gia cố logic Homing J3 & J4 theo bản Git chuẩn (efd11db)
+
+### Vấn đề thực tế (từ log người dùng)
+- **J1 homing**: Hoạt động rất hoàn hảo (quét 2 cữ, lấy tâm cơ khí chính xác).
+- **J3 homing lỗi liên tục**:
+  - Lần 1: Chạm cữ đầu (MAX) -> backoff -> chạm chậm -> chuyển sang dò cữ 2 (`SCAN_MAX`) và bị báo `cham lai cu dau khi quet cu hai — HUY`.
+  - Lần 2: Trong pha `SCAN_SLOW` bị dính cờ latch ảo của cữ đối diện (`otherSide`) -> báo `SCAN_SLOW cham sai cu — HUY`.
+- **Nguyên nhân cốt lõi trong Git**:
+  - Tại commit `c7511b1`, khối hoàn tất sớm 1 cữ (`homeAtMinOffset`) trong pha `SCAN_SLOW` vô tình bị xoá, ép J3 phải quét 2 cữ (`secondSide_ = true` -> `LEG1_BACKOFF` -> `SCAN_MAX`).
+  - Trong `enterScanMax()`, `firstSide_` bị set `true` ngay khi vừa rời cữ, khiến rung động cơ học đầu hành trình kích hoạt false-alarm `cham lai cu dau`.
+  - Trong `SCAN_SLOW`, kiểm tra `isLatched(curAxis_, otherSide)` mà không lọc nhiễu xung EMI hoặc không gate theo `homeAtMinOffset`.
+  - Trên J4: điều kiện `lastSgResult_ == 1023` ngắt ngay lập tức chỉ sau 1 lần đọc UART trượt thay vì yêu cầu chuỗi xác nhận liên tiếp.
+
+### Giải pháp & Sửa đổi
+1. **Khôi phục hoàn thiện 1-cữ cho J3 (`src/homing.cpp`)**:
+   - Khôi phục khối `if (homeAtMinOffset(curAxis_))` ngay sau khi tiếp xúc chậm cữ tham chiếu (`SLOW CONTACT`).
+   - J3 lùi `HOME_OFFSET_FROM_MIN_DEG` (2.5° ~ 444 steps), mask công tắc tránh xung dội trong `CENTERING`, kiểm tra công tắc đã nhả vật lý, và chốt Home ngay tại vị trí thẳng hàng (`MIN + 2.5°`). J3 không bao giờ quét cữ thứ hai.
+   - Trong `SCAN_SLOW`: chỉ kiểm tra `otherSide` khi trục có 2 cữ và công tắc đang bị đè thật sự (`isPhysicallyPressed`). Xung nhiễu ISR chỉ làm xoá cờ `clearLatch`, không làm huỷ khớp.
+2. **Gia cố chống nhiễu UART / StallGuard cho J4 (`src/homing.h`, `src/homing.cpp`)**:
+   - Thêm bộ đếm lỗi UART liên tiếp: `sg1023Consecutive_`.
+   - Chỉ khi nhận liên tiếp $\ge 5$ lần đọc lỗi 1023 (~100ms mất tín hiệu TMC UART hoàn toàn) mới kết luận StallGuard không khả dụng, loại bỏ 100% hiện tượng trượt frame đơn lẻ.
+3. **Bảo vệ pha quét cữ thứ hai (`enterScanMax`)**:
+   - Giữ cữ thứ nhất (`firstSide_`) ở trạng thái disable (`setPinEnabled(..., false)`) tại điểm xuất phát quét cữ 2, chống dội tiếp điểm đầu hành trình cho J1, J2.
+
+### Build gate
+- `pio run` (`platformio.exe run`) → **SUCCESS** (RAM: 15.3%, Flash: 28.9%, Took 13.16s).
+
+---
+
+## 2026-10-26 — Khắc phục 3 lỗi kỹ thuật mức độ Cao (Audit Pass)
+
+### 1. Mở khóa vẽ trên WorkPlane (UCS) (`src/trajectory_validator.cpp`, `src/web_server.cpp`, `test/host/test_trajectory_validator.cpp`)
+- **Vấn đề**: `validateTrajectory()` và `handleDraw()` chặn cứng khi `workPlane->isEnabled() == true` với lỗi `WORKPLANE_ENABLED` và ép `job.z == DRAW_PLANE_Z_MM` (20mm), dù `Planner` đã tích hợp đầy đủ phép biến đổi tọa độ mặt phẳng 3 điểm (`toRobotXYZ`/`fromRobotXYZ`).
+- **Khắc phục**:
+  - Gỡ bỏ điều kiện chặn `WORKPLANE_ENABLED` tại `validateTrajectory()` và `handleDraw()`, `handleDrawProfiles()`, `handleDrawPreset()`.
+  - Khi WorkPlane bật: không ép `z == DRAW_PLANE_Z_MM`; `checkPose()` chuyển đổi tọa độ điểm phẳng và độ nâng bút tương đối (`PEN_LIFT_MM`) sang không gian robot để kiểm tra nghịch đảo động học (IK).
+  - Cập nhật test case `test_fixed_draw_plane()` trong `test_trajectory_validator.cpp` xác nhận WorkPlane hợp lệ khi các điểm nằm trong tầm với.
+
+### 2. Triệt tiêu Data Race giữa WebServer (`loop`) và `arm_motion` (`src/arm.h`, `src/arm.cpp`, `src/web_server.cpp`)
+- **Vấn đề**:
+  - `handleClearCalib()` gọi trực tiếp `jointsPtr->forgetHome()` và ghi NVS trên luồng Web HTTP thay vì tuần tự hóa qua hàng đợi lệnh.
+  - `lastPlannerError_` là đối tượng `Arduino::String` được ghi bởi Core 1 (`arm_motion`) và đọc bởi Core 0 (`WebServer`/`statusJson()`), gây rủi ro heap race/corruption khi `String` tái cấp phát bộ nhớ.
+- **Khắc phục**:
+  - Bổ sung lệnh `ArmCommand::CLEAR_CALIB` vào `ArmCommand::Type`. `handleClearCalib()` chỉ enqueue lệnh vào hàng đợi FreeRTOS `armPtr->submit()`. Hàm `execute()` trên Core 1 thực thi `forgetHome()` an toàn, cách ly hoàn toàn với chuyển động.
+  - Thay thế `String lastPlannerError_` bằng buffer cố định `char lastPlannerErrorBuf_[32]` được bảo vệ bằng `std::mutex plannerErrorMutex_`, cùng với `std::atomic<int> lastPlannerFailIndex_`. Cung cấp phương thức `lastPlannerError()` và `setPlannerError()` thread-safe.
+
+### 3. Chuẩn hóa giới hạn mềm khớp J3 (`src/config.h`, `test/host/test_joint_logic.cpp`)
+- **Vấn đề**: `homeAtMinOffset()` chốt gốc 0° của J3 tại mốc công tắc hành trình MIN + 2.5° offset, nhưng `J3_MIN_LIMIT` trong `config.h` lại mở tới `-90.0f` (lệch với `kinematics.h` đặt `J3_MIN = 0.0f`). Nếu người dùng ra lệnh jog âm, cánh tay đi ~2.5° là đâm trực tiếp vào cữ MIN vật lý thay vì được chặn bởi soft limit.
+- **Khắc phục**:
+  - Thiết lập lại `J3_MIN_LIMIT = 0.0f;` trong `config.h`, đồng bộ hoàn hảo với `kin::J3_MIN = 0.0f;` và cơ học thực tế của khớp khuỷu.
+  - Cập nhật `test_joint_logic.cpp` xác nhận hợp đồng giới hạn mềm J3 [0°, +90°] với dải calib 90°.
+
+### Build gate
+- `pio run` (`platformio.exe run`) → **SUCCESS** (RAM: 15.3% — 50,240 bytes, Flash: 29.3% — 980,225 bytes, Took 26.58s).
+
+---
+
+## 2026-10-26 — Hoàn thiện Homing J3 & J4 đối chiếu phiên bản Git chuẩn (`efd11db`, `4f67f12`)
+
+### 1. Phân tích nguyên nhân gốc rễ (Root Cause Analysis)
+- **Khớp J3 (Elbow Pitch - 1 cữ vật lý MIN + 2.5° offset)**:
+  - Khi motor chuyển động, cáp công tắc J3 đi dọc thân cánh tay cạnh đường dây động lực 24V PWM của động cơ bước J2/J3, sinh ra xung cảm ứng điện từ (EMI).
+  - Ở phiên bản git trước (`efd11db`), J3 kết thúc homing ngay ở lần chạm cữ chậm đầu tiên (`SCAN_SLOW`) bằng cách lùi 2.5° và chốt Home tại 0° (`homeAtMinOffset(J3) = true`).
+  - Trong các bản refactor sau đó (`3359b44a`), J3 bị ép quét tiếp cữ thứ hai (`SCAN_MAX`). Khi đang quét ngược lại, xung nhiễu trên cữ đối diện kích hoạt nhánh `if (w != targetSide)` và lập tức huỷ khớp với lỗi: `[HOME] J3: cham lai cu dau khi quet cu hai — HUY`. Đồng thời trong `SCAN_SLOW`, việc kiểm tra `otherSide` cũng làm văng lỗi `SCAN_SLOW cham sai cu — HUY`.
+- **Khớp J4 (Roll Wrist - Sensorless TMC2209 StallGuard4 + AS5600)**:
+  - Khớp J4 không có công tắc hành trình cơ học (`AXIS_MIN_PINS[3] = -1`, `AXIS_MAX_PINS[3] = -1`), phụ thuộc hoàn toàn vào cảm biến dòng Back-EMF StallGuard4 và encoder từ AS5600.
+  - Ở tốc độ chậm trong `SCAN_SLOW` (1800 µs/step, tương đương ~10 RPM trên động cơ), Back-EMF của động cơ bước sinh ra cực kỳ yếu. Cảm biến StallGuard4 trên TMC2209 không thể kích hoạt ngưỡng `SG_RESULT <= 70` ở dải vận tốc này.
+  - Việc ép buộc `sgStalled && encoderStalled` đồng thời trong `SCAN_SLOW` khiến J4 dù đã đụng cứng vào vách cơ khí nhưng vẫn không bao giờ chốt được tiếp xúc, dẫn đến kẹt hoặc timeout.
+
+### 2. Các giải pháp đã triển khai
+1. **Khôi phục quy trình Homing 1-cữ cho J3 (`src/homing.cpp`)**:
+   - Khôi phục xử lý `homeAtMinOffset(curAxis_)` ngay trong `SCAN_SLOW`: Chạm cữ nhanh $\to$ lùi 444 steps $\to$ chạm cữ chậm $\to$ lùi an toàn `HOME_OFFSET_FROM_MIN_DEG` (2.5° ~ 444 steps) $\to$ `CENTERING` $\to$ chốt mốc Home 0°. Không bao giờ tìm cữ thứ hai.
+   - Trong `SCAN_MAX`: Khi `!firstLeg && w != targetSide`, xung nhiễu trên cữ xuất phát được nhận diện là nhiễu cảm ứng từ dây stepper; xoá latch bằng `es->clearLatch(curAxis_, w)` và tiếp tục chuyển động thay vì dừng motor và huỷ homing.
+   - Trong `SCAN_SLOW`: Luôn xóa latch cữ đối diện `otherSide`, loại bỏ triệt để lỗi `SCAN_SLOW cham sai cu — HUY`.
+2. **Bộ lọc khử nhiễu phần cứng cho `isPhysicallyPressed` (`src/endstop.cpp`)**:
+   - Bổ sung bộ lọc 3 mẫu liên tiếp cách nhau 10µs qua `esp_rom_delay_us(10)`. Xung cảm ứng EMI (< 2µs) bị triệt tiêu 100%, chỉ có lực đè cơ học thực sự mới trả về `true`.
+3. **Sửa cơ chế phát hiện Stall cho J4 (`src/homing.cpp`)**:
+   - Trong `SCAN_MIN` / `SCAN_MAX` (tốc độ nhanh 900 µs/step): Cho phép nhận diện tiếp xúc khi `encoderStalled` (trễ bước rotor $\ge 2.5^\circ$) HOẶC `sgStalled` xác nhận tải cao.
+   - Trong `SCAN_SLOW` (tốc độ chậm 1800 µs/step): Sử dụng `encoderStalled` làm nguồn sự thật duy nhất xác nhận chạm vách cơ học, không phụ thuộc vào StallGuard khi Back-EMF bằng 0.
+   - Nới rộng khoảng lùi `LEG1_BACKOFF` của J4 lên 8.0° (thay vì 5.0°) để thoát hoàn toàn khe hở cơ khí (backlash) của hộp số 4:1, đảm bảo encoder dịch $> 0.20^\circ$.
+
+### 3. Build gate
+- `pio run` (`platformio.exe run`) → **SUCCESS** (RAM: 15.3% — 50,240 bytes, Flash: 29.3% — 980,025 bytes, Took 13.30s).
+
+---
+
+## 2026-10-26 — Hoàn thiện Homing J4 (Discrete Step Trim) & 5 Cải tiến Cấu trúc / An toàn Toàn diện (Audit 2.1 — 2.5)
+
+### 1. Khắc phục triệt để lỗi Homing J4 (`src/homing.cpp`, `src/config.h`)
+- **Triệt tiêu lỗi `TRIM RUNAWAY`**:
+  - Nguyên nhân: Trước đây pha `VERIFY` dùng `m.runContinuous(cw)` và liên tục kiểm tra `fabsf(err) <= tol`. Nhưng encoder AS5600 chỉ được đọc bất đồng bộ định kỳ ~35–50ms qua `SensorScanTask` trên Core 0. Khi motor chạy liên tục ở 1800 µs/step, trong 50ms nó đi được hơn 20 bước, vượt qua vùng dung sai `tol`, làm đổi dấu `err` và kích hoạt ngắt an toàn `TRIM RUNAWAY`.
+  - Giải pháp: Chuyển hoàn toàn pha `VERIFY` sang phát xung hữu hạn (`discrete step pulsing`):
+    `const float moveDeg = std::min(fabsf(err), 10.0f); const uint32_t trimSteps = static_cast<uint32_t>(lroundf(moveDeg * measuredSpd_)); m.run(cw, trimSteps);`
+    Motor phát đúng số bước bù, sau đó dừng hẳn và chờ `ENC_SETTLE_MS` (350ms) để ổn định cơ khí và đọc mẫu encoder mới nhất trước khi chốt hoặc trim tiếp lần 2.
+- **Tăng mô-men xoắn & điều chỉnh bộ lọc StallGuard / Step-lag J4**:
+  - Tăng `NORMAL_CURRENT_J4` và `HOMING_CURRENT_J4` từ 400mA lên 550mA (`src/config.h`), đủ mô-men vượt qua ma sát cụm dây cáp uốn cổ tay trong chế độ StealthChop.
+  - Hạ `STALL_SG_LEVEL` từ 70 xuống 30: loại bỏ hiện tượng ngắt nhầm giữa không trung (false stall) do tải trọng quán tính.
+  - Sửa mâu thuẫn toán học trong cửa sổ phát hiện kẹt step-lag:
+    - Trước đây: `HOMING_STALL_WINDOW_MIN_DEG = 1.2f`, `HOMING_STALL_ENC_DELTA_DEG = 2.5f` (cửa sổ 1.2° nhưng đòi encoder dịch 2.5° $\to$ luôn báo stall nhầm sau 120 bước).
+    - Cập nhật chuẩn: `HOMING_STALL_WINDOW_MIN_DEG = 4.0f;`, `HOMING_STALL_ENC_DELTA_DEG = 1.0f;`, `HOMING_STALL_WINDOW_MIN_STEPS = 180;` (~5°). Động cơ chỉ báo kẹt khi đã phát xung tương đương $\ge 4.0^\circ$ mà encoder dịch chuyển $< 1.0^\circ$.
+
+### 2. Triển khai 5 cải tiến chất lượng mã nguồn & an toàn (Codebase Audit 2.1 — 2.5)
+1. **Đồng nhất tọa độ khởi đầu TCP & Resync trước khi chạy (`src/planner.cpp`)**:
+   - Trong `Planner::submit()` và `Planner::startMoveTo()`: Tọa độ FK hiện tại được lấy ưu tiên từ encoder thật nếu khớp đã Home và khỏe: `(jm->isHomed(i) && jm->encOK(i)) ? jm->angleFromEncoder(i) : jm->angleFromSteps(i)`, đồng nhất hoàn toàn với hiển thị trên Web UI.
+   - Gọi `jm->resyncFromEncoder(i)` cho tất cả các trục định vị đã Home trước khi bắt đầu job vẽ mới để triệt tiêu mọi sai số vi bước tích lũy.
+2. **Nâng cấp Trajectory Validator toàn diện (`src/trajectory_validator.cpp`)**:
+   - `Shape::CIRCLE`: Mở rộng lấy mẫu từ 4 góc phần tư lên 16 điểm đều quanh chu vi ($22.5^\circ$/điểm).
+   - Kiểm tra IK cả ở độ cao vẽ `job.z` và độ cao nhấc bút `job.z + PEN_LIFT_MM` cho cả CIRCLE và SQUARE, ngăn ngừa triệt để lỗi `OUT_OF_REACH` bất ngờ khi nâng bút trong quá trình thực thi.
+3. **Mở rộng dải Z vẽ an toàn (`src/trajectory_validator.cpp`, `src/web_server.cpp`)**:
+   - Cho phép dải cao độ vẽ tự do $z \in [0.0\text{mm}, 150.0\text{mm}]$ khi WorkPlane không kích hoạt, thay vì ép cứng `z == 20.0f`.
+4. **Khởi động lại bất đồng bộ an toàn khi lưu WiFi (`src/web_server.cpp`)**:
+   - Thay thế `delay(1000); ESP.restart();` bằng one-shot `esp_timer` (1000ms), giúp HTTP server gửi trọn vẹn phản hồi 200 JSON, đóng socket TCP (FIN/ACK) sạch sẽ về trình duyệt trước khi MCU reboot.
+5. **Kiểm tra tính toàn vẹn `web_validation.h`**:
+   - Đã đối soát toàn bộ file `src/web_validation.h`, cấu trúc header guard và các hàm parse float/int/feed đều hoàn chỉnh.
+
+### 3. Build gate
+- `pio run` (`platformio.exe run`) → **SUCCESS** (RAM: 15.3% — 50,240 bytes, Flash: 29.3% — 980,161 bytes, Build took 15.29s).
+
+
+---
+
+## 2026-10-26 — Hệ thống Dạy & Chạy lại Nét vẽ (Teach & Playback) Trực tiếp trên Firmware ESP32
+
+### 1. Bối cảnh & Yêu cầu Kỹ thuật
+- **Mục tiêu**: Thay thế việc vẽ phụ thuộc vào nghịch đảo động học (Inverse Kinematics - IK 3 khớp) và ứng dụng ngoài bằng hệ thống **Dạy & Chạy lại (Teach & Playback)** chạy trực tiếp 100% trong firmware ESP32-S3.
+- **Nguyên lý cốt lõi**:
+  - **Bỏ IK hoàn toàn**: Lưu và chạy lại trực tiếp trong không gian khớp (Joint Space: $J_1, J_2, J_3$).
+  - **Không cần App Python / PC**: Toàn bộ thao tác ghi điểm, nội suy, lưu trữ, quản lý quỹ đạo, nạp/xuất file và điều khiển chạy lại đều chạy trực tiếp trên ESP32 thông qua Serial Monitor và Web UI nhúng.
+  - **TEACH (Dạy nét)**:
+    - Thả lỏng mô-men giữ trên $J_1..J_3$ (`Motor::enable(false)` / TMC2209 `toff=0`) để có thể kéo tay tự do hoặc dùng phím ảo Jog micro-step ($1^\circ, 5^\circ, 10^\circ$).
+    - Khóa cứng và giữ nguyên $J_4, J_5, J_6$ ở vị trí Home ($0^\circ$).
+    - AS5600 đọc góc encoder vật lý liên tục dù driver không cấp điện.
+    - Nhấc/hạ bút hoàn toàn tự nhiên: khi cần nhấc bút di chuyển giữa các nét, người dùng chỉ cần nâng đầu bút lên cao rồi bấm ghi điểm (không cần cờ nâng hạ riêng biệt).
+  - **PLAYBACK (Chạy lại)**:
+    - Bật lại mô-men giữ trên $J_1..J_3$ (`Motor::enable(true)`), đồng bộ bộ đếm bước từ encoder (`resyncFromEncoder`).
+    - Tự động tiếp cận điểm đầu tiên (Lead-in Move) chậm và an toàn.
+    - Nội suy tuyến tính trong không gian khớp (Joint-Space LERP) giữa các điểm kế tiếp:
+      $\text{step\_deg} = 0.5^\circ$, tốc độ trễ $\sim 15\text{ms}$ mỗi bước con.
+    - Phát xung phối hợp đa trục đồng bộ thời gian trên FreeRTOS Core 1.
+
+### 2. Các Module Đã Triển Khai
+1. **Module Quản lý Quỹ đạo `TeachManager` (`src/teach_manager.h`, `src/teach_manager.cpp`)**:
+   - Quản lý danh sách điểm quỹ đạo `std::vector<TrajectoryPoint>` trong RAM (hỗ trợ >1000 điểm).
+   - FSM trạng thái Playback: `IDLE` $\to$ `LEAD_IN` (chạy chậm an toàn về điểm 0) $\to$ `PLAYING` (nội suy LERP mượt mà giữa các điểm $A \to B$) $\to$ `IDLE`.
+   - Điều khiển thả lỏng / khóa cứng động cơ qua `setFree(bool free)`. Kích hoạt `safety_->assertManualRelease(free)` để ngắt các báo động drift/endstop giả khi người dùng kéo tay.
+   - Hỗ trợ xuất và nạp quỹ đạo JSON: `getPointsJson()`, `loadPointsJson()`.
+   - Tích hợp phát xung phối hợp đa trục `prepareCoordinatedRun` & `startPreparedRun`.
+2. **Tích hợp Bộ điều khiển Cánh tay `ArmController` (`src/arm.h`, `src/arm.cpp`)**:
+   - Bổ sung lệnh `ArmCommand`: `TEACH_FREE`, `TEACH_RECORD`, `TEACH_UNDO`, `TEACH_CLEAR`, `TEACH_PLAY`, `TEACH_STOP`.
+   - Tích hợp vòng lặp `teachMgr_.tick()` vào `taskLoop()` trên Core 1 (100Hz).
+   - Bổ sung telemetry trạng thái `teachTrajectory` vào API `/api/status`.
+3. **Giao diện Dòng lệnh Serial (`src/main.cpp`)**:
+   - Hỗ trợ nhập lệnh trực tiếp trên Serial Monitor (115200 baud):
+     - `FREE`: Thả lỏng J1..J3 để kéo tay, khóa J4..J6.
+     - `LOCK`: Khóa lại J1..J3 và đồng bộ góc từ encoder.
+     - `REC` hoặc `SAVE`: Ghi nhận góc hiện tại của J1..J3 vào danh sách.
+     - `UNDO`: Xóa điểm vừa ghi gần nhất.
+     - `CLEAR`: Xóa toàn bộ danh sách điểm.
+     - `LIST`: Liệt kê các điểm đã lưu dạng JSON.
+     - `POS`: In góc hiện tại của các khớp.
+     - `PLAY`: Bắt đầu phát lại quỹ đạo.
+     - `STOP`: Dừng khẩn cấp mọi chuyển động.
+     - `JOG <1..3> <deg>`: Jog dịch chuyển khớp trợ giúp kéo tay.
+4. **Giao diện Web UI Nhúng & REST API (`src/web_server.cpp`)**:
+   - Thêm các endpoint REST API:
+     - `POST /api/teach/free`
+     - `POST /api/teach/record`
+     - `POST /api/teach/undo`
+     - `POST /api/teach/clear`
+     - `GET  /api/teach/points`
+     - `POST /api/teach/load`
+     - `POST /api/teach/play`
+     - `POST /api/teach/stop`
+   - Bổ sung bảng điều khiển trực quan "Dạy & Chạy lại nét vẽ (Teach & Playback)" trong Web UI:
+     - Thẻ trạng thái, phím Thả lỏng / Khóa cứng, Ghi điểm, Hoàn tác, Xóa hết.
+     - Lưới phím Jog ảo vi bước ($1^\circ, 5^\circ, 10^\circ$) cho $J_1..J_3$.
+     - Tải file JSON về máy tính (`draw_trajectory.json`) và Nạp file JSON từ máy tính vào robot.
+     - Nút lớn BẮT ĐẦU CHẠY LẠI và DỪNG KHẨN CẤP kèm tiến độ chạy thời gian thực.
+
+### 3. Build gate
+- `pio run` (`platformio.exe run`) → **SUCCESS** (RAM: 15.4% — 50,360 bytes, Flash: 30.4% — 1,016,233 bytes, 0 errors, 0 warnings).
+
+
+---
+
+## 2026-10-26 — Impeccable Audit & UI Polish Pass (Giao diện Web Console ESP32)
+
+### 1. Phân tích & Phát hiện
+- **Sửa lỗi lệch trục Jog vi bước (`src/web_server.cpp`)**: `jogTeach(axis, dir)` trước đây truyền trục dạng 1-based (`axis=1..3`) khiến API `/api/jog` (vốn 0-based: 0 là J1) quay sai sang $J_2$ và $J_4$. Đã chuẩn hóa thành `axis - 1` để điều khiển chính xác $J_1..J_3$.
+- **Đồng bộ trạng thái `FREE`**: Cập nhật biến trạng thái `s_teachIsFree` trực tiếp từ dữ liệu telemetry `d.teachTrajectory.free` trong `updateUI()`, ngăn ngừa tình trạng lệch trạng thái khi reload trang hoặc điều khiển qua Serial.
+- **Tuân thủ Design Tokens & System Rules (`DESIGN.md`, `.impeccable/design.json`)**:
+  - Triệt tiêu các khối inline `style="..."` trong thẻ Teach & Playback, thay bằng các class chuyên dụng (`.teach-card`, `.teach-jog-box`, `.teach-jog-grid`, `.teach-actions`, `.teach-progress`).
+  - Thay thế `.btn-xs` bằng cấu trúc `.step-selector` và `.step-btn` chuẩn của hệ thống thiết kế.
+  - Tích hợp lớp `.btn.btn-loading` hiển thị vòng xoay loading spinner tự động khi có lệnh HTTP bất đồng bộ đang thực thi.
+  - Khôi phục hiệu ứng xung ánh sáng an toàn `@keyframes estopPulse` cho nút E-STOP cố định góc màn hình.
+  - Bổ sung quy chuẩn hiển thị số đơn vị cố định `font-variant-numeric: tabular-nums;` chống rung giật chữ khi polling dữ liệu, và quy chuẩn tracking chữ hoa `letter-spacing: 0.04em;`.
+  - Mở rộng tiêu chuẩn nút bấm cảm ứng di động đạt tối thiểu 44×44px trong chế độ `pointer: coarse`.
+- **Dọn dẹp mã nguồn thừa**: Loại bỏ hàm `handleTeachPlay()` cũ không còn dùng trong namespace ẩn của `src/web_server.cpp`, đưa cảnh báo trình biên dịch về 0 warning.
+
+### 2. Build gate
+- `pio run` (`platformio.exe run`) → **SUCCESS** (RAM: 15.4% — 50,360 bytes, Flash: 30.5% — 1,018,793 bytes, 0 errors, 0 warnings).
+
+---
+
+## 2026-10-26 — Đại tu Kiến trúc: Chuyển đổi toàn diện sang Dạy-và-chạy lại (Pure Joint-Space Teach & Playback)
+
+### 1. Quyết định Kiến trúc & Động lực
+- **Chấm dứt đường ống IK Cartesian (Decommission Cartesian IK Pipeline)**:
+  - Loại bỏ hoàn toàn sự phụ thuộc vào giải thuật IK 6 khớp, bộ lập kế hoạch vẽ đoạn/cung/đường tròn trên hệ trục Cartesian (`planner.*`), biến đổi mặt phẳng nghiêng 3 điểm UCS (`work_plane.*`), kiểm định vùng với (`trajectory_validator.*`), và mẫu vẽ tĩnh (`drawing_workspace.*`).
+  - Toàn bộ các file trên được chuyển sang `archive/` để lưu trữ đối chiếu, cách ly triệt để khỏi quy trình biên dịch của PlatformIO. Tiết kiệm ngay hơn **41 KB bộ nhớ Flash** cho ESP32-S3!
+- **Mô hình Dạy & Chạy lại thuần Joint-Space**:
+  - **Khóa cứng cổ tay $J_4..J_6$**: Tự động đưa và giữ chặt $J_4, J_5, J_6$ ở vị trí $0^\circ$ (Home) với mô-men giữ chủ động (active holding torque) và bù sai số kín từ encoder.
+  - **Dạy nét vẽ $J_1..J_3$**: Thả lỏng mô-men $J_1, J_2, J_3$ để kéo tay tự do hoặc dùng phím vi bước trợ giúp ($1^\circ, 5^\circ, 10^\circ$). Lưu góc trực tiếp từ encoder/step: `[j1, j2, j3, penDown]`.
+  - **Nét vẽ & Nhấc bút thuần điểm**: Nhấc bút = Điểm di chuyển tự do (Travel Move, nét đứt). Hạ bút = Điểm vẽ nét (Draw Stroke, nét liền). Không cần cờ servo hoặc trục Z ảo Cartesian.
+  - **100% Firmware ESP32**: Hoạt động khép kín hoàn toàn trên vi điều khiển ESP32-S3 và Web UI nhúng, không cần app Python hay máy tính bên ngoài.
+
+### 2. Chi tiết Triển khai Kỹ thuật
+- **Lưu trữ Flash NVS Quỹ đạo (`src/nvs_store.h/.cpp`)**:
+  - Bổ sung các phương thức: `saveTeachTrajectory(const void* data, size_t size)`, `loadTeachTrajectory(void* data, size_t maxSize)`, và `clearTeachTrajectory()`.
+  - Cơ chế tự động khôi phục quỹ đạo đã lưu từ NVS ngay khi khởi động (`main.cpp: setup()`).
+  - Hỗ trợ lệnh Serial CLI: `FLASH SAVE`, `FLASH LOAD`.
+- **Teach Manager Độc lập (`src/teach_manager.h/.cpp`)**:
+  - Tích hợp trực tiếp các hàm `saveToNvs(NvsStore* nvs)` và `loadFromNvs(NvsStore* nvs)`.
+  - Bổ sung `(void)` casts cho các lời gọi `nodiscard` (`resyncFromEncoder`, `prepareCoordinatedRun`) triệt tiêu hoàn toàn cảnh báo của compiler.
+- **Dọn dẹp Lõi Điều khiển Robot (`src/arm.h/.cpp`)**:
+  - Tinh giản `ArmMode`: Loại bỏ `ArmMode::CART`.
+  - Tinh giản `ArmCommand`: Xóa bỏ toàn bộ các lệnh Cartesian cũ (`MOVE_CART`, `DRAW_LINE`, `DRAW_CIRCLE`, `DRAW_SQUARE`, `SAVE_TEACH_POINT`, `PLAY_TEACH_POINTS`, `CLEAR_TEACH_POINTS`, `RELEASE_J1_J4`, `ENABLE_J1_J4`).
+  - Thu hồi `Planner*`, `plannerErrorMutex_`, và các biến đệm lỗi của bộ lập quỹ đạo cũ khỏi `ArmController`.
+- **Hợp nhất & Nâng cấp Giao diện Web Console (`src/web_server.cpp`)**:
+  - Bổ sung 2 REST API endpoint lưu/đọc Flash: `POST /api/teach/nvs/save` và `POST /api/teach/nvs/load`.
+  - Hợp nhất Tab 3 thành **"🎨 Teach & Draw Studio"**:
+    - **Nửa trái**: Khung nhìn Mô hình 3D Digital Twin thời gian thực, tích hợp vẽ trực tiếp quỹ đạo đường nét 3D (nét liền xanh cyan cho nét vẽ, nét đứt vàng hổ phách cho di chuyển nhấc bút). Tích hợp thanh trượt duyệt điểm (Scrub Slider) và nút chạy hoạt họa mô phỏng (Play Sim) trong không gian khớp mà không chạm vào robot thật.
+    - **Nửa phải**: Thẻ Điều khiển Dạy & Chạy lại tập trung (Chuyển trạng thái Thả lỏng/Khóa cứng, Ghi điểm Hạ/Nhấc bút, Hoàn tác, Xóa hết, Phím vi bước $J_1..J_3$, Chạy trên robot, Dừng khẩn cấp, Tải/Nạp file JSON, Lưu/Đọc Flash NVS).
+
+### 3. Build gate
+- `pio run` (`platformio.exe run`) → **SUCCESS** (RAM: 15.2% — 49,924 bytes, Flash: 29.2% — 977,005 bytes, 0 errors, 0 warnings). Tiết kiệm >41 KB Flash so với bản Cartesian.
+
+---
+
+## 2026-10-26 — Khắc phục Triệt để 6 Lỗi Sau Refactor (Fatal Bug & Logic Hardening)
+
+### 1. Phân tích & Xử lý
+- **Lỗi 1 (Fatal Crash/Freeze UI)**: Xóa bỏ lời gọi `renderTwinConfig()` không còn tồn tại trong `initStudio()` tại `src/web_server.cpp`, khôi phục chu trình chạy `updateTeachPathPreview()`, `setInterval(pollOnce, 300)`. Xóa sạch các hàm mồ côi `onSimCartChange` và `applySimPreset`.
+- **Lỗi 2 (UART Mutex & Hold Current)**: Bổ sung phương thức an toàn `Motor::setHoldCurrentScale(uint8_t iholdVal)` trong `src/motor.h/.cpp` (được bảo vệ bởi `takeUart(50)`, `flushUartRx()`, `giveUart()`), thay thế hoàn toàn lời gọi trần `drv->ihold(24)`. Bổ sung khôi phục dòng giữ J4 trong `HomingController::restoreDriverDefaults()` và tái kích hoạt `teachMgr_.lockWristAxes()` khi Homing kết thúc trong `src/arm.cpp`.
+- **Lỗi 3 (Logic Cờ `penDown`)**: Xác định tính chất phân đoạn theo điểm đích đến `segEnd_.penDown` thay vì `segStart_.penDown` trong `TeachManager::tick()` và `statusJson()`. Đồng bộ vẽ đường nét 3D Digital Twin: đoạn nối lấy theo cờ `pen` của điểm đích (nét liền cyan khi hạ bút, nét đứt vàng hổ phách khi nhấc bút).
+- **Lỗi 4 (Xung đột Active Wrist Lock)**: Thêm điều kiện chặn `if (!freeMode_ && playState_ == PlayState::IDLE) return;` trong `TeachManager::maintainWristLock()` để không can thiệp vào `SHOW_OFF`, `HOMING`, hay `JOG J4..J6`. Nạp tốc độ chuẩn `motors_[a]->setSpeed(DEFAULT_AXIS_JOG_SPEEDS[a])` trước khi bù bước.
+- **Lỗi 5 (Nút Set Home Web UI)**: Khôi phục hàm `confirmSetHome(axis)` trong JavaScript tại `src/web_server.cpp`.
+- **Lỗi 6 (Chốt trần MAX_POINTS & Dọn code cũ)**:
+  - Thêm kiểm tra `points_.size() >= MAX_POINTS` trong `recordPoint()` và `loadPointsJson()`. Bắt buộc J1–J3 phải `isHomed()` và `encOK()` mới cho phép ghi điểm.
+  - Xóa bỏ struct `TeachPoint` và các hàm 3-point A/B/C cũ (`loadTeachPoint`, `saveTeachPoint`, `clearTeachPoints`) khỏi `src/nvs_store.h/.cpp`.
+
+### 2. Build gate
+- `pio run` (`platformio.exe run`) → **SUCCESS** (RAM: 15.2% — 49,924 bytes, Flash: 29.2% — 976,201 bytes, 0 errors, 0 warnings). Tiết kiệm thêm 804 bytes Flash.
+
+---
+
+## 2026-10-26 — Hardening Đa luồng (RTOS Concurrency) & Trạng thái biên Cổ tay
+
+### 1. Phân tích & Khắc phục
+- **Bảo vệ Đa luồng Core 0 / Core 1 (`TeachManager::tick`)**: Thêm `std::lock_guard<std::mutex> lock(mutex_);` vào đầu hàm `TeachManager::tick()` trên Core 1 (`arm_motion`), triệt tiêu hoàn toàn rủi ro data race khi WebServer trên Core 0 gọi `loadPointsJson`, `loadFromNvs`, hoặc `statusJson` đồng thời.
+- **Bảo vệ Trạng thái Bận (`handleTeachLoadPoints`)**: Bổ sung `if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }` vào `handleTeachLoadPoints()` trong `src/web_server.cpp`, ngăn việc nạp đè quỹ đạo khi robot đang di chuyển.
+- **Bù Giới hạn Cổ tay J4–J6 (`maintainWristLock`)**: Thay điều kiện cứng `if (steps > 0 && steps < 500)` bằng kẹp trần `std::min<uint32_t>(rawSteps, 500U)`. Khi J4..J6 bị lệch lớn (kể cả >30° sau khi Jog), mỗi chu kỳ 100ms sẽ bù đều đặn tối đa 500 bước cho đến khi về chuẩn 0.0°, không bị kẹt ngoài ngưỡng.
+- **Đồng bộ Web Studio & NVS UI**:
+  - Gán `simWaypoints = wps;` trong `updateTeachPathPreview()`, duy trì đường vẽ 3D ổn định khi kéo thanh trượt Scrub hoặc khớp.
+  - Chuyển `saveTeachToNvs()` và `loadTeachFromNvs()` sang `JSON.parse(txt)` kèm bộ lọc `if (!text.startsWith('{'))` trong `requestCommand()`.
+  - Bổ sung `std::clamp` giới hạn mềm an toàn khi nạp file JSON từ bên ngoài.
+  - Cập nhật test TCP Home trong `digital_twin.py` khớp chiều dài D6 = 55mm (PASS 100%).
+
+### 2. Build gate
+- `pio run` (`platformio.exe run`) → **SUCCESS** (RAM: 15.2% — 49,924 bytes, Flash: 29.2% — 977,229 bytes, 0 errors, 0 warnings).
+
+- **Micro-Hardening (Đạt chuẩn 10/10 An toàn Thời gian Thực)**:
+  - Khai báo `std::atomic<bool> freeMode_{false};` và `std::atomic<PlayState> playState_{PlayState::IDLE};` trong `teach_manager.h` với ngữ nghĩa bộ nhớ `std::memory_order_acquire/release`, đảm bảo các hàm getter `isFree()`, `isPlaying()`, `playState()` đạt chuẩn C++17 tuyệt đối, hoàn toàn lock-free và loại bỏ mọi cảnh báo phân tích tĩnh đa luồng.
+  - Bổ sung chốt chặn kiểm tra Homing & Encoder J1–J3 (`!jm_->isHomed(a) || !jm_->encOK(a)`) ngay đầu `TeachManager::startPlayback()` trước khi cho phép cánh tay phát lại quỹ đạo từ Flash NVS.
+

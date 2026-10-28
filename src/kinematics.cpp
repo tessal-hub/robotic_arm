@@ -4,6 +4,23 @@
 #include <initializer_list>
 
 namespace kin {
+
+static float s_toolLength = D_TOOL;
+
+void setToolLength(float toolMm) {
+    if (toolMm >= 0.0f && toolMm <= 300.0f) {
+        s_toolLength = toolMm;
+    }
+}
+
+float getToolLength() {
+    return s_toolLength;
+}
+
+float getEffectiveToolLength() {
+    return D6 + s_toolLength;
+}
+
 namespace {
 
 struct Mat4 {
@@ -72,7 +89,7 @@ FkResult forward(const float enc[6]) {
         T = T * rx(DH[i].alpha) * tx(DH[i].a) * rz(th) * tz(DH[i].d);
         if (i == 3) T4 = T;
     }
-    T = T * tz(D_TOOL); // bút gắn đồng trục J6, dài D_TOOL (30mm) dọc trục tool
+    T = T * tz(s_toolLength); // bút gắn đồng trục J6, dài s_toolLength dọc trục tool
 
     FkResult out;
     out.wristCenter.x = T4.m[0][3];
@@ -85,10 +102,10 @@ FkResult forward(const float enc[6]) {
 }
 
 bool ikPenDown(const Pose& target, float outEnc[6]) {
-    // Wrist center (J5): bút chỉ xuống => cao hơn TCP D_TOOL_EFFECTIVE (55 + 30 = 85mm)
+    // Wrist center (J5): bút chỉ xuống => cao hơn TCP getEffectiveToolLength()
     const float cx = target.x;
     const float cy = target.y;
-    const float cz = target.z + D_TOOL_EFFECTIVE;
+    const float cz = target.z + getEffectiveToolLength();
 
     const float t1 = atan2f(cy, cx);
 
@@ -128,20 +145,18 @@ bool ikPenDown(const Pose& target, float outEnc[6]) {
         const float e1 = t1 * 57.29577951308232f;
         const float e2 = t2 * 57.29577951308232f + 90.0f; // trừ offset -90
         const float e3 = t3 * 57.29577951308232f;
-        const float e5 = -q23 * 57.29577951308232f - THETA5_OFFSET;
 
         if (!(e1 >= J1_MIN && e1 <= J1_MAX)) continue;
         if (!(e2 >= J2_MIN && e2 <= J2_MAX)) continue;
         if (!(e3 >= J3_MIN && e3 <= J3_MAX)) continue;
-        if (!(e5 >= J5_MIN && e5 <= J5_MAX)) continue;
 
         if (!found || fabsf(e3) < bestJ3) {
             bestEnc[0] = e1;
             bestEnc[1] = e2;
             bestEnc[2] = e3;
-            bestEnc[3] = 0.0f;                       // t4 giữ mặt phẳng tay
-            bestEnc[4] = e5;
-            bestEnc[5] = 0.0f;                       // roll khoá 0 khi vẽ
+            bestEnc[3] = 0.0f; // Khóa cứng J4 = 0°
+            bestEnc[4] = 0.0f; // Khóa cứng J5 = 0° (không bù góc)
+            bestEnc[5] = 0.0f; // Khóa cứng J6 = 0°
             bestJ3 = fabsf(e3);
             found = true;
         }

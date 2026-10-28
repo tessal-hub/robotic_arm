@@ -1,5 +1,14 @@
 #include "safety_manager.h"
 
+// isrNotify được gọi trực tiếp từ GPIO ISR: đặt vào IRAM để không bị
+// "Cache disabled" panic nếu cạnh endstop trúng lúc NVS ghi flash.
+// Host build (test) không có IRAM_ATTR.
+#ifdef ARDUINO
+#define SM_IRAM_ATTR IRAM_ATTR
+#else
+#define SM_IRAM_ATTR
+#endif
+
 #ifdef ARDUINO
 #include "endstop.h"
 #include "joint_model.h"
@@ -11,9 +20,11 @@ SafetyManager::SafetyManager(Endstops* es, JointModel* jm) {
   endstops_ = es;
   joints_ = jm;
   state_.store(SafetyState::NORMAL, std::memory_order_release);
-  homingActive_ = false;
+  homingActive_.store(false, std::memory_order_relaxed);
+  manualReleaseActive_.store(false, std::memory_order_relaxed);
   for (auto &row : pending_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
   for (auto &row : pendingTime_) for (auto &v : row) v.store(0, std::memory_order_relaxed);
+  for (auto &row : rearm_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
   for (auto &row : latched_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
 }
 
@@ -28,20 +39,26 @@ void SafetyManager::pollEndstops() {
 }
 #endif
 
-void SafetyManager::isrNotify(uint8_t axis, EndstopWhich which, int64_t isrTimeUs) {
+void SM_IRAM_ATTR SafetyManager::isrNotify(uint8_t axis, EndstopWhich which, int64_t isrTimeUs) {
   if (axis >= NUM_MOTORS) return;
   uint8_t idx = (which == EndstopWhich::MIN) ? 0 : 1;
   // Tranh Starvation Debounce: chi ghi nhan isrTimeUs cua xung dau tien
   // khi pending_[axis][idx] chuyen tu false -> true.
   // Cac xung nhiễu lien tiep se khong reset bo dem debounce 50ms.
+  // Xung den khi pending DANG true: khong stamp lai timestamp (chong starvation)
+  // nhung phai danh dau rearm_ — neu khong, pollEndstops xoa pending ngay truoc
+  // canh cuoi cung se lam mat han canh do (cong tac nhan that nhung khong bao gio latch).
   if (!pending_[axis][idx].exchange(true, std::memory_order_acq_rel)) {
     pendingTime_[axis][idx].store(isrTimeUs, std::memory_order_release);
+  } else {
+    rearm_[axis][idx].store(true, std::memory_order_release);
   }
 }
 
 void SafetyManager::pollEndstops(uint64_t nowUs) {
-  if (manualReleaseActive_) {
+  if (manualReleaseActive_.load(std::memory_order_acquire)) {
     for (auto &row : pending_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
+    for (auto &row : rearm_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
     for (auto &row : latched_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
     return;
   }
@@ -60,7 +77,7 @@ void SafetyManager::pollEndstops(uint64_t nowUs) {
 #endif
       if (pressed) {
         latched_[a][wi].store(true, std::memory_order_relaxed);
-        if (!homingActive_) {
+        if (!homingActive_.load(std::memory_order_acquire)) {
           SafetyState cur = state_.load(std::memory_order_acquire);
           if (cur != SafetyState::E_STOP) {
             state_.store(SafetyState::E_STOP, std::memory_order_release);
@@ -76,6 +93,14 @@ void SafetyManager::pollEndstops(uint64_t nowUs) {
         // GPIO HIGH at poll time -> glitch, no latch
       }
       pending_[a][wi].store(false, std::memory_order_relaxed);
+      // Cạnh ISR vào giữa lúc poll đang xử lý (pending còn true) bị dồn vào
+      // rearm_: khởi động lại vòng debounce từ now thay vì mất cạnh hoàn toàn.
+      // Công tắc nhấn thật sẽ latch ở poll sau (~+50ms); noise liên tục chỉ
+      // kéo dài vòng debounce, không gây E_STOP giả (quyết định vẫn theo mức).
+      if (rearm_[a][wi].exchange(false, std::memory_order_acq_rel)) {
+        pending_[a][wi].store(true, std::memory_order_release);
+        pendingTime_[a][wi].store(static_cast<int64_t>(nowUs), std::memory_order_release);
+      }
     }
   }
   // Drift -> FAULT mapping (Spec §3.3 single owner): if drift latched and we are
@@ -96,7 +121,7 @@ void SafetyManager::pollEndstops(uint64_t nowUs) {
 }
 
 void SafetyManager::assertHoming(bool active) {
-  homingActive_ = active;
+  homingActive_.store(active, std::memory_order_release);
   if (active) {
     SafetyState cur = state_.load(std::memory_order_acquire);
     if (cur == SafetyState::NORMAL) {
@@ -111,11 +136,11 @@ void SafetyManager::assertHoming(bool active) {
 }
 
 void SafetyManager::assertManualRelease(bool active) noexcept {
-  manualReleaseActive_ = active;
-  if (!active) return;
   for (auto &row : pending_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
+  for (auto &row : rearm_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
   for (auto &row : latched_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
-  if (state_.load(std::memory_order_acquire) == SafetyState::E_STOP) {
+  manualReleaseActive_.store(active, std::memory_order_release);
+  if (active && state_.load(std::memory_order_acquire) == SafetyState::E_STOP) {
     state_.store(SafetyState::NORMAL, std::memory_order_release);
   }
 }
@@ -154,6 +179,7 @@ bool SafetyManager::tryClearFault() {
   if (pressed) return false;
   for (auto &row : latched_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
   for (auto &row : pending_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
+  for (auto &row : rearm_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
   // pendingTime not needed clear but for completeness
   for (auto &row : pendingTime_) for (auto &v : row) v.store(0, std::memory_order_relaxed);
 #ifdef ARDUINO
@@ -164,7 +190,7 @@ bool SafetyManager::tryClearFault() {
   if (clearDrift_) clearDrift_();
 #endif
   state_.store(SafetyState::NORMAL, std::memory_order_release);
-  homingActive_ = false;
+  homingActive_.store(false, std::memory_order_release);
   return true;
 }
 
@@ -231,6 +257,7 @@ void SafetyManager::clearLatched(uint8_t axis, EndstopWhich which) noexcept {
   latched_[axis][idx].store(false, std::memory_order_relaxed);
   // Also clear pending for this channel to avoid stale ISR pending after explicit clear
   pending_[axis][idx].store(false, std::memory_order_relaxed);
+  rearm_[axis][idx].store(false, std::memory_order_relaxed);
   pendingTime_[axis][idx].store(0, std::memory_order_relaxed);
 }
 
@@ -240,6 +267,7 @@ bool SafetyManager::consumeLatched(uint8_t axis, EndstopWhich which) noexcept {
   bool was = latched_[axis][idx].exchange(false, std::memory_order_acq_rel);
   // Clear pending as well — consume means handled, no re-latch from old ISR
   pending_[axis][idx].store(false, std::memory_order_relaxed);
+  rearm_[axis][idx].store(false, std::memory_order_relaxed);
   pendingTime_[axis][idx].store(0, std::memory_order_relaxed);
   return was;
 }
@@ -248,12 +276,14 @@ void SafetyManager::clearPending(uint8_t axis, EndstopWhich which) noexcept {
   if (axis >= NUM_MOTORS) return;
   uint8_t idx = (which == EndstopWhich::MIN) ? 0 : 1;
   pending_[axis][idx].store(false, std::memory_order_relaxed);
+  rearm_[axis][idx].store(false, std::memory_order_relaxed);
   pendingTime_[axis][idx].store(0, std::memory_order_relaxed);
 }
 
 void SafetyManager::forceClear() noexcept {
   for (auto &row : pending_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
   for (auto &row : pendingTime_) for (auto &v : row) v.store(0, std::memory_order_relaxed);
+  for (auto &row : rearm_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
   for (auto &row : latched_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
   // Do NOT call clearLatches_ — Endstops::clearAllLatches() already cleared local latched/pending
   // and then calls forceClear() to clear manager side. Calling back would recurse infinitely.
@@ -263,5 +293,5 @@ void SafetyManager::forceClear() noexcept {
   if (clearDrift_) clearDrift_();
 #endif
   state_.store(SafetyState::NORMAL, std::memory_order_release);
-  homingActive_ = false;
+  homingActive_.store(false, std::memory_order_release);
 }

@@ -8,11 +8,9 @@
 #include "joint_model.h"
 #include "motor.h"
 #include "nvs_store.h"
-#include "planner.h"
 #include "sensor.h"
 #include "web_server.h"
 #include "wifi_manager.h"
-#include "work_plane.h"
 
 // ---- Đối tượng toàn cục (static allocation, không heap cho module chính) ----
 static SemaphoreHandle_t g_uartMutex = nullptr;
@@ -31,11 +29,96 @@ static Endstops g_endstops;
 static NvsStore g_nvs;
 static JointModel g_joints;
 static HomingController g_homing;
-static WorkPlane g_workPlane;
-static Planner g_planner;
 static WifiManager g_wifi;
 static WebServer g_server(WEB_SERVER_PORT);
 static ArmController g_arm;
+
+static String s_serialBuf = "";
+
+static void processSerialLine(String line) {
+    line.trim();
+    if (line.isEmpty()) return;
+    String upper = line;
+    upper.toUpperCase();
+
+    if (upper == "FREE") {
+        ArmCommand c; c.type = ArmCommand::TEACH_FREE; c.value = 1.0f;
+        (void)g_arm.submit(c);
+        Serial.println("[SERIAL] TEACH_FREE: J1..J3 tha long de keo tay, J4..J6 khoa cung Home.");
+    } else if (upper == "LOCK") {
+        ArmCommand c; c.type = ArmCommand::TEACH_FREE; c.value = 0.0f;
+        (void)g_arm.submit(c);
+        Serial.println("[SERIAL] TEACH_LOCK: J1..J3 da khoa lai va dong bo encoder.");
+    } else if (upper == "REC" || upper == "SAVE" || upper == "DOWN") {
+        ArmCommand c; c.type = ArmCommand::TEACH_RECORD; c.value = 1.0f;
+        (void)g_arm.submit(c);
+        Serial.println("[SERIAL] TEACH_RECORD: Ghi diem VE (Pen DOWN)");
+    } else if (upper == "UP" || upper == "TRAVEL") {
+        ArmCommand c; c.type = ArmCommand::TEACH_RECORD; c.value = 0.0f;
+        (void)g_arm.submit(c);
+        Serial.println("[SERIAL] TEACH_RECORD: Ghi diem NHAC BUT (Pen UP/Travel)");
+    } else if (upper == "UNDO") {
+        ArmCommand c; c.type = ArmCommand::TEACH_UNDO;
+        (void)g_arm.submit(c);
+    } else if (upper == "CLEAR") {
+        ArmCommand c; c.type = ArmCommand::TEACH_CLEAR;
+        (void)g_arm.submit(c);
+        Serial.println("[SERIAL] TEACH_CLEAR: Da xoa toan bo diem.");
+    } else if (upper == "PLAY") {
+        ArmCommand c; c.type = ArmCommand::TEACH_PLAY; c.p[0] = 0.5f; c.p[1] = 15.0f;
+        (void)g_arm.submit(c);
+        Serial.println("[SERIAL] TEACH_PLAY: Bat dau chay lai quy dao...");
+    } else if (upper == "STOP" || upper == "S" || upper == "X") {
+        (void)g_arm.submit({ArmCommand::STOP_ALL});
+        Serial.println("[SERIAL] STOP ALL");
+    } else if (upper == "LIST") {
+        if (g_arm.teachManager() != nullptr) {
+            Serial.printf("[SERIAL] Danh sach diem (%u diem):\n%s\n",
+                          static_cast<unsigned>(g_arm.teachManager()->pointCount()),
+                          g_arm.teachManager()->getPointsJson().c_str());
+        }
+    } else if (upper == "POS") {
+        Serial.printf("[SERIAL] POS: J1=%.2f, J2=%.2f, J3=%.2f\n",
+                      g_joints.angleFromEncoder(0),
+                      g_joints.angleFromEncoder(1),
+                      g_joints.angleFromEncoder(2));
+    } else if (upper == "SAVE FLASH" || upper == "FLASH SAVE") {
+        if (g_arm.busy()) {
+            Serial.println("[SERIAL] Tu choi: Robot dang ban, khong the ghi Flash!");
+        } else if (g_arm.teachManager() != nullptr && g_arm.teachManager()->saveToNvs(&g_nvs)) {
+            Serial.println("[SERIAL] Da luu quy dao vao Flash (NVS) thanh cong!");
+        } else {
+            Serial.println("[SERIAL] Luu vao Flash (NVS) that bai!");
+        }
+    } else if (upper == "LOAD FLASH" || upper == "FLASH LOAD") {
+        if (g_arm.busy()) {
+            Serial.println("[SERIAL] Tu choi: Robot dang ban, khong the doc Flash!");
+        } else if (g_arm.teachManager() != nullptr && g_arm.teachManager()->loadFromNvs(&g_nvs)) {
+            Serial.println("[SERIAL] Da doc quy dao tu Flash (NVS) thanh cong!");
+        } else {
+            Serial.println("[SERIAL] Doc tu Flash (NVS) that bai!");
+        }
+    } else if (upper.startsWith("JOG ")) {
+        int axis = 0;
+        float deg = 0;
+        // SỬA LỖI: Dùng upper.c_str() thay vì line.c_str() để nhận cả chữ thường "jog 1 10"
+        if (sscanf(upper.c_str(), "JOG %d %f", &axis, &deg) == 2 && axis >= 1 && axis <= 6) {
+            if (g_arm.isWristLocked() && axis >= 4) {
+                Serial.println("[SERIAL] Tu choi: J4..J6 dang khoa cung! (Dung lenh WRIST UNLOCK de mo)");
+            } else {
+                ArmCommand c; c.type = ArmCommand::JOG_REL; c.axis = static_cast<uint8_t>(axis - 1); c.value = deg;
+                (void)g_arm.submit(c);
+                Serial.printf("[SERIAL] JOG J%d %+f deg\n", axis, deg);
+            }
+        }
+    } else if (upper == "WRIST UNLOCK") {
+        g_arm.setWristLocked(false);
+    } else if (upper == "WRIST LOCK") {
+        g_arm.setWristLocked(true);
+    } else {
+        Serial.println("[SERIAL] Lenh ho tro: FREE, LOCK, REC, UP, UNDO, CLEAR, LIST, PLAY, STOP, POS, FLASH SAVE, FLASH LOAD, JOG <1..3> <deg>");
+    }
+}
 
 void setup() {
     // 0) Tách JTAG/ROM matrix (gpio_reset_pin), khóa LOW và cấu hình push-pull 40mA cho tất cả các chân STEP/DIR của 6 motor ngay từ đầu
@@ -86,8 +169,10 @@ void setup() {
     }
     for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
         delay(10);
+        const uint8_t holdScale = (i == 3) ? WRIST_J4_HOLD_SCALE : DEFAULT_HOLD_SCALE;
+        const bool useSpreadCycle = (i == 1); // J2 dùng SpreadCycle đồng nhất với Homing
         g_motors[i].begin(DEFAULT_AXIS_RUN_CURRENTS[i], DEFAULT_MICROSTEPS,
-                          false, DEFAULT_HOLD_SCALE);
+                          useSpreadCycle, holdScale);
     }
 
     // 4) Endstops (ISR abort an toàn)
@@ -103,13 +188,24 @@ void setup() {
     const uint8_t restoredCount = g_joints.restoreFromNVS();
     Serial.printf("[MAIN] Restore tu NVS: %u khop (khong can home lai neu du 6)\n",
                   restoredCount);
+    if (LOCK_WRIST_J4_J6) {
+        for (uint8_t a = 3; a < NUM_MOTORS; ++a) {
+            if (!g_joints.isHomed(a)) {
+                g_joints.setHomeHere(a);
+                Serial.printf("[MAIN] LOCK_WRIST_J4_J6: Tu dong dat moc Home 0 deg cho J%u\n", a + 1);
+            }
+        }
+    }
 
-    // 6) Homing FSM + Planner + Arm arbiter (motion task core 1)
+    // 6) Homing FSM + Arm arbiter (motion task core 1)
     g_homing.begin(motorPtrs, &g_endstops, &g_joints);
-    g_planner.begin(motorPtrs, &g_joints);
-    g_planner.setWorkPlane(&g_workPlane);
     armSetWifiProvider(&g_wifi);
-    g_arm.begin(motorPtrs, &g_sensor, &g_endstops, &g_joints, &g_homing, &g_planner, &g_nvs);
+    g_arm.begin(motorPtrs, &g_sensor, &g_endstops, &g_joints, &g_homing, &g_nvs);
+
+    // Tự động khôi phục Teach Trajectory từ Flash (NVS) nếu có
+    if (g_arm.teachManager() != nullptr) {
+        g_arm.teachManager()->loadFromNvs(&g_nvs);
+    }
 
     // 7) WiFi: STA(NVS creds) -> AP fallback
     g_wifi.begin(&g_nvs);
@@ -121,7 +217,7 @@ void setup() {
     }
 
     // 9) Web app
-    webBegin(g_server, &g_arm, &g_wifi, &g_joints, &g_nvs, &g_workPlane);
+    webBegin(g_server, &g_arm, &g_wifi, &g_joints, &g_nvs);
 
     Serial.printf("[MAIN] San sang! IP: %s\n", g_wifi.ipString().c_str());
 }
@@ -130,8 +226,13 @@ void loop() {
     g_server.handleClient();
     while (Serial.available()) {
         const char c = static_cast<char>(Serial.read());
-        if (c == ' ' || c == 's' || c == 'x') {
-            (void)g_arm.submit({ArmCommand::STOP_ALL});
+        if (c == '\n' || c == '\r') {
+            if (s_serialBuf.length() > 0) {
+                processSerialLine(s_serialBuf);
+                s_serialBuf = "";
+            }
+        } else {
+            s_serialBuf += c;
         }
     }
 }

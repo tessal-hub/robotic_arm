@@ -16,6 +16,8 @@ enum class EndstopWhich : uint8_t { MIN = 0, MAX = 1 };
 
 // SafetyState single owner (Spec §3.3): NORMAL=idle/jog/cart, HOMING=homing active,
 // E_STOP=endstop latch (ISR debounce, 50ms+poll), FAULT=drift/power failure.
+// (Nguồn drift hiện CHƯA được wire: JointModel::hasAnyDriftFault() luôn false —
+// đường FAULT chỉ đến từ notifyFault() do các module khác gọi.)
 // Both E_STOP and FAULT block motion (isMotionAllowed() false). CLEAR_FAULT clears both.
 // isEStop() is true only for E_STOP (fast ISR stop); state() distinguishes FAULT.
 enum class SafetyState { NORMAL = 0, E_STOP = 1, FAULT = 2, HOMING = 3 };
@@ -54,9 +56,11 @@ public:
       if (jm) jm->clearAllDriftFaults();
     };
     state_.store(SafetyState::NORMAL, std::memory_order_release);
-    homingActive_ = false;
+    homingActive_.store(false, std::memory_order_relaxed);
+    manualReleaseActive_.store(false, std::memory_order_relaxed);
     for (auto &row : pending_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
     for (auto &row : pendingTime_) for (auto &v : row) v.store(0, std::memory_order_relaxed);
+    for (auto &row : rearm_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
     for (auto &row : latched_) for (auto &v : row) v.store(false, std::memory_order_relaxed);
   }
 #endif
@@ -94,10 +98,13 @@ private:
   std::function<void()> clearDrift_;
 #endif
   std::atomic<SafetyState> state_{SafetyState::NORMAL};
-  bool homingActive_{false};
-  bool manualReleaseActive_{false};
+  std::atomic<bool> homingActive_{false};
+  std::atomic<bool> manualReleaseActive_{false};
   std::array<std::array<std::atomic<bool>,2>, NUM_MOTORS> pending_{};
   std::array<std::array<std::atomic<int64_t>,2>, NUM_MOTORS> pendingTime_{};
+  // Cạnh ISR đến khi pending đang true (bị nhạn timestamp): poll sẽ khởi động
+  // lại vòng debounce mới thay vì làm mất cạnh (lost-edge race với pollEndstops).
+  std::array<std::array<std::atomic<bool>,2>, NUM_MOTORS> rearm_{};
   std::array<std::array<std::atomic<bool>,2>, NUM_MOTORS> latched_{};
   static constexpr int64_t DEBOUNCE_US = 50000; // 50ms
 };

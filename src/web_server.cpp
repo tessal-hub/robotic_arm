@@ -2,11 +2,10 @@
 #include "web_validation.h"
 #include "arm.h"
 #include "config.h"
-#include "drawing_workspace.h"
 #include "joint_model.h"
+#include "kinematics.h"
 #include "nvs_store.h"
 #include "wifi_manager.h"
-#include "work_plane.h"
 
 const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
@@ -277,6 +276,38 @@ body.setup-mode .jog-controls { display: none; }
 .jog-calib-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 2px; }
 .jog-calib-row .btn { min-height: 30px; font-size: 0.72rem; padding: 4px 8px; }
 .jcard-calib { min-height: 1.1em; color: var(--text-muted); font-family: var(--font-mono); font-size: 0.68rem; }
+.btn-toggle {
+  background: var(--surface-sub); color: var(--text-muted);
+  border: 1px solid var(--border-strong); padding: 5px 12px;
+  font-size: 0.78rem; font-weight: 600; border-radius: var(--radius-sm);
+  cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  transition: all 150ms ease; min-height: 32px;
+}
+.btn-toggle:hover { color: var(--text-main); border-color: var(--primary); }
+.btn-toggle.active {
+  background: rgba(56,189,248,0.18); color: var(--primary);
+  border-color: var(--primary); font-weight: 700;
+}
+.btn-toggle.locked {
+  background: rgba(245,158,11,0.18); color: var(--warning);
+  border-color: var(--warning); font-weight: 700;
+}
+.tool-len-box {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface-sub); padding: 3px 8px;
+  border-radius: var(--radius-sm); border: 1px solid var(--border);
+}
+.moveto-row { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+.moveto-input {
+  flex: 1; padding: 5px 8px; background: var(--surface-elevated);
+  border: 1px solid var(--border); border-radius: var(--radius-xs);
+  color: var(--text-main); font-size: 0.8rem; font-family: var(--font-mono); min-width: 0;
+}
+.moveto-input:focus { border-color: var(--primary); outline: none; }
+.target-tag {
+  font-size: 0.68rem; color: var(--text-dim); font-family: var(--font-mono);
+  background: var(--surface-elevated); padding: 2px 6px; border-radius: var(--radius-xs);
+}
 
 /* ---- Cartesian & Draw Studio ---- */
 .mode-toggle-bar {
@@ -324,32 +355,127 @@ body.setup-mode .jog-controls { display: none; }
 .draw-profile small { display: block; margin-top: 2px; font-family: var(--font-sans); font-size: 0.68rem; opacity: 0.85; }
 .draw-guided .input-field { max-width: 260px; }
 
+/* ---- Numeric Typography & Labels ---- */
+.jcard-deg, .stat-row .v, .hud-item .val { font-variant-numeric: tabular-nums; }
+.hud-item .lbl, .input-field label, .jcard-flags { letter-spacing: 0.04em; }
+
+/* ---- Loading Spinner State ---- */
+.btn.btn-loading { color: transparent !important; position: relative; pointer-events: none; }
+.btn.btn-loading::after {
+  content: ""; position: absolute; width: 16px; height: 16px; top: 50%; left: 50%;
+  margin: -8px 0 0 -8px; border: 2px solid currentColor; border-right-color: transparent;
+  border-radius: 50%; animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- Teach & Playback Component Styles ---- */
+.teach-card { margin-top: 16px; }
+.teach-jog-box {
+  background: var(--surface-sub); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 12px; margin-bottom: 12px;
+}
+.teach-jog-header {
+  display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;
+}
+.teach-jog-title { font-size: 0.80rem; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.teach-jog-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px;
+}
+.teach-jog-pair { display: flex; gap: 4px; }
+.teach-jog-pair .btn { flex: 1; min-height: 38px; font-weight: 600; }
+.teach-actions { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.teach-progress { margin-top: 8px; font-size: 0.85rem; color: var(--primary); font-family: var(--font-mono); font-weight: 600; }
+
 /* ---- Floating E-STOP & Toast ---- */
 #estop {
   position: fixed; bottom: 18px; right: 18px; z-index: var(--z-estop);
   padding: 14px 24px; font-size: 1.05rem; font-weight: 800; border-radius: var(--radius-pill);
-  box-shadow: 0 3px 8px rgba(239,68,68,0.38); letter-spacing: 0.02em;
+  box-shadow: 0 6px 24px rgba(220,38,38,0.5); letter-spacing: 0.02em;
+  animation: estopPulse 2.2s ease-in-out infinite;
+}
+@keyframes estopPulse {
+  0%, 100% { box-shadow: 0 6px 24px rgba(220,38,38,0.5); }
+  50% { box-shadow: 0 6px 36px rgba(220,38,38,0.9); }
 }
 #toast {
   position: fixed; bottom: 18px; left: 18px; z-index: var(--z-toast);
   background: var(--surface-elevated); border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md); padding: 10px 18px; font-size: 0.84rem;
+  border-left-width: 4px; border-radius: var(--radius-md); padding: 10px 18px; font-size: 0.84rem;
   color: var(--text-main); display: none; max-width: 80vw;
+}
+#toast.show {
+  display: block;
+  animation: toastIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 #toast.t-ok { border-color: var(--success); background: var(--toast-ok-bg); color: var(--success-text); }
 #toast.t-warn { border-color: var(--warning); background: var(--toast-warn-bg); color: var(--warning-text); }
 #toast.t-err { border-color: var(--danger); background: var(--toast-err-bg); color: var(--danger-text); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
+/* ---- HELLO STUDIO STYLES ---- */
+.hello-hero {
+  display: flex; align-items: center; justify-content: space-between;
+  background: linear-gradient(135deg, rgba(56,189,248,0.12), rgba(99,102,241,0.10));
+  padding: 12px 16px; border-radius: var(--radius-md); border: 1px solid rgba(56,189,248,0.3);
+  margin-bottom: 12px; flex-wrap: wrap; gap: 8px;
+}
+.hello-homing-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 8px 12px; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;
+}
+.hello-letters-row {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 14px;
+}
+.hello-letter-card {
+  background: var(--surface); border: 2px solid var(--border); border-radius: var(--radius-md);
+  padding: 10px 4px; text-align: center; cursor: pointer; transition: all 120ms ease;
+  display: flex; flex-direction: column; align-items: center; gap: 4px; user-select: none;
+}
+.hello-letter-card:hover { border-color: var(--primary); transform: translateY(-2px); }
+.hello-letter-card.active {
+  border-color: var(--primary); background: rgba(56,189,248,0.18);
+  box-shadow: 0 0 14px rgba(56,189,248,0.35); transform: translateY(-2px);
+}
+.hello-glyph { font-size: 2.2rem; font-weight: 900; font-family: var(--font-mono); color: var(--text-main); line-height: 1; }
+.hello-letter-card.active .hello-glyph { color: var(--primary); }
+.hello-badge { font-size: 0.68rem; font-weight: 700; padding: 2px 6px; border-radius: var(--radius-pill); background: var(--surface-elevated); color: var(--text-dim); }
+.hello-letter-card.active .hello-badge { background: var(--primary); color: var(--bg); }
+.hello-visual-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 820px) { .hello-visual-grid { grid-template-columns: 1fr; } }
+.hello-box {
+  background: var(--surface-sub); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px;
+}
+.hello-diagram-wrap {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 220px;
+}
+.hello-press-bar {
+  display: flex; align-items: center; justify-content: space-between; background: var(--surface-sub);
+  border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 12px; margin: 8px 0; flex-wrap: wrap; gap: 6px;
+}
+.hello-table {
+  width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.78rem; margin-top: 8px;
+}
+.hello-table th, .hello-table td {
+  padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--border);
+}
+.hello-table th { color: var(--text-dim); font-size: 0.68rem; text-transform: uppercase; }
+
 @media (pointer: coarse) {
   .mode-tab, .nav-tab { min-height: 44px; font-size: 0.9rem; }
   .btn, .tool-btn, .step-btn, .preset-pill, .mode-toggle-btn { min-height: 44px; }
   .jog-btn { min-height: 48px; }
   .jog-calib-row .btn { min-height: 44px; font-size: 0.78rem; padding: 8px; }
+  .teach-jog-pair .btn { min-height: 44px; }
   .viewport-canvas { height: clamp(240px, 70vw, 340px); }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+  #estop { animation: none !important; }
 }
 </style>
 </head>
@@ -371,17 +497,196 @@ body.setup-mode .jog-controls { display: none; }
     <button id="mode-setup" class="mode-tab" data-mode="setup" aria-pressed="false">Setup</button>
   </nav>
   <nav class="nav-tabs" id="operateNav" role="tablist" aria-label="Công cụ vận hành">
-    <button id="tab-dash" class="nav-tab operate-nav active" data-t="pane-dash" role="tab" aria-selected="true" aria-controls="pane-dash" tabindex="0">Overview</button>
-    <button id="tab-jog" class="nav-tab operate-nav" data-t="pane-jog" role="tab" aria-selected="false" aria-controls="pane-jog" tabindex="-1">Joints</button>
-    <button id="tab-motion" class="nav-tab operate-nav" data-t="pane-motion" role="tab" aria-selected="false" aria-controls="pane-motion" tabindex="-1">Motion &amp; Draw</button>
+    <button id="tab-hello" class="nav-tab operate-nav active" data-t="pane-hello" role="tab" aria-selected="true" aria-controls="pane-hello" tabindex="0">✍️ VIẾT CHỮ HELLO</button>
+    <button id="tab-dash" class="nav-tab operate-nav" data-t="pane-dash" role="tab" aria-selected="false" aria-controls="pane-dash" tabindex="-1">Overview</button>
+    <button id="tab-jog" class="nav-tab operate-nav" data-t="pane-jog" role="tab" aria-selected="false" aria-controls="pane-jog" tabindex="-1">Khớp &amp; Homing</button>
+    <button id="tab-motion" class="nav-tab setup-nav" data-t="pane-motion" role="tab" aria-selected="false" aria-controls="pane-motion" tabindex="-1">🎨 Studio Nâng Cao</button>
     <button id="tab-calib" class="nav-tab setup-nav" data-t="pane-jog" role="tab" aria-selected="false" aria-controls="pane-jog" tabindex="-1">Calibration</button>
     <button id="tab-settings" class="nav-tab setup-nav" data-t="pane-settings" role="tab" aria-selected="false" aria-controls="pane-settings" tabindex="-1">WiFi &amp; Hardware</button>
   </nav>
 
   <!-- =========================================================================
+       TAB 0: DEDICATED HELLO STUDIO (VIẾT CHỮ HELLO TỪNG CHỮ CÁI)
+  ========================================================================== -->
+  <div id="pane-hello" class="tab-pane active" role="tabpanel" aria-labelledby="tab-hello" tabindex="0">
+    <div class="hello-hero">
+      <div>
+        <div style="font-size:0.72rem;color:var(--text-dim);text-transform:uppercase;font-weight:700">Studio Viết Chữ</div>
+        <div style="font-size:1.35rem;font-weight:800;color:var(--text-main)">Xưởng Viết "HELLO" (Từng Chữ Tự Chỉnh Giấy)</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="badge b-idle" id="helloPlayStatusBadge">Sẵn sàng</span>
+        <button class="btn btn-warning" id="btnHelloFree" onclick="toggleHelloFree()">🔓 Thả lỏng tay để kéo</button>
+      </div>
+    </div>
+
+    <!-- Homing Status & 1-Click Home for Drawing -->
+    <div class="hello-homing-bar" id="helloHomingBar">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="badge" id="helloHomedBadge">Đang kiểm tra Home...</span>
+        <span style="font-size:0.75rem;color:var(--text-muted)" id="helloHomedNotice">
+          Sau khi bật nguồn, bắt buộc Home để ngòi bút chuẩn xác từng milimet!
+        </span>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-primary" id="btnHelloHomeAll" style="font-weight:700;padding:6px 14px" onclick="homeHelloDrawAxes()">
+          🎯 HOME J3..J1 (Chuẩn Bị Vẽ)
+        </button>
+        <button class="btn btn-ghost" style="padding:4px 8px;font-size:0.74rem" onclick="api('/api/home/axis?axis=2')">Home J3</button>
+        <button class="btn btn-ghost" style="padding:4px 8px;font-size:0.74rem" onclick="api('/api/home/axis?axis=1')">Home J2</button>
+        <button class="btn btn-ghost" style="padding:4px 8px;font-size:0.74rem" onclick="api('/api/home/axis?axis=0')">Home J1</button>
+      </div>
+    </div>
+
+    <!-- Letter Selector Row: H, E, L1, L2, O -->
+    <div class="hello-letters-row" id="helloLettersRow">
+      <div class="hello-letter-card active" onclick="selectHelloLetter('H')" id="cardLetterH">
+        <span class="hello-glyph">H</span>
+        <span class="hello-badge" id="badgeLetterH">0 điểm</span>
+      </div>
+      <div class="hello-letter-card" onclick="selectHelloLetter('E')" id="cardLetterE">
+        <span class="hello-glyph">E</span>
+        <span class="hello-badge" id="badgeLetterE">0 điểm</span>
+      </div>
+      <div class="hello-letter-card" onclick="selectHelloLetter('L1')" id="cardLetterL1">
+        <span class="hello-glyph">L₁</span>
+        <span class="hello-badge" id="badgeLetterL1">0 điểm</span>
+      </div>
+      <div class="hello-letter-card" onclick="selectHelloLetter('L2')" id="cardLetterL2">
+        <span class="hello-glyph">L₂</span>
+        <span class="hello-badge" id="badgeLetterL2">0 điểm</span>
+      </div>
+      <div class="hello-letter-card" onclick="selectHelloLetter('O')" id="cardLetterO">
+        <span class="hello-glyph">O</span>
+        <span class="hello-badge" id="badgeLetterO">0 điểm</span>
+      </div>
+    </div>
+
+    <!-- Main Two-Column Work Area -->
+    <div class="hello-visual-grid">
+      <!-- Left Column: Visual Diagram & Stroke Analysis -->
+      <div class="hello-box">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <h3 style="font-size:0.95rem;font-weight:700;margin:0" id="helloLetterTitle">Sơ đồ nét: Chữ H</h3>
+          <span style="font-size:0.75rem;color:var(--text-muted)">Quy ước: Xanh = Vẽ · Vàng đứt = Bay</span>
+        </div>
+        <div class="hello-diagram-wrap" id="helloDiagramWrap">
+          <!-- Dynamic SVG Diagram inserted by JS -->
+        </div>
+        <div style="margin-top:10px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);border-radius:var(--radius-xs);padding:8px 10px;font-size:0.76rem;color:var(--text-main)">
+          🛡️ <b>Mẹo chống bay giấy ở đoạn xa:</b> Với nét vẽ vươn từ trong ra ngoài bàn, hãy ghi thêm 1 điểm trung gian ở giữa đoạn (hoặc chọn <i>Độ đè bút &ge; 1.0&deg;</i>) để triệt tiêu độ cong hình học!
+        </div>
+      </div>
+
+      <!-- Right Column: Step-by-Step Recording & Jog Controls -->
+      <div class="hello-box">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <h3 style="font-size:0.95rem;font-weight:700;margin:0">Thao tác &amp; Ghi điểm</h3>
+          <span class="badge b-run" id="helloActiveStepBadge">Điểm tiếp theo: #1</span>
+        </div>
+
+        <!-- Primary Recording Buttons -->
+        <div class="btn-row" style="margin-top:4px">
+          <button class="btn btn-primary" style="flex:1;font-weight:700;min-height:42px" onclick="helloRecordPoint(true)">
+            🖊️ GHI ĐIỂM HẠ BÚT (Vẽ)
+          </button>
+          <button class="btn btn-warning" style="flex:1;font-weight:700;min-height:42px" onclick="helloRecordPoint(false)">
+            ✈️ GHI ĐIỂM NHẤC (Bay)
+          </button>
+        </div>
+        <div class="btn-row" style="margin-top:6px">
+          <button class="btn btn-ghost" style="flex:1" onclick="helloUndoPoint()">↩ Hoàn tác điểm</button>
+          <button class="btn btn-danger" style="flex:1" onclick="helloClearPoints()">🗑 Xóa nét chữ này</button>
+        </div>
+
+        <!-- Inline Jog for Precision Positioning -->
+        <div class="teach-jog-box" style="margin-top:10px">
+          <div class="teach-jog-header">
+            <span class="teach-jog-title">Jog chỉnh vị trí ngòi bút:</span>
+            <div class="step-selector">
+              <button class="step-btn" id="btnHStep1" onclick="setHelloJogStep(1)">1&deg;</button>
+              <button class="step-btn active" id="btnHStep5" onclick="setHelloJogStep(5)">5&deg;</button>
+              <button class="step-btn" id="btnHStep10" onclick="setHelloJogStep(10)">10&deg;</button>
+            </div>
+          </div>
+          <div class="teach-jog-grid">
+            <div class="teach-jog-pair">
+              <button class="btn btn-ghost" onclick="jogHello(1,-1)">J1 &minus;</button>
+              <button class="btn btn-ghost" onclick="jogHello(1,1)">J1 +</button>
+            </div>
+            <div class="teach-jog-pair">
+              <button class="btn btn-ghost" onclick="jogHello(2,-1)">J2 &minus;</button>
+              <button class="btn btn-ghost" onclick="jogHello(2,1)">J2 +</button>
+            </div>
+            <div class="teach-jog-pair">
+              <button class="btn btn-ghost" onclick="jogHello(3,-1)">J3 &minus;</button>
+              <button class="btn btn-ghost" onclick="jogHello(3,1)">J3 +</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pen Press Depth (Bù đè bút J2) -->
+        <div class="hello-press-bar">
+          <span style="font-size:0.78rem;font-weight:700;color:var(--text-main)">⚓ Độ đè bút J2:</span>
+          <div style="display:flex;gap:4px;align-items:center">
+            <button class="step-btn" onclick="setHelloPenPress(0.0)">0&deg;</button>
+            <button class="step-btn active" id="btnPress03" onclick="setHelloPenPress(0.35)">0.35&deg;</button>
+            <button class="step-btn" id="btnPress05" onclick="setHelloPenPress(0.5)">0.5&deg;</button>
+            <button class="step-btn" id="btnPress10" onclick="setHelloPenPress(1.0)">1.0&deg;</button>
+            <input type="number" id="inputHelloPressDeg" min="0" max="4.0" step="0.05" value="0.35" style="width:52px;padding:3px;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-xs);color:var(--text-main);font-size:0.78rem" onchange="setHelloPenPress(this.value)">
+          </div>
+        </div>
+
+        <!-- Action / Execution Section -->
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-success" id="btnHelloPlay" style="flex:2;min-height:44px;font-size:0.95rem;font-weight:800" onclick="playHelloLetter()">
+            ▶ BẮT ĐẦU VIẾT CHỮ <span id="btnHelloPlayLetter">H</span>
+          </button>
+          <button class="btn btn-danger" style="flex:1" onclick="api('/api/teach/stop')">⏹ DỪNG</button>
+        </div>
+
+        <!-- Move Paper & Next Letter Button -->
+        <div style="margin-top:10px">
+          <button class="btn btn-ghost btn-block" style="border-color:var(--primary);color:var(--primary);font-weight:700;min-height:40px" onclick="nextHelloLetter()">
+            ➡️ ĐÃ VIẾT XONG! DỜI GIẤY SANG CHỮ TIẾP THEO ⏩
+          </button>
+        </div>
+
+        <!-- Quick Template Preset Button -->
+        <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">
+          <button class="btn btn-ghost" style="font-size:0.75rem;padding:4px 8px;min-height:30px" onclick="autoPresetCurrentHelloLetter()">
+            ✨ Nạp nét mẫu chống bay giấy
+          </button>
+          <button class="btn btn-ghost" style="font-size:0.75rem;padding:4px 8px;min-height:30px" onclick="saveHelloAllToNvs()">
+            💾 Lưu Flash NVS
+          </button>
+        </div>
+
+        <!-- Points Table for current letter -->
+        <div style="margin-top:10px;max-height:160px;overflow-y:auto">
+          <table class="hello-table">
+            <thead>
+              <tr>
+                <th style="width:30px">#</th>
+                <th>Trạng thái</th>
+                <th>J1 (Base)</th>
+                <th>J2 (Vai)</th>
+                <th>J3 (Khuỷu)</th>
+              </tr>
+            </thead>
+            <tbody id="helloPointsTableBody">
+              <tr><td colspan="5" style="text-align:center;color:var(--text-dim)">Chưa có điểm nào. Hãy ghi điểm hoặc nạp nét mẫu!</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================================
        TAB 1: DASHBOARD (Live Twin & System Health)
   ========================================================================== -->
-  <div id="pane-dash" class="tab-pane active" role="tabpanel" aria-labelledby="tab-dash" tabindex="0">
+  <div id="pane-dash" class="tab-pane" role="tabpanel" aria-labelledby="tab-dash" tabindex="0">
     <div class="grid-2col">
       <!-- Left Column: 3D Digital Twin -->
       <section class="card" aria-labelledby="headDashTwin">
@@ -426,6 +731,9 @@ body.setup-mode .jog-controls { display: none; }
 
           <div class="stat-row"><span class="k">Mạng WiFi</span><span class="v" id="dashWifiInfo">-</span></div>
           <div class="stat-row"><span class="k">Khớp đã Home</span><span class="v" id="dashHomedCount">-/6</span></div>
+          <div class="stat-row"><span class="k">Khóa cổ tay (J4..J6)</span><span class="v" id="dashWristLock">Đang khóa 🔒</span></div>
+          <div class="stat-row"><span class="k">Active Hold</span><span class="v" id="dashActiveHold">BẬT ⚓</span></div>
+          <div class="stat-row"><span class="k">Dài bút (tool)</span><span class="v" id="dashToolLen">30.0 mm</span></div>
           <div class="stat-row"><span class="k">Công tắc Endstop</span><span class="v" id="dashEsInfo">Tất cả mở</span></div>
           <div class="stat-row"><span class="k">Tiến độ Homing</span><span class="v" id="dashHomingProg">Sẵn sàng</span></div>
           <div class="stat-row"><span class="k">Command latency</span><span class="v" id="dashCommandLatency">-- ms</span></div>
@@ -440,10 +748,9 @@ body.setup-mode .jog-controls { display: none; }
           </div>
 
           <div class="btn-row">
-            <button class="btn btn-primary need-idle" onclick="api('/api/home/all')">🚀 HOME ALL (J1-J4)</button>
             <button class="btn btn-showoff need-idle" onclick="startShowOff()">✨ SHOW OFF</button>
-            <button class="btn btn-warning" onclick="stopRobot()">⏹ STOP ALL</button>
             <button class="btn btn-ghost" onclick="clearFault()">CLEAR FAULT</button>
+            <button class="btn btn-danger" onclick="stopRobot()">⏹ STOP ALL</button>
           </div>
         </section>
 
@@ -462,22 +769,26 @@ body.setup-mode .jog-controls { display: none; }
   ========================================================================== -->
   <div id="pane-jog" class="tab-pane" role="tabpanel" aria-labelledby="tab-jog" tabindex="0">
     <div class="jog-header-bar">
-      <div class="operate-only" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <div class="operate-only" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span style="font-size:0.82rem;font-weight:600;color:var(--text-muted)">Bước Jog:</span>
         <div class="step-selector" id="stepSelector"></div>
+        <button class="btn-toggle" id="btnWristLock" onclick="toggleWristLock()" title="Bật/Tắt khóa cụm cổ tay J4-J6">🔒 Khóa cổ tay</button>
+        <button class="btn-toggle" id="btnActiveHold" onclick="toggleActiveHold()" title="Bật/Tắt giữ vị trí closed-loop">⚓ Active Hold: TẮT</button>
+        <div class="tool-len-box">
+          <span style="font-size:0.75rem;font-weight:600;color:var(--text-dim)">🖊️ Bút:</span>
+          <input type="number" id="inputToolLength" min="0" max="300" step="1" style="width:50px;padding:3px 4px;background:var(--surface-elevated);border:1px solid var(--border);border-radius:var(--radius-xs);color:var(--text-main);font-size:0.8rem;text-align:center" value="30">
+          <span style="font-size:0.75rem;color:var(--text-muted)">mm</span>
+          <button class="btn btn-ghost" style="min-height:26px;padding:2px 8px;font-size:0.72rem" onclick="applyToolLength()">Lưu</button>
+        </div>
       </div>
       <div class="setup-only" style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-ghost need-idle" onclick="api('/api/home/axis?axis=0')">Home J1</button>
         <button class="btn btn-ghost need-idle" onclick="api('/api/home/axis?axis=1')">Home J2</button>
         <button class="btn btn-ghost need-idle" onclick="api('/api/home/axis?axis=2')">Home J3</button>
-        <button class="btn btn-ghost need-idle" onclick="api('/api/home/axis?axis=3')">Home J4</button>
-        <button class="btn btn-ghost need-idle" onclick="confirmSetHome(4)">Set Home J5</button>
-        <button class="btn btn-ghost need-idle" onclick="confirmSetHome(5)">Set Home J6</button>
-        <button class="btn btn-ghost need-idle" onclick="confirmSetHome(255)">Set Home J5+J6</button>
-        <button class="btn btn-primary need-idle" onclick="api('/api/home/all')">🚀 HOME ALL (J1-J4)</button>
+        <button class="btn btn-ghost need-idle" id="btnHomeJ4" onclick="api('/api/home/axis?axis=3')">Home J4</button>
+        <button class="btn btn-ghost need-idle" id="btnSetHomeJ5" onclick="confirmSetHome(4)">Set Home J5</button>
+        <button class="btn btn-ghost need-idle" id="btnSetHomeJ6" onclick="confirmSetHome(5)">Set Home J6</button>
         <button class="btn btn-showoff need-idle" onclick="startShowOff()">✨ Show Off</button>
-        <button id="btnReleaseJ1J4" class="btn btn-warning need-idle" onclick="confirmReleaseJ1J4()">🤲 Release J1-J4</button>
-        <button class="btn btn-success need-release" onclick="api('/api/enable/j1-j4')" disabled>🔒 Enable J1-J4</button>
         <button class="btn btn-warning" onclick="clearFault()">🛡️ CLEAR FAULT</button>
         <button class="btn btn-danger" onclick="stopRobot()">⏹ STOP ALL</button>
       </div>
@@ -495,34 +806,20 @@ body.setup-mode .jog-controls { display: none; }
         <button class="btn btn-primary need-gripper" type="submit" disabled>Set angle</button>
         <button class="btn btn-danger" type="button" onclick="stopRobot()">STOP ALL</button>
       </form>
-      <p class="meta">Target only, no position feedback. STOP ALL or Release cuts servo pulses; the gripper may lose its hold. Teach A–B–C saves arm joints only.</p>
-    </section>
-    <section class="card" aria-labelledby="headTeach" style="margin-top:16px">
-      <div class="card-head">
-        <h2 id="headTeach">Teach points</h2>
-        <span class="meta" id="teachStatus">A — B — C —</span>
-      </div>
-      <p class="meta">Move the arm, save each pose, then replay A → B → C. Teach again after changing home or encoder direction.</p>
-      <div class="btn-row">
-        <button class="btn btn-ghost need-idle" onclick="saveTeachPoint(0)">Save A</button>
-        <button class="btn btn-ghost need-idle" onclick="saveTeachPoint(1)">Save B</button>
-        <button class="btn btn-ghost need-idle" onclick="saveTeachPoint(2)">Save C</button>
-        <button class="btn btn-success need-idle" onclick="api('/api/teach/play')">▶ Play A-B-C</button>
-        <button class="btn btn-danger need-idle" onclick="clearTeachPoints()">Clear</button>
-      </div>
+      <p class="meta">Target only, no position feedback. STOP ALL cuts servo pulses; the gripper may lose its hold.</p>
     </section>
   </div>
 
   <!-- =========================================================================
-       TAB 3: CARTESIAN & DRAW STUDIO (Unified Motion & Trajectory Studio)
+       TAB 3: TEACH & DRAW STUDIO (Unified Trajectory & Simulation Studio)
   ========================================================================== -->
   <div id="pane-motion" class="tab-pane" role="tabpanel" aria-labelledby="tab-motion" tabindex="0">
     <div class="grid-2col">
-      <!-- Left Column: Interactive Simulation Twin -->
+      <!-- Left Column: Interactive Simulation Twin & 3D Path Preview -->
       <section class="card" aria-labelledby="headSimTwin">
         <div class="card-head">
-          <h2 id="headSimTwin">Motion preview</h2>
-          <span class="badge b-run" id="simIkStatusBadge">IK OK</span>
+          <h2 id="headSimTwin">Quỹ đạo 3D &amp; Mô hình Arm</h2>
+          <span class="badge b-run" id="simIkStatusBadge">3D Twin</span>
         </div>
         <div class="viewport-box">
           <div class="viewport-toolbar">
@@ -537,129 +834,88 @@ body.setup-mode .jog-controls { display: none; }
               <button class="tool-btn" onclick="resetSimCam()">Reset Cam</button>
             </div>
           </div>
-          <canvas id="simCanvas" class="viewport-canvas" width="680" height="380" role="application" tabindex="0" aria-label="Mô phỏng quỹ đạo 3D" aria-describedby="simCanvasHelp" aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Plus Minus 0"></canvas>
+          <canvas id="simCanvas" class="viewport-canvas" width="680" height="380" role="application" tabindex="0" aria-label="Mô phỏng quỹ đạo 3D" aria-describedby="simCanvasHelp"></canvas>
           <p id="simCanvasHelp" class="sr-only">Kéo để xoay hoặc pan camera. Dùng các phím mũi tên để đổi góc nhìn, cộng trừ để zoom và phím 0 để reset.</p>
         </div>
 
         <div class="hud-pill-bar">
           <div class="hud-item"><span class="lbl">Sim TCP (X, Y, Z)</span><span class="val accent" id="hudSimTcp">-- mm</span></div>
-          <div class="hud-item"><span class="lbl">Reach Status</span><span class="val" id="hudSimReach">Hợp lệ trong tầm với</span></div>
-          <div class="hud-item"><span class="lbl">Playback</span><span class="val" id="hudSimPlay">0%</span></div>
+          <div class="hud-item"><span class="lbl">Trạng thái bút</span><span class="val" id="hudSimReach">Sẵn sàng</span></div>
+          <div class="hud-item"><span class="lbl">Tiến độ mô phỏng</span><span class="val" id="hudSimPlay">0%</span></div>
         </div>
 
         <div style="margin-top:10px;display:flex;align-items:center;gap:8px">
           <button class="btn btn-ghost" id="btnSimPlay" onclick="toggleSimPlay()">▶ Chạy mô phỏng (Play)</button>
           <input type="range" id="simScrub" min="0" max="100" value="0" style="flex:1;accent-color:var(--primary);cursor:pointer" oninput="onSimScrubChange(this.value)">
-          <span class="meta" id="simScrubVal" style="min-width:38px;text-align:right">0%</span>
+          <span class="meta" id="simScrubVal" style="min-width:65px;text-align:right">0/0 (0%)</span>
         </div>
       </section>
 
-      <!-- Right Column: Dual Motion Panels (Direct Move / Shape Draw) -->
+      <!-- Right Column: Teach & Playback Studio -->
       <div>
-        <div class="mode-toggle-bar">
-          <button class="mode-toggle-btn active" id="btnToggleMove" onclick="switchMotionMode('move')">📍 Di chuyển điểm (Move IK)</button>
-          <button class="mode-toggle-btn" id="btnToggleDraw" onclick="switchMotionMode('draw')">✏️ Vẽ hình (Draw Shape)</button>
-        </div>
-
-        <!-- Panel A: Direct Cartesian Move -->
-        <section class="card" id="panelCartMove" aria-labelledby="headCartMove">
+        <section class="card teach-card" aria-labelledby="headTeach">
           <div class="card-head">
-            <h2 id="headCartMove">Move TCP</h2>
-            <span class="meta">Bút vuông góc mặt bàn</span>
+            <h2 id="headTeach">🎨 Dạy &amp; Chạy lại nét vẽ (Teach &amp; Playback)</h2>
+            <span class="badge b-idle" id="teachTrajBadge">0 điểm</span>
           </div>
-          <div class="preset-pills" role="group" aria-label="Preset mô phỏng Cartesian">
-            <button type="button" class="preset-pill" onclick="applySimPreset('home', this)" aria-pressed="false">Home (0°)</button>
-            <button type="button" class="preset-pill" onclick="applySimPreset('draw', this)" aria-pressed="false">Ready Draw</button>
-            <button type="button" class="preset-pill" onclick="applySimPreset('reach_fwd', this)" aria-pressed="false">Reach +X</button>
-            <button type="button" class="preset-pill" onclick="applySimPreset('reach_back', this)" aria-pressed="false">Reach -X</button>
-            <button type="button" class="preset-pill" onclick="applySimPreset('fold', this)" aria-pressed="false">Folded</button>
-            <button type="button" class="preset-pill btn-showoff" onclick="startShowOff()" aria-pressed="false" style="color:#fff">✨ Show Off</button>
+          <p class="meta">Bỏ IK hoàn toàn. Thả lỏng J1..J3 để kéo tay hoặc dùng Jog hỗ trợ lưu điểm. J4..J6 tự động khóa cứng 0°.</p>
+
+          <div class="btn-row" style="margin-bottom:12px">
+            <button id="btnTeachFree" class="btn btn-warning" onclick="toggleTeachFree()">🔓 Thả lỏng J1..J3 (Kéo tay)</button>
+            <button class="btn btn-primary" onclick="teachRecordPoint(true)" style="font-weight:700">💾 GHI ĐIỂM VẼ (Hạ bút)</button>
+            <button class="btn btn-ghost" onclick="teachRecordPoint(false)">✈️ GHI ĐIỂM NHẤC (Travel)</button>
+            <button class="btn btn-ghost" onclick="teachUndoPoint()">↩ Hoàn tác</button>
+            <button class="btn btn-danger" onclick="teachClearPoints()">🗑 Xóa hết</button>
           </div>
 
-          <div class="slider-row">
-            <label for="simX">Target X:</label>
-            <input type="range" id="simX" min="-250" max="250" step="1" value="160" oninput="onSimCartChange()">
-            <span class="val" id="simXVal">160 mm</span>
-          </div>
-          <div class="slider-row">
-            <label for="simY">Target Y:</label>
-            <input type="range" id="simY" min="-250" max="250" step="1" value="0" oninput="onSimCartChange()">
-            <span class="val" id="simYVal">0 mm</span>
-          </div>
-          <div class="slider-row">
-            <label for="simZ">Target Z:</label>
-            <input type="range" id="simZ" min="-10" max="350" step="1" value="10" oninput="onSimCartChange()">
-            <span class="val" id="simZVal">10 mm</span>
+          <!-- Jog nhanh hỗ trợ khi hộp số kéo tay nặng -->
+          <div class="teach-jog-box">
+            <div class="teach-jog-header">
+              <span class="teach-jog-title">Jog hỗ trợ (hộp số 20:1):</span>
+              <div class="step-selector">
+                <button class="step-btn" id="btnJStep1" onclick="setTeachJogStep(1)">1°</button>
+                <button class="step-btn active" id="btnJStep5" onclick="setTeachJogStep(5)">5°</button>
+                <button class="step-btn" id="btnJStep10" onclick="setTeachJogStep(10)">10°</button>
+              </div>
+            </div>
+            <div class="teach-jog-grid">
+              <div class="teach-jog-pair">
+                <button class="btn btn-ghost" onclick="jogTeach(1,-1)" aria-label="Jog J1 âm">J1 &minus;</button>
+                <button class="btn btn-ghost" onclick="jogTeach(1,1)" aria-label="Jog J1 dương">J1 +</button>
+              </div>
+              <div class="teach-jog-pair">
+                <button class="btn btn-ghost" onclick="jogTeach(2,-1)" aria-label="Jog J2 âm">J2 &minus;</button>
+                <button class="btn btn-ghost" onclick="jogTeach(2,1)" aria-label="Jog J2 dương">J2 +</button>
+              </div>
+              <div class="teach-jog-pair">
+                <button class="btn btn-ghost" onclick="jogTeach(3,-1)" aria-label="Jog J3 âm">J3 &minus;</button>
+                <button class="btn btn-ghost" onclick="jogTeach(3,1)" aria-label="Jog J3 dương">J3 +</button>
+              </div>
+            </div>
           </div>
 
-          <div class="input-grid" style="margin-top:10px">
-            <div class="input-field"><label for="mvFeed">Tốc độ Feed (mm/s)</label><input type="number" id="mvFeed" value="30"></div>
+          <div class="teach-actions">
+            <div class="btn-row" style="margin-top:0">
+              <button class="btn btn-success" id="btnTeachPlay" onclick="teachPlayTrajectory()" style="font-weight:700">▶ BẮT ĐẦU CHẠY TRÊN ROBOT</button>
+              <button class="btn btn-danger" onclick="api('/api/teach/stop')">⏹ DỪNG</button>
+            </div>
+            <div class="btn-row" style="margin-top:0">
+              <button class="btn btn-ghost" onclick="downloadTeachJson()">📥 Tải JSON</button>
+              <button class="btn btn-ghost" onclick="document.getElementById('fileTeachUpload').click()">📤 Nạp JSON</button>
+              <button class="btn btn-ghost" onclick="saveTeachToNvs()">💾 Lưu Flash (NVS)</button>
+              <button class="btn btn-ghost" onclick="loadTeachFromNvs()">📂 Đọc Flash (NVS)</button>
+              <input type="file" id="fileTeachUpload" accept=".json" style="display:none" aria-hidden="true" tabindex="-1" onchange="uploadTeachJson(event)">
+            </div>
           </div>
-
-          <div class="btn-row">
-            <button class="btn btn-primary btn-block need-idle" onclick="sendSimPoseToRobot()">⚡ NẠP VỊ TRÍ XUỐNG ROBOT</button>
-          </div>
+          <div id="teachPlayProgress" class="teach-progress" role="status" aria-live="polite"></div>
         </section>
 
-        <!-- Panel B: Shape Drawing Studio -->
-        <section class="card" id="panelCartDraw" style="display:none" aria-labelledby="headCartDraw">
-          <div class="card-head">
-            <h2 id="headCartDraw">Quick Draw</h2>
-            <span class="meta">Line Planner</span>
-          </div>
-          <div class="draw-guided" aria-labelledby="drawGuidedTitle">
-            <p id="drawGuidedTitle">Choose a safe plane and shape. The full path is checked before motion.</p>
-            <div class="draw-profile-list" id="drawZProfiles" role="radiogroup" aria-label="Recommended drawing heights">
-              <span class="meta">Calculating reachable planes...</span>
-            </div>
-            <div class="input-field">
-              <label for="dwQuickShape">Shape</label>
-              <select id="dwQuickShape" onchange="onQuickShapeChange()">
-                <option value="square">Square</option>
-                <option value="circle">Circle</option>
-                <option value="line">Line</option>
-              </select>
-            </div>
-            <div class="input-grid">
-              <div class="input-field" id="quickLineStartX"><label for="dwQuickStartX">Start X (mm)</label><input type="number" id="dwQuickStartX" value="100" oninput="previewQuickDraw()"></div>
-              <div class="input-field" id="quickLineStartY"><label for="dwQuickStartY">Start Y (mm)</label><input type="number" id="dwQuickStartY" value="-15" oninput="previewQuickDraw()"></div>
-              <div class="input-field" id="quickLineLength"><label for="dwQuickLength">Line length (mm)</label><input type="number" id="dwQuickLength" value="120" min="40" step="5" oninput="previewQuickDraw()"></div>
-            </div>
-            <p id="drawQuickMeta">HOME J1-J4 before starting. Place the paper at the selected base-Z height.</p>
-            <div class="btn-row">
-              <button class="btn btn-success need-idle" id="btnQuickDraw" onclick="startQuickDraw()" style="flex:1">START QUICK DRAW</button>
-              <button class="btn btn-primary need-idle" id="btnHello" onclick="startHello()" style="flex:1">WRITE HELLO</button>
-              <button class="btn btn-ghost" onclick="previewQuickDraw()">Preview 3D</button>
-              <button class="btn btn-danger" onclick="stopRobot()">ABORT</button>
-            </div>
-          </div>
-        </section>
-
-        <!-- Panel C: Fine Joint Sliders Fold -->
+        <!-- Simulation Fine Joint Sliders Fold -->
         <section class="card" aria-labelledby="headSimJointSliders">
           <div class="card-head">
-            <h2 id="headSimJointSliders">Simulation joints</h2>
+            <h2 id="headSimJointSliders">Simulation joints (Fine-tune)</h2>
           </div>
           <div id="simJointSliders"></div>
-        </section>
-
-        <section class="card" aria-labelledby="headTwinConfig">
-          <div class="card-head">
-            <h2 id="headTwinConfig">Twin geometry &amp; limits</h2>
-            <span class="meta">SIMULATION ONLY</span>
-          </div>
-          <p class="meta" style="margin-bottom:12px">Changes affect this browser preview only. They never write firmware, NVS, or motor limits.</p>
-          <div class="input-grid" id="twinGeometryInputs"></div>
-          <div id="twinLimitInputs" style="margin-top:12px"></div>
-          <div class="btn-row" style="margin-top:12px">
-            <button class="btn btn-primary" onclick="applyTwinConfig()">APPLY TO TWIN</button>
-            <button class="btn btn-ghost" onclick="resetTwinConfig()">RESET CURRENT ARM</button>
-          </div>
-          <div id="twinDerived" style="margin-top:12px"></div>
-          <div class="stat-row"><span class="k">Gear ratios J1-J6</span><span class="v">6 : 20 : 20 : 4 : 3 : 1</span></div>
-          <div class="stat-row"><span class="k">Step signs J1-J6</span><span class="v">+ + - - + +</span></div>
-          <div class="stat-row"><span class="k">Encoder signs J1-J6</span><span class="v">- - + - + -</span></div>
-          <div class="stat-row"><span class="k">Drivers</span><span class="v">TMC2209 x4 | A4988 x2</span></div>
         </section>
       </div>
     </div>
@@ -718,7 +974,7 @@ body.setup-mode .jog-controls { display: none; }
 const CURRENT_TWIN = {
   geometry: [139.0, 138.0, 88.0, 125.0, 55.0, 30.0],
   offsets: [-90.0, 0.0],
-  limits: [[-90,90],[-90,90],[0,90],[-75,75],[-90,90],[-360,360]]
+  limits: [[-90,90],[-90,90],[-20,90],[-75,75],[-90,90],[-360,360]]
 };
 let D1, A2, A3, D4, D6, D_TOOL, D_TOOL_EFF, L_FORE, DELTA_WRIST, DELTA_RAD;
 let THETA2_OFFSET, THETA5_OFFSET;
@@ -837,15 +1093,13 @@ function ikPenDown(tx, ty, tz){
     const e1 = rad2deg(t1);
     const e2 = rad2deg(t2) - THETA2_OFFSET;
     const e3 = rad2deg(t3);
-    const e5 = -rad2deg(q23) - THETA5_OFFSET;
 
     if(e1 < JOINT_LIMITS[0][0] || e1 > JOINT_LIMITS[0][1]) continue;
     if(e2 < JOINT_LIMITS[1][0] || e2 > JOINT_LIMITS[1][1]) continue;
     if(e3 < JOINT_LIMITS[2][0] || e3 > JOINT_LIMITS[2][1]) continue;
-    if(e5 < JOINT_LIMITS[4][0] || e5 > JOINT_LIMITS[4][1]) continue;
 
     if(!best || Math.abs(e3) < bestJ3){
-      best = [e1, e2, e3, 0.0, e5, 0.0];
+      best = [e1, e2, e3, 0.0, 0.0, 0.0]; // Khóa cứng J4, J5, J6 = 0.0°
       bestJ3 = Math.abs(e3);
     }
   }
@@ -973,17 +1227,26 @@ class Canvas3DRenderer {
     if(!landmarks) return;
 
     // 2. Trajectory Waypoints
-    if(pathPts && pathPts.length > 0){
-      ctx.strokeStyle = THEME_PALETTE.penTool; ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      let first = true;
-      for(const wp of pathPts){
-        if(wp.drawing){
-          const p = this.project([wp.x, wp.y, wp.z]);
-          if(first){ ctx.moveTo(p.u, p.v); first = false; } else { ctx.lineTo(p.u, p.v); }
+    if(pathPts && pathPts.length > 1){
+      for(let i = 1; i < pathPts.length; i++){
+        const pPrev = this.project([pathPts[i-1].x, pathPts[i-1].y, pathPts[i-1].z]);
+        const pCurr = this.project([pathPts[i].x, pathPts[i].y, pathPts[i].z]);
+        const isDrawing = (pathPts[i].drawing === true || (pathPts[i].drawing === undefined && pathPts[i].pen !== false));
+        ctx.beginPath();
+        if(isDrawing){
+          ctx.strokeStyle = THEME_PALETTE.penTool;
+          ctx.lineWidth = 2.5;
+          ctx.setLineDash([]);
+        } else {
+          ctx.strokeStyle = '#f59e0b';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([4, 4]);
         }
+        ctx.moveTo(pPrev.u, pPrev.v);
+        ctx.lineTo(pCurr.u, pCurr.v);
+        ctx.stroke();
       }
-      ctx.stroke();
+      ctx.setLineDash([]);
     }
 
     // 3. Robot Arm Skeleton
@@ -1067,233 +1330,8 @@ function initStudio() {
     }
   }
 
-  renderTwinConfig();
-
-  generateSimPath();
   updateSimFromAngles(simAngles);
-  loadQuickDrawProfiles();
-}
-
-function renderTwinConfig(){
-  const geometry = [
-    ['D1', D1], ['A2', A2], ['A3', A3], ['D4', D4], ['D6', D6], ['Tool', D_TOOL],
-    ['J2 offset', THETA2_OFFSET], ['J5 offset', THETA5_OFFSET]
-  ];
-  const box = document.getElementById('twinGeometryInputs');
-  if(box) box.innerHTML = geometry.map((item, i) => `<div class="input-field"><label for="twinG${i}">${item[0]} (${i < 6 ? 'mm' : 'deg'})</label><input id="twinG${i}" type="number" step="0.1" value="${item[1]}"></div>`).join('');
-
-  const limits = document.getElementById('twinLimitInputs');
-  if(limits) limits.innerHTML = JOINT_LIMITS.map((lim, i) => `<div class="input-grid"><div class="input-field"><label for="twinMin${i}">J${i+1} min (deg)</label><input id="twinMin${i}" type="number" step="0.5" value="${lim[0]}"></div><div class="input-field"><label for="twinMax${i}">J${i+1} max (deg)</label><input id="twinMax${i}" type="number" step="0.5" value="${lim[1]}"></div></div>`).join('');
-  updateTwinDerived();
-}
-
-function applyTwinConfig(){
-  const geometry = Array.from({length: 6}, (_, i) => Number(document.getElementById(`twinG${i}`).value));
-  const offsets = [Number(document.getElementById('twinG6').value), Number(document.getElementById('twinG7').value)];
-  const limits = Array.from({length: 6}, (_, i) => [Number(document.getElementById(`twinMin${i}`).value), Number(document.getElementById(`twinMax${i}`).value)]);
-  if(geometry.some(v => !Number.isFinite(v) || v <= 0) || offsets.some(v => !Number.isFinite(v)) || limits.some(l => !Number.isFinite(l[0]) || !Number.isFinite(l[1]) || l[0] >= l[1])){
-    toast('Twin config invalid: lengths must be positive and every min must be below max.', 'error');
-    return;
-  }
-  setTwinConfig(geometry, offsets, limits);
-  setSimSource('sim');
-  simAngles = simAngles.map((v, i) => Math.max(JOINT_LIMITS[i][0], Math.min(JOINT_LIMITS[i][1], v)));
-  for(let i=0; i<6; i++){
-    const slider = document.getElementById(`simJ${i}`);
-    if(slider){ slider.min = JOINT_LIMITS[i][0]; slider.max = JOINT_LIMITS[i][1]; }
-  }
-  updateTwinDerived();
-  generateSimPath();
-  updateSimFromAngles(simAngles);
-  toast('Digital Twin updated. Robot firmware is unchanged.', 'info');
-}
-
-function resetTwinConfig(){
-  setTwinConfig(CURRENT_TWIN.geometry, CURRENT_TWIN.offsets, CURRENT_TWIN.limits);
-  renderTwinConfig();
-  applyTwinConfig();
-}
-
-function updateTwinDerived(){
-  const el = document.getElementById('twinDerived');
-  if(el) el.innerHTML = `<div class="stat-row"><span class="k">Forearm resultant</span><span class="v">${L_FORE.toFixed(2)} mm @ ${DELTA_WRIST.toFixed(2)} deg</span></div><div class="stat-row"><span class="k">J5 to TCP</span><span class="v">${D_TOOL_EFF.toFixed(1)} mm</span></div>`;
-}
-
-async function loadQuickDrawProfiles(){
-  const container = document.getElementById('drawZProfiles');
-  if(!container) return;
-  try {
-    const response = await fetch('/api/draw/presets');
-    const data = await response.json();
-    if(!response.ok || !data.profiles || !data.profiles.length) throw new Error(data.error || 'No reachable plane');
-    drawProfiles = data.profiles;
-    selectedDrawProfile = 0;
-    selectQuickDrawProfile(0);
-  } catch (err) {
-    container.innerHTML = '<span class="meta">No quick-draw profile: calibrate/disable WorkPlane or check joint limits.</span>';
-    const start = document.getElementById('btnQuickDraw');
-    if(start) start.disabled = true;
-  }
-}
-
-function renderQuickDrawProfiles(){
-  const container = document.getElementById('drawZProfiles');
-  if(!container) return;
-  container.innerHTML = drawProfiles.map((profile, index) => {
-    const selected = index === selectedDrawProfile;
-    return `<button type="button" class="preset-pill draw-profile" role="radio" aria-checked="${selected}" aria-pressed="${selected}" onclick="selectQuickDrawProfile(${index})">Z ${profile.z.toFixed(0)} mm<small>safe square ${profile.maxSquareSide.toFixed(0)} mm</small></button>`;
-  }).join('');
-}
-
-function selectQuickDrawProfile(index){
-  if(!drawProfiles[index]) return;
-  selectedDrawProfile = index;
-  renderQuickDrawProfiles();
-  const profile = drawProfiles[index];
-  const size = Number(profile.size) || Math.floor(profile.maxSquareSide * 0.60 / 5) * 5;
-  const shapeEl = document.getElementById('dwQuickShape');
-  const shape = shapeEl ? shapeEl.value : 'line';
-  const startX = document.getElementById('dwQuickStartX');
-  const startY = document.getElementById('dwQuickStartY');
-  const length = document.getElementById('dwQuickLength');
-  if(startX) startX.value = (shape === 'circle' ? profile.x + size * 0.5 : profile.x - size * 0.5).toFixed(0);
-  if(startY) startY.value = (shape === 'square' ? profile.y - size * 0.5 : profile.y).toFixed(0);
-  if(length) length.value = size.toFixed(0);
-  onQuickShapeChange();
-}
-
-function onQuickShapeChange(){
-  previewQuickDraw();
-}
-
-function previewQuickDraw(){
-  const profile = drawProfiles[selectedDrawProfile];
-  if(!profile) return;
-  const shapeEl = document.getElementById('dwQuickShape');
-  const shape = shapeEl ? shapeEl.value : 'line';
-  const value = id => { const el = document.getElementById(id); return el ? parseFloat(el.value) : NaN; };
-  const size = Number(profile.size) || Math.floor(profile.maxSquareSide * 0.60 / 5) * 5;
-  const startX = Number.isFinite(value('dwQuickStartX')) ? value('dwQuickStartX') : profile.x - size * 0.5;
-  const startY = Number.isFinite(value('dwQuickStartY')) ? value('dwQuickStartY') : profile.y;
-  const length = Number.isFinite(value('dwQuickLength')) ? value('dwQuickLength') : size;
-  simWaypoints = [];
-  if(shape === 'circle'){
-    const half = size * 0.5;
-    const centerX = startX - half;
-    for(let a = 0; a <= Math.PI * 2 + 0.001; a += 0.08){
-      simWaypoints.push({ x: centerX + half * Math.cos(a), y: startY + half * Math.sin(a), z: profile.z, drawing: true });
-    }
-  } else if(shape === 'square') {
-    const half = size * 0.5;
-    const centerX = startX + half;
-    const centerY = startY + half;
-    [[-half,-half],[half,-half],[half,half],[-half,half],[-half,-half]].forEach(p => {
-      simWaypoints.push({ x: centerX + p[0], y: centerY + p[1], z: profile.z, drawing: true });
-    });
-  } else {
-    simWaypoints = [{ x: startX, y: startY, z: profile.z, drawing: true },
-                    { x: startX + length, y: startY, z: profile.z, drawing: true }];
-  }
-  const meta = document.getElementById('drawQuickMeta');
-  if(meta) meta.textContent = shape === 'line'
-    ? `Z plan ${profile.z.toFixed(0)} mm · start X=${startX.toFixed(0)}, Y=${startY.toFixed(0)} · line ${length.toFixed(0)} mm`
-    : `Z plan ${profile.z.toFixed(0)} mm · start X=${startX.toFixed(0)}, Y=${startY.toFixed(0)} · ${shape} ${size.toFixed(0)} mm`;
-  const scrub = document.getElementById('simScrub');
-  if(scrub) scrub.max = Math.max(1, simWaypoints.length - 1);
-  setSimSource('sim');
-  onSimScrubChange(0);
-}
-
-function startQuickDraw(){
-  if(!drawProfiles[selectedDrawProfile]) return;
-  const shapeEl = document.getElementById('dwQuickShape');
-  const shape = shapeEl ? shapeEl.value : 'line';
-  const value = id => { const el = document.getElementById(id); return el ? parseFloat(el.value) : NaN; };
-  const sx = value('dwQuickStartX'), sy = value('dwQuickStartY'), length = value('dwQuickLength');
-  if(!Number.isFinite(sx) || !Number.isFinite(sy) || (shape === 'line' && !Number.isFinite(length))){
-    toast(shape === 'line' ? 'Nhập Start X, Start Y và độ dài hợp lệ' : 'Nhập Start X và Start Y hợp lệ', 'err');
-    return;
-  }
-  const lineLength = shape === 'line' ? `&length=${length}` : '';
-  post('/api/draw/preset', `shape=${shape}&profile=${selectedDrawProfile}&sx=${sx}&sy=${sy}${lineLength}`);
-}
-
-function helloSegments(x, y, totalWidth){
-  const w = totalWidth / 6.4, h = w * 1.6, gap = w * 0.35;
-  const strokes = [], line = (ox, a, b, c, d) => strokes.push([x + ox + a*w, y + b*h, x + ox + c*w, y + d*h]);
-  let ox = 0;
-  line(ox,0,0,0,1); line(ox,1,0,1,1); line(ox,0,.5,1,.5); ox += w + gap; // H
-  line(ox,0,0,0,1); line(ox,0,1,1,1); line(ox,0,.5,.8,.5); line(ox,0,0,1,0); ox += w + gap; // E
-  line(ox,0,1,0,0); line(ox,0,0,1,0); ox += w + gap; // L
-  line(ox,0,1,0,0); line(ox,0,0,1,0); ox += w + gap; // L
-  line(ox,0,0,0,1); line(ox,0,1,1,1); line(ox,1,1,1,0); line(ox,1,0,0,0); // O
-  return strokes;
-}
-
-function helloPreflight(strokes, z){
-  return strokes.every(s => {
-    const count = Math.max(1, Math.ceil(Math.hypot(s[2] - s[0], s[3] - s[1]) / LINE_SEGMENT));
-    for(let i = 0; i <= count; i++){
-      const t = i / count;
-      if(!ikPenDown(s[0] + (s[2] - s[0]) * t, s[1] + (s[3] - s[1]) * t, z).ok) return false;
-    }
-    return ikPenDown(s[0], s[1], z + PEN_LIFT).ok && ikPenDown(s[2], s[3], z + PEN_LIFT).ok;
-  });
-}
-
-async function waitForHelloStroke(runId){
-  let seenBusy = false;
-  const deadline = Date.now() + 60000;
-  while(runId === helloRunId && Date.now() < deadline){
-    await new Promise(resolve => setTimeout(resolve, 100));
-    const response = await fetch('/api/status');
-    if(!response.ok) throw new Error(`status ${response.status}`);
-    const status = await response.json();
-    latestStatus = status;
-    updateUI(status);
-    if(status.mode === 'fault' || status.mode === 'release') throw new Error(`robot ${status.mode}`);
-    if(status.busy) seenBusy = true;
-    else if(seenBusy) return;
-  }
-  if(runId === helloRunId) throw new Error('stroke timeout');
-}
-
-async function startHello(){
-  const profile = drawProfiles[selectedDrawProfile];
-  const sx = parseFloat(document.getElementById('dwQuickStartX').value);
-  const sy = parseFloat(document.getElementById('dwQuickStartY').value);
-  const width = parseFloat(document.getElementById('dwQuickLength').value);
-  if(!profile || !Number.isFinite(sx) || !Number.isFinite(sy) || !Number.isFinite(width) || width < 40){
-    toast('HELLO cần Start X, Start Y và chiều rộng ít nhất 40 mm', 'err');
-    return;
-  }
-  const strokes = helloSegments(sx, sy, width);
-  if(!helloPreflight(strokes, profile.z)){
-    toast('HELLO nằm ngoài vùng IK an toàn; đổi Start X/Y, width hoặc plane', 'err');
-    return;
-  }
-  const runId = ++helloRunId;
-  if(statusPollController) statusPollController.abort();
-  pendingCommands++;
-  syncCommandState();
-  try {
-    for(let i = 0; i < strokes.length && runId === helloRunId; i++){
-      const s = strokes[i];
-      toast(`Writing HELLO · stroke ${i + 1}/${strokes.length}`, 'info');
-      const body = `shape=line&base_profile=1&x1=${s[0]}&y1=${s[1]}&x2=${s[2]}&y2=${s[3]}&z=${profile.z}&feed=10`;
-      const response = await fetch('/api/draw', {
-        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body
-      });
-      if(!response.ok) throw new Error((await response.text()) || `draw ${response.status}`);
-      await waitForHelloStroke(runId);
-    }
-    if(runId === helloRunId) toast('✓ HELLO complete', 'ok');
-  } catch(err) {
-    if(runId === helloRunId) toast(`HELLO stopped: ${err.message}`, 'err');
-  } finally {
-    pendingCommands = Math.max(0, pendingCommands - 1);
-    syncCommandState();
-  }
+  updateTeachPathPreview();
 }
 
 function setDashView(v, btn){
@@ -1372,58 +1410,9 @@ function onSimJointChange(axis, val){
   updateSimFromAngles(simAngles);
 }
 
-function onSimCartChange(){
-  if(simSource === 'live') setSimSource('sim');
-  const x = parseFloat(document.getElementById('simX').value);
-  const y = parseFloat(document.getElementById('simY').value);
-  const z = parseFloat(document.getElementById('simZ').value);
-  document.getElementById('simXVal').textContent = x.toFixed(1) + ' mm';
-  document.getElementById('simYVal').textContent = y.toFixed(1) + ' mm';
-  document.getElementById('simZVal').textContent = z.toFixed(1) + ' mm';
-
-  const res = ikPenDown(x, y, z);
-  const badge = document.getElementById('simIkStatusBadge');
-  if(res.ok){
-    if(badge){ badge.textContent = 'IK OK'; badge.className = 'badge b-run'; }
-    updateSimFromAngles(res.angles);
-  } else {
-    if(badge){ badge.textContent = 'OUT OF REACH'; badge.className = 'badge b-fault'; }
-  }
-}
-
 function startShowOff(){
   post('/api/showoff', '');
   toast('Đang khởi động điệu múa Show Off 6 trục đồng bộ!', 'info');
-}
-
-function applySimPreset(type, btn){
-  setSimSource('sim');
-  if(btn){
-    document.querySelectorAll('.preset-pill').forEach(b => b.setAttribute('aria-pressed', 'false'));
-    btn.setAttribute('aria-pressed', 'true');
-  }
-  if(type === 'home') updateSimFromAngles([0, 0, 0, 0, 0, 0]);
-  else if(type === 'draw'){ const ik = ikPenDown(160, 0, DRAW_PLANE_Z); if(ik.ok) updateSimFromAngles(ik.angles); }
-  else if(type === 'reach_fwd') updateSimFromAngles([0, 90, 0, 0, -DELTA_WRIST, 0]);
-  else if(type === 'reach_back') updateSimFromAngles([0, -90, 0, 0, -DELTA_WRIST, 0]);
-  else if(type === 'fold') updateSimFromAngles([0, 45, 90, 0, -45, 0]);
-}
-
-function generateSimPath(){
-  simWaypoints = [];
-  if(simPathType === 'circle'){
-    const cx = 140, cy = 0, r = 45, z = DRAW_PLANE_Z;
-    for(let a=0; a<=Math.PI*2; a+=0.15){
-      simWaypoints.push({ x: cx + r*Math.cos(a), y: cy + r*Math.sin(a), z: z, drawing: true });
-    }
-  } else {
-    const x1 = 100, y1 = -70, x2 = 180, y2 = 70, z = DRAW_PLANE_Z;
-    for(let s=0; s<=1.0; s+=0.04){
-      simWaypoints.push({ x: x1 + s*(x2-x1), y: y1 + s*(y2-y1), z: z, drawing: true });
-    }
-  }
-  const scrubEl = document.getElementById('simScrub');
-  if(scrubEl) scrubEl.max = Math.max(1, simWaypoints.length - 1);
 }
 
 function onSimScrubChange(val){
@@ -1431,21 +1420,26 @@ function onSimScrubChange(val){
   simScrubIdx = idx;
   const scrubVal = document.getElementById('simScrubVal');
   const hudSimPlay = document.getElementById('hudSimPlay');
-  const pct = `${Math.round(idx / Math.max(1, simWaypoints.length-1) * 100)}%`;
+  const total = (s_teachPoints && s_teachPoints.length) ? s_teachPoints.length : 1;
+  const pct = `${idx + 1}/${total} (${Math.round(idx / Math.max(1, total - 1) * 100)}%)`;
   if(scrubVal) scrubVal.textContent = pct;
   if(hudSimPlay) hudSimPlay.textContent = pct;
-  if(simWaypoints[idx]){
-    const wp = simWaypoints[idx];
-    const ik = ikPenDown(wp.x, wp.y, wp.z);
-    if(ik.ok) updateSimFromAngles(ik.angles);
+
+  if(s_teachPoints && s_teachPoints[idx]){
+    const pt = s_teachPoints[idx];
+    const angles = [pt[0], pt[1], pt[2], 0, 0, 0];
+    updateSimFromAngles(angles);
+    const hudReach = document.getElementById('hudSimReach');
+    if(hudReach) hudReach.textContent = pt[3] ? '🖊 ĐANG VẼ (Hạ bút)' : '✈️ DI CHUYỂN (Nhấc bút)';
   }
 }
 
 function simAnimStep(now){
   if(!simPlayAnimId) return;
-  if(!document.hidden && now - simLastAnimTime >= 45){
+  if(!document.hidden && now - simLastAnimTime >= 40){
     simLastAnimTime = now;
-    simScrubIdx = (simScrubIdx + 1) % simWaypoints.length;
+    const total = (s_teachPoints && s_teachPoints.length) ? s_teachPoints.length : 1;
+    simScrubIdx = (simScrubIdx + 1) % total;
     const scrubEl = document.getElementById('simScrub');
     if(scrubEl) scrubEl.value = simScrubIdx;
     onSimScrubChange(simScrubIdx);
@@ -1460,27 +1454,14 @@ function toggleSimPlay(){
     simPlayAnimId = null;
     if(btn) btn.textContent = '▶ Chạy mô phỏng (Play)';
   } else {
+    if(!s_teachPoints || s_teachPoints.length < 2){
+      toast('Cần ít nhất 2 điểm để mô phỏng', 'err');
+      return;
+    }
+    setSimSource('sim');
     if(btn) btn.textContent = '⏸ Tạm dừng (Pause)';
     simLastAnimTime = performance.now();
     simPlayAnimId = requestAnimationFrame(simAnimStep);
-  }
-}
-
-function sendSimPoseToRobot(){
-  const lm = forwardKinematics(simAngles);
-  const feed = document.getElementById('mvFeed') ? document.getElementById('mvFeed').value : 30;
-  post('/api/move', `x=${lm.tcp[0].toFixed(2)}&y=${lm.tcp[1].toFixed(2)}&z=${lm.tcp[2].toFixed(2)}&feed=${feed}`);
-}
-
-function switchMotionMode(mode){
-  const bMove = document.getElementById('btnToggleMove'), bDraw = document.getElementById('btnToggleDraw');
-  const pMove = document.getElementById('panelCartMove'), pDraw = document.getElementById('panelCartDraw');
-  if(mode === 'move'){
-    bMove.classList.add('active'); bDraw.classList.remove('active');
-    pMove.style.display = 'block'; pDraw.style.display = 'none';
-  } else {
-    bDraw.classList.add('active'); bMove.classList.remove('active');
-    pDraw.style.display = 'block'; pMove.style.display = 'none';
   }
 }
 
@@ -1490,16 +1471,20 @@ function switchMotionMode(mode){
 function toast(msg, cls){
   const t = document.getElementById('toast');
   if(!t) return;
+  t.style.display = '';
   t.textContent = msg;
-  t.className = cls ? ('t-' + cls) : '';
-  t.style.display = 'block';
+  t.className = (cls ? ('t-' + cls) : '') + ' show';
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.style.display = 'none'; }, 2600);
+  toastTimer = setTimeout(() => { t.className = ''; }, 2600);
 }
 async function requestCommand(url, options, trigger){
   if(statusPollController) statusPollController.abort();
   const control = trigger || pendingTrigger();
-  if(control) { control.disabled = true; control.setAttribute('aria-busy', 'true'); }
+  if(control) {
+    control.disabled = true;
+    control.setAttribute('aria-busy', 'true');
+    control.classList.add('btn-loading');
+  }
   pendingCommands++;
   syncCommandState();
   try {
@@ -1509,14 +1494,19 @@ async function requestCommand(url, options, trigger){
       toast(text || `Lệnh thất bại (${response.status})`, 'err');
       return null;
     }
-    toast((text === 'OK' ? '✓ ' : '') + (text || 'Đã nhận lệnh'), 'ok');
+    if(!text.startsWith('{')){
+      toast((text === 'OK' ? '✓ ' : '') + (text || 'Đã nhận lệnh'), 'ok');
+    }
     return text;
   } catch (_) {
     toast('Lỗi mạng / Mất kết nối robot', 'err');
     return null;
   } finally {
     pendingCommands = Math.max(0, pendingCommands - 1);
-    if(control) control.removeAttribute('aria-busy');
+    if(control) {
+      control.removeAttribute('aria-busy');
+      control.classList.remove('btn-loading');
+    }
     if(control && !control.classList.contains('need-idle')) control.disabled = false;
     syncCommandState();
     pollOnce();
@@ -1533,36 +1523,676 @@ function post(url, body, trigger){
   return requestCommand(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body }, trigger);
 }
 function clearFault(){ post('/api/jog', 'fault_clear=1'); }
-function jog(axis, dir){ post('/api/jog', `axis=${axis}&deg=${dir * stepSize}`); }
+function jog(axis, dir){
+  if(axis >= 3 && wristLockedState){ toast('Trục cổ tay J4..J6 đang khóa cứng!', 'warn'); return; }
+  post('/api/jog', `axis=${axis}&deg=${dir * stepSize}`);
+}
 function setGripper(event){
   event.preventDefault();
   const input = document.getElementById('gripperAngle');
   if(input.reportValidity()) post('/api/gripper', `deg=${encodeURIComponent(input.value)}`, event.submitter);
 }
-function saveTeachPoint(slot){ api(`/api/teach/save?slot=${slot}`); }
-function clearTeachPoints(){
-  if(confirm('Clear saved teach points A-C from NVS?')) api('/api/teach/clear');
+let s_teachJogStep = 5;
+let s_teachIsFree = false;
+
+function setTeachJogStep(deg) {
+  s_teachJogStep = deg;
+  ['btnJStep1', 'btnJStep5', 'btnJStep10'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('active', id === 'btnJStep' + deg);
+  });
+  toast('Bước Jog: ' + deg + '°');
 }
-function confirmSetHome(axis){
-  const axes = axis === 255 ? [4, 5] : [axis];
-  const labels = axes.map(a => `J${a + 1}`).join(' + ');
-  const existing = latestStatus && latestStatus.joints
-    ? axes.some(a => latestStatus.joints[a] && latestStatus.joints[a].homed) : false;
-  const message = existing
-    ? `Ghi đè mốc home hiện có của ${labels}? Zero mới sẽ được lưu vào NVS khi robot đang IDLE.`
-    : `Lưu vị trí hiện tại làm mốc home cho ${labels} vào NVS? Robot phải đang IDLE.`;
-  if(confirm(message)){
-    api(`/api/sethome?axis=${axis}`).then(t => {
-      if(t === 'OK') {
-        toast(`Đã gửi Set Home ${labels}; trạng thái HOMED sẽ cập nhật sau khi lệnh hoàn tất.`, 'ok');
-        pollOnce();
+
+function jogTeach(axis, sign) {
+  post('/api/jog', `axis=${axis - 1}&deg=${sign * s_teachJogStep}`);
+}
+
+function toggleTeachFree() {
+  const nextFree = !s_teachIsFree;
+  api(`/api/teach/free?free=${nextFree ? 1 : 0}`).then(ok => {
+    if (ok === null) return;
+    s_teachIsFree = nextFree;
+    const btn = document.getElementById('btnTeachFree');
+    if (btn) {
+      btn.textContent = s_teachIsFree ? '🔒 Khóa J1..J3' : '🔓 Thả lỏng J1..J3 (Kéo tay)';
+      btn.className = s_teachIsFree ? 'btn btn-primary' : 'btn btn-warning';
+    }
+  });
+}
+
+let s_teachPoints = [];
+
+function updateTeachPathPreview() {
+  fetch('/api/teach/points')
+    .then(r => r.json())
+    .then(pts => {
+      s_teachPoints = pts || [];
+      const scrubEl = document.getElementById('simScrub');
+      if(scrubEl) {
+        scrubEl.max = Math.max(1, s_teachPoints.length - 1);
+        if(simScrubIdx >= s_teachPoints.length) simScrubIdx = 0;
+        scrubEl.value = simScrubIdx;
       }
+      if(!pts || !pts.length) {
+        simWaypoints = [];
+        if(dashRenderer) dashRenderer.lastPath = null;
+        if(simRenderer) simRenderer.lastPath = null;
+        const badge = document.getElementById('teachTrajBadge');
+        if(badge) { badge.textContent = '0 điểm'; badge.className = 'badge b-idle'; }
+        onSimScrubChange(0);
+        return;
+      }
+      const downCount = pts.filter(p => p[3] !== 0).length;
+      const badge = document.getElementById('teachTrajBadge');
+      if(badge) {
+        badge.textContent = `${pts.length} điểm (${downCount} nét vẽ)`;
+        badge.className = 'badge b-run';
+      }
+      const wps = pts.map(p => {
+        const angles = [p[0], p[1], p[2], 0, 0, 0];
+        const lm = forwardKinematics(angles);
+        return { x: lm.tcp[0], y: lm.tcp[1], z: lm.tcp[2], pen: (p[3] !== 0) };
+      });
+      simWaypoints = wps;
+      if(dashRenderer) dashRenderer.lastPath = wps;
+      if(simRenderer) simRenderer.lastPath = wps;
+      onSimScrubChange(simScrubIdx);
+      if(isPaneActive('pane-motion')) simRenderer.renderCurrent();
+      if(isPaneActive('pane-dash')) dashRenderer.renderCurrent();
+    })
+    .catch(() => {});
+}
+
+function teachRecordPoint(penDown) {
+  const isDown = (penDown !== false);
+  post('/api/teach/record', `pen=${isDown ? 1 : 0}`).then(ok => {
+    if (ok !== null) setTimeout(updateTeachPathPreview, 50);
+  });
+}
+
+function teachUndoPoint() {
+  api('/api/teach/undo').then(ok => {
+    if (ok !== null) setTimeout(updateTeachPathPreview, 50);
+  });
+}
+
+function teachClearPoints() {
+  if (confirm('Xóa toàn bộ điểm dạy vẽ trong RAM?')) {
+    api('/api/teach/clear').then(ok => {
+      if (ok !== null) setTimeout(updateTeachPathPreview, 50);
     });
   }
 }
-function confirmReleaseJ1J4(){
-  if(confirm('Release torque J1-J4 for hand adjustment, including recovery from a pressed endstop? Home marks and NVS are kept. Move the arm clear by hand, then press Enable J1-J4 and Clear Fault if needed.')){
-    api('/api/release/j1-j4');
+
+function teachPlayTrajectory() {
+  api('/api/teach/play?step_deg=0.5&speed=15');
+}
+
+function downloadTeachJson() {
+  fetch('/api/teach/points')
+    .then(r => r.json())
+    .then(data => {
+      const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'draw_trajectory.json';
+      a.click();
+      toast('Đã tải file draw_trajectory.json');
+    })
+    .catch(e => toast('Lỗi tải file', 'err'));
+}
+
+function uploadTeachJson(evt) {
+  const file = evt.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    fetch('/api/teach/load', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: e.target.result
+    }).then(r => {
+      if (r.ok) {
+        toast('Nạp file JSON thành công!');
+        setTimeout(updateTeachPathPreview, 150);
+      } else toast('Lỗi nội dung file JSON', 'err');
+    });
+  };
+  reader.readAsText(file);
+}
+
+function saveTeachToNvs() {
+  post('/api/teach/nvs/save')
+    .then(txt => {
+      if(!txt) return;
+      try {
+        const d = JSON.parse(txt);
+        if(d.ok) toast('💾 Đã lưu quỹ đạo vào Flash (NVS)!', 'ok');
+        else toast('❌ Lưu Flash thất bại: ' + (d.msg || ''), 'err');
+      } catch(e) {
+        toast('❌ Lỗi lưu Flash', 'err');
+      }
+    })
+    .catch(() => toast('❌ Lỗi kết nối Flash', 'err'));
+}
+
+function loadTeachFromNvs() {
+  post('/api/teach/nvs/load')
+    .then(txt => {
+      if(!txt) return;
+      try {
+        const d = JSON.parse(txt);
+        if(d.ok) {
+          toast(`📂 Đã nạp ${d.count} điểm từ Flash (NVS)!`, 'ok');
+          updateTeachPathPreview();
+        } else {
+          toast('❌ ' + (d.msg || 'Không có quỹ đạo trong Flash'), 'err');
+        }
+      } catch(e) {
+        toast('❌ Lỗi nạp Flash', 'err');
+      }
+    })
+    .catch(() => toast('❌ Lỗi nạp Flash', 'err'));
+}
+/* =========================================================================
+   DEDICATED HELLO STUDIO JAVASCRIPT ENGINE
+   ========================================================================= */
+let s_lastStatus = null;
+let s_helloJogStep = 5;
+let s_activeHelloLetter = localStorage.getItem('hello_active_letter') || 'H';
+if (!['H', 'E', 'L1', 'L2', 'O'].includes(s_activeHelloLetter)) s_activeHelloLetter = 'H';
+const HELLO_LETTERS = ['H', 'E', 'L1', 'L2', 'O'];
+
+const HELLO_CONFIG = {
+  H: {
+    title: 'Chữ H (3 nét: Cột trái -> Cột phải -> Gạch ngang)',
+    svg: `<svg viewBox="0 0 220 220" width="180" height="180">
+      <rect x="30" y="20" width="160" height="180" fill="none" stroke="rgba(255,255,255,0.08)" stroke-dasharray="4"/>
+      <line x1="60" y1="35" x2="60" y2="185" stroke="#10b981" stroke-width="6" stroke-linecap="round"/>
+      <line x1="60" y1="185" x2="160" y2="35" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6"/>
+      <line x1="160" y1="35" x2="160" y2="185" stroke="#10b981" stroke-width="6" stroke-linecap="round"/>
+      <line x1="160" y1="185" x2="60" y2="110" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6"/>
+      <line x1="60" y1="110" x2="160" y2="110" stroke="#10b981" stroke-width="6" stroke-linecap="round"/>
+      <circle cx="60" cy="35" r="9" fill="#38bdf8"/><text x="60" y="38" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">1</text>
+      <circle cx="60" cy="185" r="9" fill="#38bdf8"/><text x="60" y="188" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">2</text>
+      <circle cx="160" cy="35" r="9" fill="#f59e0b"/><text x="160" y="38" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">3</text>
+      <circle cx="160" cy="185" r="9" fill="#38bdf8"/><text x="160" y="188" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">4</text>
+      <circle cx="60" cy="110" r="9" fill="#f59e0b"/><text x="60" y="113" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">5</text>
+      <circle cx="160" cy="110" r="9" fill="#38bdf8"/><text x="160" y="113" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">6</text>
+    </svg>`,
+    steps: [
+      { id: 1, text: 'Đỉnh cột trái (Hạ bút)', pen: true },
+      { id: 2, text: 'Chân cột trái (Hạ bút)', pen: true },
+      { id: 3, text: 'Đỉnh cột phải (Nhấc bút bay sang)', pen: false },
+      { id: 4, text: 'Chân cột phải (Hạ bút)', pen: true },
+      { id: 5, text: 'Giữa cột trái (Nhấc bút bay sang)', pen: false },
+      { id: 6, text: 'Giữa cột phải (Hạ bút gạch ngang)', pen: true },
+      { id: 7, text: 'Nhấc bút an toàn kết thúc', pen: false }
+    ]
+  },
+  E: {
+    title: 'Chữ E (4 nét: Cột đứng -> Gạch đáy -> Gạch giữa -> Gạch trên)',
+    svg: `<svg viewBox="0 0 220 220" width="180" height="180">
+      <rect x="30" y="20" width="160" height="180" fill="none" stroke="rgba(255,255,255,0.08)" stroke-dasharray="4"/>
+      <line x1="60" y1="35" x2="60" y2="185" stroke="#10b981" stroke-width="6" stroke-linecap="round"/>
+      <line x1="60" y1="185" x2="160" y2="185" stroke="#10b981" stroke-width="6" stroke-linecap="round"/>
+      <line x1="160" y1="185" x2="60" y2="110" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6"/>
+      <line x1="60" y1="110" x2="145" y2="110" stroke="#10b981" stroke-width="6" stroke-linecap="round"/>
+      <line x1="145" y1="110" x2="60" y2="35" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6"/>
+      <line x1="60" y1="35" x2="160" y2="35" stroke="#10b981" stroke-width="6" stroke-linecap="round"/>
+      <circle cx="60" cy="35" r="9" fill="#38bdf8"/><text x="60" y="38" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">1</text>
+      <circle cx="60" cy="185" r="9" fill="#38bdf8"/><text x="60" y="188" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">2</text>
+      <circle cx="160" cy="185" r="9" fill="#38bdf8"/><text x="160" y="188" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">3</text>
+      <circle cx="60" cy="110" r="9" fill="#f59e0b"/><text x="60" y="113" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">4</text>
+      <circle cx="145" cy="110" r="9" fill="#38bdf8"/><text x="145" y="113" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">5</text>
+      <circle cx="60" cy="35" r="7" fill="#f59e0b"/><text x="60" y="38" fill="#000" font-size="8" font-weight="bold" text-anchor="middle">6</text>
+      <circle cx="160" cy="35" r="9" fill="#38bdf8"/><text x="160" y="38" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">7</text>
+    </svg>`,
+    steps: [
+      { id: 1, text: 'Đỉnh cột đứng (Hạ bút)', pen: true },
+      { id: 2, text: 'Góc dưới trái (Hạ bút)', pen: true },
+      { id: 3, text: 'Đầu gạch đáy phải (Hạ bút)', pen: true },
+      { id: 4, text: 'Giữa cột đứng (Nhấc bút bay sang)', pen: false },
+      { id: 5, text: 'Đầu gạch giữa (Hạ bút)', pen: true },
+      { id: 6, text: 'Đỉnh cột đứng (Nhấc bút bay lên)', pen: false },
+      { id: 7, text: 'Đầu gạch trên phải (Hạ bút)', pen: true },
+      { id: 8, text: 'Nhấc bút an toàn kết thúc', pen: false }
+    ]
+  },
+  L1: {
+    title: 'Chữ L thứ nhất (2 nét: Cột đứng -> Gạch chân)',
+    svg: `<svg viewBox="0 0 220 220" width="180" height="180">
+      <rect x="30" y="20" width="160" height="180" fill="none" stroke="rgba(255,255,255,0.08)" stroke-dasharray="4"/>
+      <line x1="70" y1="35" x2="70" y2="185" stroke="#10b981" stroke-width="6" stroke-linecap="round"/>
+      <line x1="70" y1="185" x2="165" y2="185" stroke="#10b981" stroke-width="6" stroke-linecap="round"/>
+      <circle cx="70" cy="35" r="9" fill="#38bdf8"/><text x="70" y="38" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">1</text>
+      <circle cx="70" cy="185" r="9" fill="#38bdf8"/><text x="70" y="188" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">2</text>
+      <circle cx="165" cy="185" r="9" fill="#38bdf8"/><text x="165" y="188" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">3</text>
+    </svg>`,
+    steps: [
+      { id: 1, text: 'Đỉnh cột đứng (Hạ bút)', pen: true },
+      { id: 2, text: 'Góc đáy (Hạ bút)', pen: true },
+      { id: 3, text: 'Đầu gạch chân phải (Hạ bút)', pen: true },
+      { id: 4, text: 'Nhấc bút an toàn kết thúc', pen: false }
+    ]
+  },
+  L2: {
+    title: 'Chữ L thứ hai (2 nét: Cột đứng -> Gạch chân)',
+    svg: `<svg viewBox="0 0 220 220" width="180" height="180">
+      <rect x="30" y="20" width="160" height="180" fill="none" stroke="rgba(255,255,255,0.08)" stroke-dasharray="4"/>
+      <line x1="70" y1="35" x2="70" y2="185" stroke="#10b981" stroke-width="6" stroke-linecap="round"/>
+      <line x1="70" y1="185" x2="165" y2="185" stroke="#10b981" stroke-width="6" stroke-linecap="round"/>
+      <circle cx="70" cy="35" r="9" fill="#38bdf8"/><text x="70" y="38" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">1</text>
+      <circle cx="70" cy="185" r="9" fill="#38bdf8"/><text x="70" y="188" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">2</text>
+      <circle cx="165" cy="185" r="9" fill="#38bdf8"/><text x="165" y="188" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">3</text>
+    </svg>`,
+    steps: [
+      { id: 1, text: 'Đỉnh cột đứng (Hạ bút)', pen: true },
+      { id: 2, text: 'Góc đáy (Hạ bút)', pen: true },
+      { id: 3, text: 'Đầu gạch chân phải (Hạ bút)', pen: true },
+      { id: 4, text: 'Nhấc bút an toàn kết thúc', pen: false }
+    ]
+  },
+  O: {
+    title: 'Chữ O (Hình chữ nhật: Đỉnh ngang -> Cạnh phải -> Đáy ngang -> Cạnh trái khép góc)',
+    svg: `<svg viewBox="0 0 220 220" width="180" height="180">
+      <rect x="30" y="20" width="160" height="180" fill="none" stroke="rgba(255,255,255,0.08)" stroke-dasharray="4"/>
+      <line x1="60" y1="35" x2="160" y2="35" stroke="#10b981" stroke-width="6" stroke-linecap="round"/>
+      <line x1="160" y1="35" x2="160" y2="185" stroke="#10b981" stroke-width="6" stroke-linecap="round"/>
+      <line x1="160" y1="185" x2="60" y2="185" stroke="#10b981" stroke-width="6" stroke-linecap="round"/>
+      <line x1="60" y1="185" x2="60" y2="35" stroke="#10b981" stroke-width="6" stroke-linecap="round"/>
+      <circle cx="60" cy="35" r="9" fill="#38bdf8"/><text x="60" y="38" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">1</text>
+      <circle cx="160" cy="35" r="9" fill="#38bdf8"/><text x="160" y="38" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">2</text>
+      <circle cx="160" cy="185" r="9" fill="#38bdf8"/><text x="160" y="188" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">3</text>
+      <circle cx="60" cy="185" r="9" fill="#38bdf8"/><text x="60" y="188" fill="#000" font-size="10" font-weight="bold" text-anchor="middle">4</text>
+      <circle cx="60" cy="35" r="5" fill="#f59e0b"/>
+    </svg>`,
+    steps: [
+      { id: 1, text: 'Góc trên trái (Hạ bút)', pen: true },
+      { id: 2, text: 'Góc trên phải (Hạ bút nét ngang đỉnh)', pen: true },
+      { id: 3, text: 'Góc dưới phải (Hạ bút nét đứng phải)', pen: true },
+      { id: 4, text: 'Góc dưới trái (Hạ bút nét ngang đáy)', pen: true },
+      { id: 5, text: 'Góc trên trái (Hạ bút nét đứng trái khép kín)', pen: true },
+      { id: 6, text: 'Nhấc bút an toàn kết thúc', pen: false }
+    ]
+  }
+};
+
+function setHelloJogStep(deg) {
+  s_helloJogStep = deg;
+  ['btnHStep1', 'btnHStep5', 'btnHStep10'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.classList.toggle('active', id === 'btnHStep' + deg);
+  });
+  toast('Bước Jog: ' + deg + '°');
+}
+
+function jogHello(axis, sign) {
+  post('/api/jog', `axis=${axis - 1}&deg=${sign * s_helloJogStep}`);
+}
+
+function toggleHelloFree() {
+  const nextFree = !s_teachIsFree;
+  api(`/api/teach/free?free=${nextFree ? 1 : 0}`).then(ok => {
+    if (ok === null) return;
+    s_teachIsFree = nextFree;
+    const btn = document.getElementById('btnHelloFree');
+    if (btn) {
+      btn.textContent = s_teachIsFree ? '🔒 Khóa giữ tay' : '🔓 Thả lỏng tay để kéo';
+      btn.className = s_teachIsFree ? 'btn btn-primary' : 'btn btn-warning';
+    }
+    const btnTeach = document.getElementById('btnTeachFree');
+    if(btnTeach) {
+      btnTeach.textContent = s_teachIsFree ? '🔒 Khóa J1..J3' : '🔓 Thả lỏng J1..J3 (Kéo tay)';
+      btnTeach.className = s_teachIsFree ? 'btn btn-primary' : 'btn btn-warning';
+    }
+  });
+}
+
+function selectHelloLetter(letter) {
+  if(!HELLO_LETTERS.includes(letter)) return;
+  s_activeHelloLetter = letter;
+  localStorage.setItem('hello_active_letter', letter);
+  HELLO_LETTERS.forEach(l => {
+    const card = document.getElementById('cardLetter' + l);
+    if(card) card.classList.toggle('active', l === letter);
+  });
+  const playLet = document.getElementById('btnHelloPlayLetter');
+  if(playLet) playLet.textContent = letter;
+  const cfg = HELLO_CONFIG[letter];
+  if(cfg) {
+    const tit = document.getElementById('helloLetterTitle');
+    if(tit) tit.textContent = 'Sơ đồ nét: ' + cfg.title;
+    const diag = document.getElementById('helloDiagramWrap');
+    if(diag) diag.innerHTML = cfg.svg;
+  }
+
+  const saved = localStorage.getItem('hello_letter_' + letter);
+  let loadedPts = [];
+  if(saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      if(Array.isArray(parsed) && parsed.length > 0) loadedPts = parsed;
+    } catch(_) {}
+  }
+
+  if(loadedPts.length > 0) {
+    // Chữ cái này đã có bộ nhớ riêng -> Nạp vào RAM robot
+    s_teachPoints = loadedPts;
+    updateHelloPointsTable();
+    updateAllLetterBadges();
+    updateTeachPathPreview();
+    fetch('/api/teach/load', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(loadedPts)
+    });
+  } else {
+    // Chữ cái này chưa có điểm -> Xóa sạch buffer trong RAM robot, bắt đầu từ điểm 1!
+    s_teachPoints = [];
+    localStorage.removeItem('hello_letter_' + letter);
+    updateHelloPointsTable();
+    updateAllLetterBadges();
+    updateTeachPathPreview();
+    api('/api/teach/clear');
+  }
+}
+
+function syncHelloPointsFromRobot() {
+  fetch('/api/teach/points')
+    .then(r => r.json())
+    .then(pts => {
+      s_teachPoints = pts || [];
+      if(s_teachPoints.length > 0) {
+        localStorage.setItem('hello_letter_' + s_activeHelloLetter, JSON.stringify(s_teachPoints));
+      } else {
+        localStorage.removeItem('hello_letter_' + s_activeHelloLetter);
+      }
+      updateHelloPointsTable();
+      updateAllLetterBadges();
+      updateTeachPathPreview();
+    })
+    .catch(() => {});
+}
+
+function updateHelloPointsTable() {
+  const tbody = document.getElementById('helloPointsTableBody');
+  const badgeStep = document.getElementById('helloActiveStepBadge');
+  if(!tbody) return;
+  if(!s_teachPoints || s_teachPoints.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim)">Chưa có điểm nào. Hãy bấm "GHI ĐIỂM" hoặc "Nạp nét mẫu"!</td></tr>';
+    if(badgeStep) badgeStep.textContent = 'Điểm tiếp theo: #1';
+    return;
+  }
+  let html = '';
+  s_teachPoints.forEach((p, idx) => {
+    const isDown = (p[3] !== 0);
+    const badge = isDown
+      ? '<span style="color:var(--success);font-weight:700">🖊️ Hạ bút (Vẽ)</span>'
+      : '<span style="color:var(--warning);font-weight:700">✈️ Nhấc bút (Bay)</span>';
+    html += `<tr>
+      <td>${idx + 1}</td>
+      <td>${badge}</td>
+      <td>${p[0].toFixed(1)}°</td>
+      <td>${p[1].toFixed(1)}°</td>
+      <td>${p[2].toFixed(1)}°</td>
+    </tr>`;
+  });
+  tbody.innerHTML = html;
+  if(badgeStep) {
+    const cfg = HELLO_CONFIG[s_activeHelloLetter];
+    const n = s_teachPoints.length + 1;
+    const desc = (cfg && cfg.steps && cfg.steps[n - 1]) ? cfg.steps[n - 1].text : '';
+    badgeStep.textContent = `Điểm tiếp theo: #${n} ${desc ? '(' + desc + ')' : ''}`;
+  }
+}
+
+function updateAllLetterBadges() {
+  HELLO_LETTERS.forEach(l => {
+    const badge = document.getElementById('badgeLetter' + l);
+    if(!badge) return;
+    if(l === s_activeHelloLetter) {
+      badge.textContent = s_teachPoints.length ? `${s_teachPoints.length} điểm` : 'Chưa dạy';
+    } else {
+      const saved = localStorage.getItem('hello_letter_' + l);
+      if(saved) {
+        try {
+          const pts = JSON.parse(saved);
+          badge.textContent = (pts && pts.length) ? `${pts.length} điểm` : 'Chưa dạy';
+        } catch(_) { badge.textContent = 'Chưa dạy'; }
+      } else {
+        badge.textContent = 'Chưa dạy';
+      }
+    }
+  });
+}
+
+function helloRecordPoint(penDown) {
+  const isDown = (penDown !== false);
+  post('/api/teach/record', `pen=${isDown ? 1 : 0}`).then(ok => {
+    if(ok !== null) setTimeout(syncHelloPointsFromRobot, 60);
+  });
+}
+
+function helloUndoPoint() {
+  api('/api/teach/undo').then(ok => {
+    if(ok !== null) setTimeout(syncHelloPointsFromRobot, 60);
+  });
+}
+
+function helloClearPoints() {
+  if(confirm(`Xóa toàn bộ điểm của chữ ${s_activeHelloLetter}?`)) {
+    s_teachPoints = [];
+    localStorage.removeItem('hello_letter_' + s_activeHelloLetter);
+    updateHelloPointsTable();
+    updateAllLetterBadges();
+    updateTeachPathPreview();
+    api('/api/teach/clear');
+    toast(`🗑 Đã xóa toàn bộ điểm của chữ [${s_activeHelloLetter}]!`, 'ok');
+  }
+}
+
+function setHelloPenPress(deg) {
+  deg = parseFloat(deg);
+  if(isNaN(deg) || deg < 0) deg = 0.35;
+  ['btnPress03', 'btnPress05', 'btnPress10'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.classList.toggle('active', (id === 'btnPress03' && Math.abs(deg - 0.35) < 0.05) ||
+                                          (id === 'btnPress05' && Math.abs(deg - 0.5) < 0.05) ||
+                                          (id === 'btnPress10' && Math.abs(deg - 1.0) < 0.05));
+  });
+  post('/api/teach/press', `deg=${deg}`).then(ok => {
+    if(ok !== null) {
+      toast('Độ đè bút J2: ' + deg.toFixed(2) + '° (khử rơ & chống bay ngòi)');
+      const inp = document.getElementById('inputHelloPressDeg');
+      if(inp) inp.value = deg.toFixed(2);
+    }
+  });
+}
+
+function homeHelloDrawAxes() {
+  api('/api/home/all').then(ok => {
+    if(ok !== null) toast('🎯 Bắt đầu chuỗi Home J3 ➔ J2 ➔ J1 an toàn...', 'ok');
+  });
+}
+
+function updateHelloHomingStatus(d) {
+  const badge = document.getElementById('helloHomedBadge');
+  const notice = document.getElementById('helloHomedNotice');
+  const btnHome = document.getElementById('btnHelloHomeAll');
+  if(!badge || !d || !d.joints) return;
+
+  const j1 = d.joints[0], j2 = d.joints[1], j3 = d.joints[2];
+  const allPhysHomed = j1.homed && !j1.restored && j2.homed && !j2.restored && j3.homed && !j3.restored;
+  const anyRestored = j1.restored || j2.restored || j3.restored;
+  const anyUnhomed = !j1.homed || !j2.homed || !j3.homed;
+
+  if(d.homing && d.homing.active) {
+    badge.className = 'badge b-run';
+    badge.textContent = `Đang Home J${d.homing.axis} (${d.homing.phase})`;
+    if(notice) notice.textContent = 'Robot đang dò cữ cơ học... Xin đợi!';
+    if(btnHome) btnHome.disabled = true;
+  } else if(allPhysHomed) {
+    badge.className = 'badge b-ok';
+    badge.textContent = '✅ ĐÃ HOME VẬT LÝ (SẴN SÀNG VẼ)';
+    if(notice) notice.textContent = 'Tọa độ chuẩn xác từng 0.1mm. Sẵn sàng viết chữ!';
+    if(btnHome) {
+      btnHome.disabled = false;
+      btnHome.className = 'btn btn-ghost';
+      btnHome.textContent = '🎯 Home lại J3..J1';
+    }
+  } else {
+    badge.className = 'badge b-warn';
+    badge.textContent = anyRestored ? '⚠️ VỊ TRÍ NVS (CHƯA HOME VẬT LÝ)' : '❌ CHƯA HOME';
+    if(notice) notice.textContent = anyRestored
+      ? 'Vừa bật nguồn: Tọa độ chỉ ước lượng từ NVS. Bấm [HOME J3..J1] để ngòi chạm chuẩn mặt giấy!'
+      : 'Cần Home J3..J1 trước khi viết để tránh lệch mặt giấy!';
+    if(btnHome) {
+      btnHome.disabled = false;
+      btnHome.className = 'btn btn-primary';
+      btnHome.textContent = '🎯 HOME J3..J1 (Chuẩn Bị Vẽ)';
+    }
+  }
+}
+
+function playHelloLetter() {
+  if(!s_teachPoints || s_teachPoints.length < 2) {
+    toast(`Chữ ${s_activeHelloLetter} cần ít nhất 2 điểm để vẽ! Hãy ghi điểm hoặc bấm "Nạp nét mẫu".`, 'warn');
+    return;
+  }
+  if(s_lastStatus && s_lastStatus.joints) {
+    const j1 = s_lastStatus.joints[0], j2 = s_lastStatus.joints[1], j3 = s_lastStatus.joints[2];
+    const anyRestored = j1.restored || j2.restored || j3.restored;
+    const anyUnhomed = !j1.homed || !j2.homed || !j3.homed;
+    if(anyUnhomed) {
+      toast('❌ Không thể viết: Khớp J1..J3 chưa Home! Hãy bấm nút [HOME J3..J1].', 'err');
+      return;
+    }
+    if(anyRestored) {
+      if(confirm('⚠️ Robot vừa bật nguồn và tọa độ chỉ ước lượng từ NVS (chưa Home vật lý bằng cữ endstop, ngòi bút có thể bị lệch mặt giấy).\n\nBạn có muốn Home chuẩn trước khi viết không?\n- Bấm OK để chạy HOME tự động (J3 ➔ J2 ➔ J1).\n- Bấm Cancel để viết ngay với tọa độ NVS.')) {
+        homeHelloDrawAxes();
+        return;
+      }
+    }
+  }
+  toast(`Bắt đầu viết chữ [${s_activeHelloLetter}] trên robot...`, 'ok');
+  api('/api/teach/play?step_deg=0.5&speed=15');
+}
+
+function nextHelloLetter() {
+  const curIdx = HELLO_LETTERS.indexOf(s_activeHelloLetter);
+  const nextIdx = (curIdx + 1) % HELLO_LETTERS.length;
+  const nextL = HELLO_LETTERS[nextIdx];
+  selectHelloLetter(nextL);
+  toast(`👉 Đã chuyển sang chữ [${nextL}]! Hãy kéo dịch giấy sang trái ~2.5cm rồi bấm [Viết]!`, 'ok');
+}
+
+function saveHelloAllToNvs() {
+  saveTeachToNvs();
+}
+
+function addCartesianStroke(pts, x1, y1, x2, y2, penDown, zDraw, zLift) {
+  const z = penDown ? zDraw : zLift;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const dist = Math.hypot(dx, dy);
+  // Nét ngang (dx == 0): chỉ cần 2 hoặc 3 phân đoạn mượt mà (tránh chia vụn 4mm gây giật nảy)
+  const maxSegMm = (Math.abs(dx) < 0.5) ? 10.0 : 4.0;
+  const steps = Math.max(1, Math.ceil(dist / maxSegMm));
+  for(let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const x = x1 + t * dx;
+    const y = y1 + t * dy;
+    const ik = ikPenDown(x, y, z);
+    if(ik && ik.ok) {
+      const p = [
+        parseFloat(ik.angles[0].toFixed(2)),
+        parseFloat(ik.angles[1].toFixed(2)),
+        parseFloat(ik.angles[2].toFixed(2)),
+        penDown ? 1 : 0
+      ];
+      // Bỏ qua điểm đầu trùng lặp với điểm cuối của nét trước đó
+      if(pts.length > 0 && i === 0) {
+        const last = pts[pts.length - 1];
+        if(Math.abs(last[0] - p[0]) < 0.05 && Math.abs(last[1] - p[1]) < 0.05 && Math.abs(last[2] - p[2]) < 0.05) {
+          last[3] = p[3];
+          continue;
+        }
+      }
+      pts.push(p);
+    }
+  }
+}
+
+function autoPresetCurrentHelloLetter() {
+  const curAngles = window.lastRobotAngles || [0, 32, 78, 0, 0, 0];
+  const lm = forwardKinematics(curAngles);
+  const tcp = (lm && lm.tcp) ? lm.tcp : [160, 0, 45];
+  const X0 = Math.min(190, Math.max(135, tcp[0] || 160));
+  const Z_draw = tcp[2] || 45.0;
+  const Z_lift = Z_draw + 8.0;
+
+  const W = 20.0;
+  const H = 26.0;
+  const xTop = X0 + H / 2;
+  const xBot = X0 - H / 2;
+  const xMid = X0;
+  const yL = -W / 2;
+  const yR = +W / 2;
+
+  let pts = [];
+
+  if(s_activeHelloLetter === 'H') {
+    addCartesianStroke(pts, xTop, yL, xBot, yL, true, Z_draw, Z_lift);
+    addCartesianStroke(pts, xBot, yL, xTop, yR, false, Z_draw, Z_lift);
+    addCartesianStroke(pts, xTop, yR, xBot, yR, true, Z_draw, Z_lift);
+    addCartesianStroke(pts, xBot, yR, xMid, yL, false, Z_draw, Z_lift);
+    addCartesianStroke(pts, xMid, yL, xMid, yR, true, Z_draw, Z_lift);
+    addCartesianStroke(pts, xMid, yR, xMid, yR, false, Z_draw, Z_lift);
+  } else if(s_activeHelloLetter === 'E') {
+    addCartesianStroke(pts, xTop, yL, xBot, yL, true, Z_draw, Z_lift);
+    addCartesianStroke(pts, xBot, yL, xBot, yR, true, Z_draw, Z_lift);
+    addCartesianStroke(pts, xBot, yR, xMid, yL, false, Z_draw, Z_lift);
+    addCartesianStroke(pts, xMid, yL, xMid, yR - 4, true, Z_draw, Z_lift);
+    addCartesianStroke(pts, xMid, yR - 4, xTop, yL, false, Z_draw, Z_lift);
+    addCartesianStroke(pts, xTop, yL, xTop, yR, true, Z_draw, Z_lift);
+    addCartesianStroke(pts, xTop, yR, xTop, yR, false, Z_draw, Z_lift);
+  } else if(s_activeHelloLetter === 'L1' || s_activeHelloLetter === 'L2') {
+    addCartesianStroke(pts, xTop, yL, xBot, yL, true, Z_draw, Z_lift);
+    addCartesianStroke(pts, xBot, yL, xBot, yR, true, Z_draw, Z_lift);
+    addCartesianStroke(pts, xBot, yR, xBot, yR, false, Z_draw, Z_lift);
+  } else if(s_activeHelloLetter === 'O') {
+    // Hình chữ nhật 4 cạnh: Đỉnh ngang -> Cạnh phải -> Đáy ngang -> Cạnh trái khép kín -> Nhấc bút
+    addCartesianStroke(pts, xTop, yL, xTop, yR, true, Z_draw, Z_lift);  // Đỉnh ngang
+    addCartesianStroke(pts, xTop, yR, xBot, yR, true, Z_draw, Z_lift);  // Cạnh đứng phải
+    addCartesianStroke(pts, xBot, yR, xBot, yL, true, Z_draw, Z_lift);  // Đáy ngang
+    addCartesianStroke(pts, xBot, yL, xTop, yL, true, Z_draw, Z_lift);  // Cạnh đứng trái khép kín
+    addCartesianStroke(pts, xTop, yL, xTop, yL, false, Z_draw, Z_lift); // Nhấc bút kết thúc
+  }
+
+  fetch('/api/teach/load', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(pts)
+  }).then(r => {
+    if(r.ok) {
+      s_teachPoints = pts;
+      localStorage.setItem('hello_letter_' + s_activeHelloLetter, JSON.stringify(pts));
+      updateHelloPointsTable();
+      updateAllLetterBadges();
+      updateTeachPathPreview();
+      toast(`✨ Đã nạp nét mẫu chữ [${s_activeHelloLetter}] chuẩn phẳng không cong!`, 'ok');
+    } else {
+      toast('Lỗi nạp nét mẫu', 'err');
+    }
+  });
+}
+
+function confirmSetHome(axis){
+  const label = (axis === 255) ? 'J5 + J6' : `J${axis + 1}`;
+  if(confirm(`Đặt vị trí hiện tại làm mốc Home (0°) cho ${label} và lưu vào NVS?`)){
+    api(`/api/sethome?axis=${axis}`);
   }
 }
 function confirmClearCalib(axisIdx){
@@ -1580,7 +2210,7 @@ function saveWifi(){
 // Operator Console modes + contextual tabs
 const navTabs = Array.from(document.querySelectorAll('.nav-tab[data-t]'));
 const modeTabs = Array.from(document.querySelectorAll('.mode-tab[data-mode]'));
-let lastOperateTab = document.getElementById('tab-dash');
+let lastOperateTab = document.getElementById('tab-hello') || document.getElementById('tab-dash');
 function activateTab(tab, moveFocus = false){
   navTabs.forEach(x => {
     const active = x === tab;
@@ -1642,6 +2272,132 @@ modeTabs.forEach(tab => tab.addEventListener('click', () => {
   if(container) container.appendChild(b);
 });
 
+let wristLockedState = true;
+let activeHoldState = false;
+let currentToolLength = 30.0;
+
+function updateWristLockUI(isLocked){
+  wristLockedState = isLocked;
+  const btn = document.getElementById('btnWristLock');
+  if(btn){
+    btn.className = 'btn-toggle' + (isLocked ? ' locked' : ' active');
+    btn.innerHTML = isLocked ? '🔒 Cổ tay: ĐÃ KHÓA' : '🔓 Cổ tay: MỞ KHÓA';
+  }
+  const dashTxt = document.getElementById('dashWristLock');
+  if(dashTxt){
+    dashTxt.textContent = isLocked ? 'Đang khóa 🔒' : 'Mở khóa 🔓';
+    dashTxt.style.color = isLocked ? 'var(--warning)' : 'var(--success)';
+  }
+
+  for(let i=3; i<6; i++){
+    const card = document.getElementById(`jcard${i}`);
+    if(card){
+      card.classList.toggle('jcard-locked', isLocked);
+      card.style.opacity = isLocked ? '0.65' : '1.0';
+      card.style.filter = isLocked ? 'grayscale(0.4)' : 'none';
+      card.style.borderColor = isLocked ? 'var(--border-dim)' : 'var(--border)';
+    }
+    const tag = document.getElementById(`jlocktag${i}`);
+    if(tag) tag.style.display = isLocked ? 'inline' : 'none';
+
+    ['jbtnm', 'jbtnp', 'mbtn', 'hbtn', 'cbtn'].forEach(prefix => {
+      const el = document.getElementById(`${prefix}${i}`);
+      if(el){
+        el.disabled = isLocked;
+        el.style.opacity = isLocked ? '0.38' : '1.0';
+        el.style.cursor = isLocked ? 'not-allowed' : 'pointer';
+        if(isLocked) el.title = 'Cụm cổ tay J4..J6 đang khóa cứng';
+        else el.removeAttribute('title');
+      }
+    });
+  }
+
+  const h4 = document.getElementById('btnHomeJ4');
+  if(h4){
+    h4.disabled = isLocked;
+    h4.style.opacity = isLocked ? '0.38' : '1.0';
+    h4.style.cursor = isLocked ? 'not-allowed' : 'pointer';
+    h4.textContent = isLocked ? 'Home J4 🔒' : 'Home J4';
+  }
+  const s5 = document.getElementById('btnSetHomeJ5');
+  if(s5){
+    s5.disabled = isLocked;
+    s5.style.opacity = isLocked ? '0.38' : '1.0';
+    s5.style.cursor = isLocked ? 'not-allowed' : 'pointer';
+    s5.textContent = isLocked ? 'Set Home J5 🔒' : 'Set Home J5';
+  }
+  const s6 = document.getElementById('btnSetHomeJ6');
+  if(s6){
+    s6.disabled = isLocked;
+    s6.style.opacity = isLocked ? '0.38' : '1.0';
+    s6.style.cursor = isLocked ? 'not-allowed' : 'pointer';
+    s6.textContent = isLocked ? 'Set Home J6 🔒' : 'Set Home J6';
+  }
+}
+
+function updateActiveHoldUI(enabled){
+  activeHoldState = enabled;
+  const btn = document.getElementById('btnActiveHold');
+  if(btn){
+    btn.className = 'btn-toggle' + (enabled ? ' active' : '');
+    btn.innerHTML = enabled ? '⚓ Active Hold: BẬT' : '⚓ Active Hold: TẮT';
+  }
+  const dashTxt = document.getElementById('dashActiveHold');
+  if(dashTxt){
+    dashTxt.textContent = enabled ? 'BẬT ⚓' : 'TẮT';
+    dashTxt.style.color = enabled ? 'var(--success)' : 'var(--text-muted)';
+  }
+}
+
+function updateToolLengthUI(len){
+  currentToolLength = len;
+  const inp = document.getElementById('inputToolLength');
+  if(inp && document.activeElement !== inp) inp.value = len;
+  const dashTxt = document.getElementById('dashToolLen');
+  if(dashTxt) dashTxt.textContent = `${len.toFixed(1)} mm`;
+  if(typeof D_TOOL !== 'undefined') D_TOOL = len;
+  if(typeof D_TOOL_EFF !== 'undefined' && typeof D6 !== 'undefined') D_TOOL_EFF = D6 + len;
+}
+
+async function toggleWristLock(){
+  const next = !wristLockedState;
+  await api(`/api/wristlock?lock=${next ? 1 : 0}`);
+  updateWristLockUI(next);
+  toast(next ? 'Đã khóa cụm cổ tay J4..J6' : 'Đã mở khóa cụm cổ tay J4..J6');
+}
+
+async function toggleActiveHold(){
+  const next = !activeHoldState;
+  await api(`/api/activehold?enable=${next ? 1 : 0}`);
+  updateActiveHoldUI(next);
+  toast(next ? 'Đã bật Active Hold (giữ vị trí closed-loop)' : 'Đã tắt Active Hold');
+}
+
+async function applyToolLength(){
+  const inp = document.getElementById('inputToolLength');
+  if(!inp) return;
+  const val = parseFloat(inp.value);
+  if(isNaN(val) || val < 0 || val > 300){
+    toast('Chiều dài bút không hợp lệ (0..300mm)', 'err');
+    return;
+  }
+  await api(`/api/toollength?len=${val}`);
+  updateToolLengthUI(val);
+  toast(`Đã cập nhật chiều dài bút: ${val.toFixed(1)} mm`);
+}
+
+async function moveToAngle(axis){
+  const inp = document.getElementById(`mto${axis}`);
+  if(!inp) return;
+  const val = parseFloat(inp.value);
+  if(isNaN(val)){
+    toast('Vui lòng nhập góc mục tiêu (°)', 'warn');
+    return;
+  }
+  await api(`/api/moveto?axis=${axis}&deg=${val}`);
+  toast(`J${axis+1} điều khiển tới ${val.toFixed(1)}°`);
+}
+
 // Build Joint Cards & Quick Status Rows
 function buildJointCards(){
   const grid = document.getElementById('jointCardsGrid');
@@ -1650,23 +2406,31 @@ function buildJointCards(){
   if(dashRows) dashRows.innerHTML = '';
 
   for(let i=0; i<6; i++){
+    const isLocked = (i >= 3) && wristLockedState;
     if(grid){
       grid.insertAdjacentHTML('beforeend', `
-        <div class="jcard">
+        <div class="jcard${isLocked ? ' jcard-locked' : ''}" id="jcard${i}" style="${isLocked ? 'opacity:0.65;filter:grayscale(0.4);border-color:var(--border-dim);' : ''}">
           <div class="jcard-top">
-            <span class="jcard-name">${AXES[i]}</span>
-            <span class="jcard-deg" id="jd${i}">0.0°</span>
+            <span class="jcard-name">${AXES[i]} <span id="jlocktag${i}" style="display:${isLocked ? 'inline' : 'none'};font-size:0.72rem;color:var(--warning);font-weight:700;">[ĐÃ KHÓA 🔒]</span></span>
+            <div style="display:flex;align-items:baseline;gap:8px">
+              <span class="target-tag" id="jtar${i}">Mục tiêu: 0.0°</span>
+              <span class="jcard-deg" id="jd${i}">0.0°</span>
+            </div>
           </div>
           <div class="jcard-enc" id="je${i}">Encoder: --</div>
           <div class="jcard-flags" id="jf${i}"></div>
           <div class="jcard-calib" id="jc${i}">NVS: --</div>
           <div class="jog-controls">
-            <button class="jog-btn" onclick="jog(${i},-1)" aria-label="Jog ${AXES[i]} âm">↺ &minus;</button>
-            <button class="jog-btn" onclick="jog(${i},1)" aria-label="Jog ${AXES[i]} dương">+ ↻</button>
+            <button class="jog-btn" id="jbtnm${i}" ${isLocked ? 'disabled style="cursor:not-allowed;opacity:0.38"' : `onclick="jog(${i},-1)"`} aria-label="Jog ${AXES[i]} âm">↺ &minus;</button>
+            <button class="jog-btn" id="jbtnp${i}" ${isLocked ? 'disabled style="cursor:not-allowed;opacity:0.38"' : `onclick="jog(${i},1)"`} aria-label="Jog ${AXES[i]} dương">+ ↻</button>
+          </div>
+          <div class="moveto-row">
+            <input type="number" step="0.5" class="moveto-input" id="mto${i}" placeholder="Góc mục tiêu °" onkeydown="if(event.key==='Enter')moveToAngle(${i})">
+            <button class="btn btn-ghost need-idle" id="mbtn${i}" style="min-height:28px;padding:3px 10px;font-size:0.75rem" ${isLocked ? 'disabled style="cursor:not-allowed;opacity:0.38"' : `onclick="moveToAngle(${i})"`}>Tới góc</button>
           </div>
           <div class="jog-calib-row">
-            <button class="btn btn-ghost need-idle" onclick="confirmSetHome(${i})">Set Home</button>
-            <button class="btn btn-ghost need-idle" onclick="confirmClearCalib(${i})">Clear NVS</button>
+            <button class="btn btn-ghost need-idle" id="hbtn${i}" ${isLocked ? 'disabled style="cursor:not-allowed;opacity:0.38"' : `onclick="confirmSetHome(${i})"`}>Set Home</button>
+            <button class="btn btn-ghost need-idle" id="cbtn${i}" ${isLocked ? 'disabled style="cursor:not-allowed;opacity:0.38"' : `onclick="confirmClearCalib(${i})"`}>Clear NVS</button>
           </div>
         </div>
       `);
@@ -1734,6 +2498,44 @@ function updateUI(d){
     const errors = ['', 'Save/clear failed — check remaining points and retry', 'Home all six joints and check encoders', 'Home changed — teach points again', 'No valid point or playback rejected'];
     teachStatus.textContent = d.teachPoints.map((v, i) => `${String.fromCharCode(65 + i)} ${v ? '✓' : '—'}`).join('  ') + (d.teachError ? ' · ' + errors[d.teachError] : '');
   }
+  const teachBadge = document.getElementById('teachTrajBadge');
+  const teachProg = document.getElementById('teachPlayProgress');
+  if(d.teachTrajectory){
+    if(d.teachTrajectory.free !== undefined && d.teachTrajectory.free !== s_teachIsFree){
+      s_teachIsFree = d.teachTrajectory.free;
+      const btn = document.getElementById('btnTeachFree');
+      if (btn) {
+        btn.textContent = s_teachIsFree ? '🔒 Khóa J1..J3' : '🔓 Thả lỏng J1..J3 (Kéo tay)';
+        btn.className = s_teachIsFree ? 'btn btn-primary' : 'btn btn-warning';
+      }
+      const btnH = document.getElementById('btnHelloFree');
+      if (btnH) {
+        btnH.textContent = s_teachIsFree ? '🔒 Khóa giữ tay' : '🔓 Thả lỏng tay để kéo';
+        btnH.className = s_teachIsFree ? 'btn btn-primary' : 'btn btn-warning';
+      }
+    }
+    const hBadge = document.getElementById('helloPlayStatusBadge');
+    if(hBadge) {
+      if(d.teachTrajectory.playing){
+        hBadge.textContent = `ĐANG VIẾT (${d.teachTrajectory.segment + 1}/${d.teachTrajectory.count})`;
+        hBadge.className = 'badge b-run';
+      } else {
+        hBadge.textContent = 'Sẵn sàng';
+        hBadge.className = 'badge b-idle';
+      }
+    }
+    if(teachBadge) {
+      teachBadge.textContent = d.teachTrajectory.count + ' điểm';
+      teachBadge.className = 'badge ' + (d.teachTrajectory.count > 0 ? 'b-run' : 'b-idle');
+    }
+    if(teachProg){
+      if(d.teachTrajectory.playing){
+        teachProg.textContent = `▶ Đang chạy lại: đoạn ${d.teachTrajectory.segment + 1}/${d.teachTrajectory.count}`;
+      } else {
+        teachProg.textContent = '';
+      }
+    }
+  }
 
   const wfModeText = document.getElementById('wfModeText');
   if(wfModeText) wfModeText.textContent = (d.wifi.mode||'').toUpperCase();
@@ -1753,7 +2555,7 @@ function updateUI(d){
   const lmLive = liveVisualizationKinematics(robotAngles);
   if(dashRenderer) {
     dashRenderer.lastLm = lmLive;
-    dashRenderer.lastPath = null;
+    dashRenderer.lastPath = simWaypoints;
     if(isPaneActive('pane-dash')) dashRenderer.renderCurrent();
   }
 
@@ -1791,12 +2593,43 @@ function updateUI(d){
   });
 
   // Homing Chips
-  for(let i=0; i<4; i++){
-    const hc = document.getElementById('hc' + i);
-    if(hc){
-      hc.classList.toggle('done', d.joints[i].homed);
+  const homingProg = document.getElementById('dashHomingProg');
+  if(homingProg && d.homing){
+    if(d.homing.active){
+      homingProg.textContent = `Đang Home J${d.homing.axis} (${d.homing.phase})`;
+    } else {
+      homingProg.textContent = d.homing.lastOk ? 'Sẵn sàng' : 'Lỗi Homing';
     }
   }
+  for(let i=0; i<6; i++){
+    const hc = document.getElementById('hc' + i);
+    if(hc && d.joints[i]){
+      const isHomingThis = !!(d.homing && d.homing.active && d.homing.axis === (i + 1));
+      hc.classList.toggle('active', isHomingThis);
+      hc.classList.toggle('done', !isHomingThis && d.joints[i].homed);
+    }
+  }
+
+  if(d.wristLocked !== undefined && d.wristLocked !== wristLockedState){
+    updateWristLockUI(d.wristLocked);
+  }
+  if(d.activeHold !== undefined && d.activeHold !== activeHoldState){
+    updateActiveHoldUI(d.activeHold);
+  }
+  if(d.toolLength !== undefined && Math.abs(d.toolLength - currentToolLength) > 0.05){
+    updateToolLengthUI(d.toolLength);
+  }
+  if(d.targetAngles && Array.isArray(d.targetAngles)){
+    for(let i=0; i<6; i++){
+      const el = document.getElementById('jtar' + i);
+      if(el && d.targetAngles[i] !== undefined){
+        el.textContent = 'Mục tiêu: ' + d.targetAngles[i].toFixed(1) + '°';
+      }
+    }
+  }
+
+  s_lastStatus = d;
+  updateHelloHomingStatus(d);
 }
 
 function setOnline(on){
@@ -1825,6 +2658,7 @@ function pollOnce(){
 }
 
 initStudio();
+try { selectHelloLetter(s_activeHelloLetter); } catch(_) {}
 setInterval(pollOnce, 300);
 pollOnce();
 </script>
@@ -1838,7 +2672,6 @@ ArmController* armPtr = nullptr;
 WifiManager* wifiPtr = nullptr;
 JointModel* jointsPtr = nullptr;
 NvsStore* nvsPtr = nullptr;
-WorkPlane* workPlanePtr = nullptr;
 
 void sendJson(int code, const String& body) { srv->send(code, "application/json", body); }
 
@@ -1870,6 +2703,10 @@ void handleJog() {
     float deg = 0.0f;
     if (!webval::parseInt(srv->arg("axis").c_str(), axis) || axis < 0 || axis >= NUM_MOTORS) {
         srv->send(400, "text/plain", "bad axis"); return;
+    }
+    if (armPtr->isWristLocked() && axis >= 3) {
+        srv->send(400, "text/plain", "J4..J6 is locked");
+        return;
     }
     if (!webval::parseFiniteFloat(srv->arg("deg").c_str(), deg) || fabsf(deg) < 0.01f || fabsf(deg) > 180.0f) {
         srv->send(400, "text/plain", "bad deg");
@@ -1909,106 +2746,6 @@ void handleGripper() {
     srv->send(ok ? 202 : 409, "text/plain", ok ? "Queued" : "gripper unavailable");
 }
 
-void handleMove() {
-    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
-    if (!srv->hasArg("x") || !srv->hasArg("y") || !srv->hasArg("z")) {
-        srv->send(400, "text/plain", "missing x, y, or z");
-        return;
-    }
-    float x = 0.0f, y = 0.0f, z = 0.0f;
-    if (!webval::parseFiniteFloat(srv->arg("x").c_str(), x) ||
-        !webval::parseFiniteFloat(srv->arg("y").c_str(), y) ||
-        !webval::parseFiniteFloat(srv->arg("z").c_str(), z)) {
-        srv->send(400, "text/plain", "non-finite coordinates");
-        return;
-    }
-    if (z < -15.0f || z > 435.0f || (x * x + y * y > 350.0f * 350.0f)) {
-        srv->send(400, "text/plain", "z or xy out of range");
-        return;
-    }
-    ArmCommand c;
-    c.type = ArmCommand::MOVE_CART;
-    c.p[0] = x; c.p[1] = y; c.p[2] = z;
-    c.p[5] = 30.0f;
-    if (srv->hasArg("feed") &&
-        (!webval::parseFiniteFloat(srv->arg("feed").c_str(), c.p[5]) || !webval::validFeed(c.p[5]))) {
-        srv->send(400, "text/plain", "bad feed"); return;
-    }
-    if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
-    const bool ok = armPtr->submit(c, 20);
-    if (ok) { srv->send(200, "text/plain", "OK"); return; }
-    String err = armPtr->lastPlannerError();
-    if (err == "OUT_OF_REACH" || err == "BAD_RADIUS" || err == "BAD_LINE") {
-        char buf[96];
-        snprintf(buf, sizeof(buf), "{\"error\":\"%s\",\"segment\":%d}", err.c_str(),
-                 armPtr->lastPlannerFailIndex());
-        srv->send(400, "application/json", buf);
-    } else {
-        srv->send(503, "text/plain", "busy");
-    }
-}
-
-void handleDraw() {
-    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
-    if (workPlanePtr != nullptr && workPlanePtr->isEnabled()) {
-        sendJson(409, "{\"error\":\"WORKPLANE_ENABLED\"}");
-        return;
-    }
-    const String shape = srv->arg("shape");
-    ArmCommand c;
-    if (shape == "line") {
-        c.type = ArmCommand::DRAW_LINE;
-        if (!webval::parseFiniteFloat(srv->arg("x1").c_str(), c.p[0]) ||
-            !webval::parseFiniteFloat(srv->arg("y1").c_str(), c.p[1]) ||
-            !webval::parseFiniteFloat(srv->arg("x2").c_str(), c.p[2]) ||
-            !webval::parseFiniteFloat(srv->arg("y2").c_str(), c.p[3]) ||
-            !webval::parseFiniteFloat(srv->arg("z").c_str(), c.p[4])) {
-            srv->send(400, "text/plain", "bad line coordinates"); return;
-        }
-        if (fabsf(c.p[4] - DRAW_PLANE_Z_MM) > 0.01f) {
-            sendJson(400, "{\"error\":\"WRONG_DRAW_PLANE\"}");
-            return;
-        }
-    } else if (shape == "circle" || shape == "square") {
-        const bool square = shape == "square";
-        c.type = square ? ArmCommand::DRAW_SQUARE : ArmCommand::DRAW_CIRCLE;
-        if (!webval::parseFiniteFloat(srv->arg("cx").c_str(), c.p[0]) ||
-            !webval::parseFiniteFloat(srv->arg("cy").c_str(), c.p[1]) ||
-            !webval::parseFiniteFloat(srv->arg("z").c_str(), c.p[2]) ||
-            !webval::parseFiniteFloat(srv->arg("r").c_str(), c.p[3])) {
-            srv->send(400, "text/plain", square ? "bad square coordinates" : "bad circle coordinates"); return;
-        }
-        if (fabsf(c.p[2] - DRAW_PLANE_Z_MM) > 0.01f) {
-            sendJson(400, "{\"error\":\"WRONG_DRAW_PLANE\"}");
-            return;
-        }
-        if (c.p[3] < 5.0f || c.p[3] > 250.0f) {
-            srv->send(400, "text/plain", square ? "side out of range" : "r out of range");
-            return;
-        }
-    } else {
-        srv->send(400, "text/plain", "shape: line|circle|square");
-        return;
-    }
-    c.p[5] = DRAW_FEED_MM_S;
-    if (srv->hasArg("feed") &&
-        (!webval::parseFiniteFloat(srv->arg("feed").c_str(), c.p[5]) || !webval::validFeed(c.p[5]))) {
-        srv->send(400, "text/plain", "bad feed"); return;
-    }
-    if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
-    const bool ok = armPtr->submit(c, 20);
-    if (ok) { srv->send(200, "text/plain", "OK"); return; }
-    String err = armPtr->lastPlannerError();
-    if (err == "OUT_OF_REACH" || err == "BAD_RADIUS" || err == "BAD_LINE") {
-        char buf[96];
-        snprintf(buf, sizeof(buf), "{\"error\":\"%s\",\"segment\":%d}", err.c_str(),
-                 armPtr->lastPlannerFailIndex());
-        srv->send(400, "application/json", buf);
-    } else {
-        srv->send(503, "text/plain", "busy");
-    }
-}
-
 void handleHomeAll() {
     if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
     if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
@@ -2024,6 +2761,10 @@ void handleHomeAxis() {
     int axis = 0;
     if (!webval::parseInt(srv->arg("axis").c_str(), axis) || axis < 0 || axis >= 4) {
         srv->send(400, "text/plain", "axis 0..3 only"); return;
+    }
+    if (armPtr->isWristLocked() && axis >= 3) {
+        srv->send(400, "text/plain", "J4..J6 is locked");
+        return;
     }
     if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
     ArmCommand c;
@@ -2047,23 +2788,6 @@ void handleSetHome() {
     srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
 }
 
-void handleReleaseJ1J4() {
-    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
-    if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
-    ArmCommand c;
-    c.type = ArmCommand::RELEASE_J1_J4;
-    const bool ok = armPtr->submit(c, 20);
-    srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
-}
-
-void handleEnableJ1J4() {
-    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
-    ArmCommand c;
-    c.type = ArmCommand::ENABLE_J1_J4;
-    const bool ok = armPtr->submit(c, 20);
-    srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
-}
-
 void handleShowOff() {
     if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
     if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
@@ -2073,52 +2797,139 @@ void handleShowOff() {
     srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
 }
 
-void handleTeachSave() {
-    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
-    int slot = -1;
-    if (!webval::parseInt(srv->arg("slot").c_str(), slot) || slot < 0 || slot >= 3) {
-        srv->send(400, "text/plain", "slot 0..2"); return;
-    }
-    if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
-    ArmCommand c;
-    c.type = ArmCommand::SAVE_TEACH_POINT;
-    c.axis = static_cast<uint8_t>(slot);
-    const bool ok = armPtr->submit(c, 20);
-    srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
-}
-
-void handleTeachPlay() {
-    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
-    if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
-    ArmCommand c;
-    c.type = ArmCommand::PLAY_TEACH_POINTS;
-    const bool ok = armPtr->submit(c, 20);
-    srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
-}
-
 void handleTeachClear() {
     if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
     if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
     ArmCommand c;
-    c.type = ArmCommand::CLEAR_TEACH_POINTS;
+    c.type = ArmCommand::TEACH_CLEAR;
+    const bool ok = armPtr->submit(c, 20);
+    srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
+}
+
+void handleTeachFree() {
+    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    int freeVal = 1;
+    if (srv->hasArg("free")) {
+        (void)webval::parseInt(srv->arg("free").c_str(), freeVal);
+    }
+    ArmCommand c;
+    c.type = ArmCommand::TEACH_FREE;
+    c.value = freeVal ? 1.0f : 0.0f;
+    const bool ok = armPtr->submit(c, 20);
+    srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
+}
+
+void handleTeachRecord() {
+    if (armPtr == nullptr || jointsPtr == nullptr || armPtr->teachManager() == nullptr) {
+        srv->send(500, "text/plain", "not ready"); return;
+    }
+    for (uint8_t a = 0; a < 3; ++a) {
+        if (!jointsPtr->isHomed(a) || !jointsPtr->encOK(a)) {
+            srv->send(409, "text/plain", "J1..J3 chua Home hoac Encoder loi!");
+            return;
+        }
+    }
+    if (armPtr->teachManager()->pointCount() >= TeachManager::MAX_POINTS) {
+        srv->send(409, "text/plain", "Da dat gioi han 250 diem!");
+        return;
+    }
+    ArmCommand c;
+    c.type = ArmCommand::TEACH_RECORD;
+    c.value = 1.0f; // mac dinh penDown = true
+    if (srv->hasArg("pen")) {
+        int penVal = 1;
+        if (webval::parseInt(srv->arg("pen").c_str(), penVal)) {
+            c.value = (penVal != 0) ? 1.0f : 0.0f;
+        }
+    }
+    const bool ok = armPtr->submit(c, 20);
+    srv->send(ok ? 200 : 503, "text/plain", ok ? (c.value >= 0.5f ? "Da ghi diem VE (Ha but)" : "Da ghi diem NHAC BUT") : "busy");
+}
+
+void handleTeachUndo() {
+    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    ArmCommand c;
+    c.type = ArmCommand::TEACH_UNDO;
+    const bool ok = armPtr->submit(c, 20);
+    srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
+}
+
+void handleTeachGetPoints() {
+    if (armPtr == nullptr || armPtr->teachManager() == nullptr) {
+        srv->send(500, "text/plain", "not ready"); return;
+    }
+    String json = armPtr->teachManager()->getPointsJson();
+    srv->send(200, "application/json", json);
+}
+
+void handleTeachLoadPoints() {
+    if (armPtr == nullptr || armPtr->teachManager() == nullptr) {
+        srv->send(500, "text/plain", "not ready"); return;
+    }
+    if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
+    if (!srv->hasArg("plain")) {
+        srv->send(400, "text/plain", "missing body"); return;
+    }
+    String body = srv->arg("plain");
+    const bool ok = armPtr->teachManager()->loadPointsJson(body);
+    srv->send(ok ? 200 : 400, "text/plain", ok ? "OK" : "bad json");
+}
+
+void handleTeachTrajPlay() {
+    if (armPtr == nullptr || jointsPtr == nullptr || armPtr->teachManager() == nullptr) {
+        srv->send(500, "text/plain", "not ready"); return;
+    }
+    if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
+    if (armPtr->teachManager()->pointCount() < 2) {
+        srv->send(409, "text/plain", "Can it nhat 2 diem de chay lai!");
+        return;
+    }
+    for (uint8_t a = 0; a < 3; ++a) {
+        if (!jointsPtr->isHomed(a) || !jointsPtr->encOK(a)) {
+            srv->send(409, "text/plain", "J1..J3 chua Home hoac Encoder loi!");
+            return;
+        }
+    }
+    float stepDeg = 0.5f;
+    float speedDelay = 15.0f;
+    if (srv->hasArg("step_deg")) (void)webval::parseFiniteFloat(srv->arg("step_deg").c_str(), stepDeg);
+    if (srv->hasArg("speed")) (void)webval::parseFiniteFloat(srv->arg("speed").c_str(), speedDelay);
+    ArmCommand c;
+    c.type = ArmCommand::TEACH_PLAY;
+    c.p[0] = stepDeg;
+    c.p[1] = speedDelay;
+    const bool ok = armPtr->submit(c, 20);
+    srv->send(ok ? 200 : 503, "text/plain", ok ? "Bat dau chay quy dao" : "busy");
+}
+
+void handleTeachStop() {
+    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    ArmCommand c;
+    c.type = ArmCommand::TEACH_STOP;
     const bool ok = armPtr->submit(c, 20);
     srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
 }
 
 void handleClearCalib() {
-    if (jointsPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
     // Flash Write Isolation Guard: Cấm xóa NVS khi robot đang chuyển động
-    if (armPtr != nullptr && armPtr->busy()) {
+    if (armPtr->busy()) {
         srv->send(409, "text/plain", "CANNOT_WRITE_FLASH_WHILE_MOVING");
         return;
     }
-    if (!srv->hasArg("axis")) { srv->send(400, "text/plain", "missing axis"); return; }
-    int axis = 0;
-    if (!webval::parseInt(srv->arg("axis").c_str(), axis) || axis < 0 || axis >= NUM_MOTORS) {
-        srv->send(400, "text/plain", "bad axis"); return;
+    ArmCommand c;
+    c.type = ArmCommand::CLEAR_CALIB;
+    if (srv->hasArg("axis")) {
+        int axis = 0;
+        if (!webval::parseInt(srv->arg("axis").c_str(), axis) || axis < 0 || axis >= NUM_MOTORS) {
+            srv->send(400, "text/plain", "bad axis"); return;
+        }
+        c.axis = static_cast<uint8_t>(axis);
+    } else {
+        c.axis = NUM_MOTORS; // clear all
     }
-    jointsPtr->forgetHome(static_cast<uint8_t>(axis));
-    srv->send(200, "text/plain", "OK");
+    const bool ok = armPtr->submit(c, 20);
+    srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
 }
 
 void handleWifiSave() {
@@ -2140,197 +2951,164 @@ void handleWifiSave() {
         return;
     }
     srv->send(200, "application/json", "{\"saved\":true,\"reboot\":true}");
-    Serial.println("[WEB] WiFi creds moi da luu — restart sau 1s...");
-    delay(1000);
-    ESP.restart();
+    Serial.println("[WEB] WiFi creds moi da luu — restart sau 1s (async)...");
+    static esp_timer_handle_t s_rebootTimer = nullptr;
+    if (s_rebootTimer == nullptr) {
+        esp_timer_create_args_t timerArgs{};
+        timerArgs.callback = [](void*) {
+            ESP.restart();
+        };
+        timerArgs.name = "async_reboot";
+        esp_timer_create(&timerArgs, &s_rebootTimer);
+    }
+    esp_timer_start_once(s_rebootTimer, 1000000ULL);
 }
 
-void handleWorkPlaneCalib() {
-    if (workPlanePtr == nullptr) { srv->send(500, "text/plain", "WorkPlane not initialized"); return; }
-    if (armPtr != nullptr && armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
-    Point3D p1, p2, p3;
-    if (!webval::parseFiniteFloat(srv->arg("p1x").c_str(), p1.x) ||
-        !webval::parseFiniteFloat(srv->arg("p1y").c_str(), p1.y) ||
-        !webval::parseFiniteFloat(srv->arg("p1z").c_str(), p1.z) ||
-        !webval::parseFiniteFloat(srv->arg("p2x").c_str(), p2.x) ||
-        !webval::parseFiniteFloat(srv->arg("p2y").c_str(), p2.y) ||
-        !webval::parseFiniteFloat(srv->arg("p2z").c_str(), p2.z) ||
-        !webval::parseFiniteFloat(srv->arg("p3x").c_str(), p3.x) ||
-        !webval::parseFiniteFloat(srv->arg("p3y").c_str(), p3.y) ||
-        !webval::parseFiniteFloat(srv->arg("p3z").c_str(), p3.z)) {
-        srv->send(400, "application/json", "{\"calibrated\":false,\"error\":\"Bad coordinates\"}");
-        return;
-    }
-    if (workPlanePtr->setThreePointCalibration(p1, p2, p3)) {
-        srv->send(200, "application/json", "{\"calibrated\":true,\"error\":\"\"}");
-    } else {
-        String json = "{\"calibrated\":false,\"error\":\"" + workPlanePtr->getLastError() + "\"}";
-        srv->send(400, "application/json", json);
-    }
-}
-
-void handleWorkPlaneToggle() {
-    if (workPlanePtr == nullptr) { srv->send(500, "text/plain", "WorkPlane not initialized"); return; }
-    if (armPtr != nullptr && armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
-    bool en = false;
-    if (!webval::parseBool01(srv->arg("en").c_str(), en)) {
-        srv->send(400, "application/json", "{\"error\":\"en must be 0 or 1\"}"); return;
-    }
-    if (en && !workPlanePtr->isCalibrated()) {
-        srv->send(409, "application/json", "{\"error\":\"NOT_CALIBRATED\"}");
-        return;
-    }
-    workPlanePtr->setEnabled(en);
-    srv->send(200, "application/json", workPlanePtr->isEnabled() ? "{\"enabled\":true}" : "{\"enabled\":false}");
-}
-
-void handleWorkPlaneStatus() {
-    if (workPlanePtr == nullptr) { srv->send(500, "text/plain", "WorkPlane not initialized"); return; }
-    const Point3D o = workPlanePtr->getOrigin();
-    const Point3D n = workPlanePtr->getNormal();
-    char buf[512];
-    snprintf(buf, sizeof(buf),
-             "{\"isCalibrated\":%s,\"isEnabled\":%s,\"origin\":[%.2f,%.2f,%.2f],\"normal\":[%.3f,%.3f,%.3f],\"error\":\"%s\"}",
-             workPlanePtr->isCalibrated() ? "true" : "false",
-             workPlanePtr->isEnabled() ? "true" : "false",
-             o.x, o.y, o.z, n.x, n.y, n.z, workPlanePtr->getLastError().c_str());
-    sendJson(200, buf);
-}
-
-void handleDrawProfiles() {
-    if (workPlanePtr != nullptr && workPlanePtr->isEnabled()) {
-        sendJson(409, "{\"error\":\"WORKPLANE_ENABLED\"}");
-        return;
-    }
-    const auto& profiles = DrawingWorkspace::recommendations();
-    String json = "{\"profiles\":[";
-    bool first = true;
-    for (uint8_t i = 0; i < profiles.size(); ++i) {
-        if (!profiles[i].valid) continue;
-        DrawingWorkspace::SuggestedJob job;
-        if (!DrawingWorkspace::makeSuggestedJob(i, DrawingWorkspace::Shape::SQUARE, job)) continue;
-        if (!first) json += ',';
-        first = false;
-        char item[176];
-        snprintf(item, sizeof(item),
-                 "{\"z\":%.1f,\"x\":%.1f,\"y\":%.1f,\"maxSquareSide\":%.1f,\"size\":%.1f}",
-                 profiles[i].z, profiles[i].centerX, profiles[i].centerY,
-                 profiles[i].maxSquareSide, job.size);
-        json += item;
-    }
-    json += "]}";
-    sendJson(first ? 503 : 200, json);
-}
-
-void handleDrawPreset() {
-    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
-    if (workPlanePtr != nullptr && workPlanePtr->isEnabled()) {
-        sendJson(409, "{\"error\":\"WORKPLANE_ENABLED\"}");
-        return;
-    }
-    int profile = 0;
-    if (!webval::parseInt(srv->arg("profile").c_str(), profile) ||
-        profile < 0 || profile >= DrawingWorkspace::kRecommendationCount) {
-        srv->send(400, "text/plain", "profile 0 required"); return;
-    }
-    const String shapeText = srv->arg("shape");
-    DrawingWorkspace::Shape shape;
-    if (shapeText == "line") shape = DrawingWorkspace::Shape::LINE;
-    else if (shapeText == "circle") shape = DrawingWorkspace::Shape::CIRCLE;
-    else if (shapeText == "square") shape = DrawingWorkspace::Shape::SQUARE;
-    else { srv->send(400, "text/plain", "shape: line|circle|square"); return; }
-
-    DrawingWorkspace::SuggestedJob job;
-    const bool hasCustomStart = srv->hasArg("sx") || srv->hasArg("sy") || srv->hasArg("length");
-    if (hasCustomStart) {
-        float startX = 0.0f;
-        float startY = 0.0f;
-        float size = 0.0f;
-        if (!srv->hasArg("sx") || !srv->hasArg("sy") ||
-            !webval::parseFiniteFloat(srv->arg("sx").c_str(), startX) ||
-            !webval::parseFiniteFloat(srv->arg("sy").c_str(), startY)) {
-            srv->send(400, "text/plain", "sx and sy are required"); return;
-        }
-        if (!DrawingWorkspace::makeSuggestedJob(static_cast<uint8_t>(profile), shape, job)) {
-            srv->send(400, "text/plain", "selected profile is not safe"); return;
-        }
-        size = job.size;
-        if (shape == DrawingWorkspace::Shape::LINE &&
-            (!srv->hasArg("length") ||
-             !webval::parseFiniteFloat(srv->arg("length").c_str(), size))) {
-            srv->send(400, "text/plain", "length is required for line"); return;
-        }
-        if (!DrawingWorkspace::makeSuggestedShape(static_cast<uint8_t>(profile), shape,
-                                                  startX, startY, size, job)) {
-            srv->send(400, "text/plain", "custom shape is not safe"); return;
-        }
-    } else if (!DrawingWorkspace::makeSuggestedJob(static_cast<uint8_t>(profile), shape, job)) {
-        srv->send(400, "text/plain", "selected profile is not safe"); return;
-    }
-    ArmCommand command;
-    command.type = shape == DrawingWorkspace::Shape::LINE ? ArmCommand::DRAW_LINE
-                 : shape == DrawingWorkspace::Shape::CIRCLE ? ArmCommand::DRAW_CIRCLE
-                                                            : ArmCommand::DRAW_SQUARE;
-    command.p[0] = job.x;
-    command.p[1] = job.y;
-    command.p[2] = job.z;
-    command.p[3] = shape == DrawingWorkspace::Shape::CIRCLE ? job.size * 0.5f : job.size;
-    if (shape == DrawingWorkspace::Shape::LINE) {
-        command.p[0] = job.x - job.size * 0.5f;
-        command.p[1] = job.y;
-        command.p[2] = job.x + job.size * 0.5f;
-        command.p[3] = job.y;
-        command.p[4] = job.z;
-    }
-    command.p[5] = DRAW_FEED_MM_S;
+void handleTeachNvsSave() {
+    if (armPtr == nullptr || nvsPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
     if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
-    const bool ok = armPtr->submit(command, 20);
-    if (ok) { srv->send(200, "text/plain", "OK"); return; }
-    const String err = armPtr->lastPlannerError();
-    if (err == "OUT_OF_REACH" || err == "BAD_RADIUS" || err == "BAD_LINE") {
-        char body[96];
-        snprintf(body, sizeof(body), "{\"error\":\"%s\",\"segment\":%d}", err.c_str(),
-                 armPtr->lastPlannerFailIndex());
-        sendJson(400, body);
+    const bool ok = armPtr->teachManager()->saveToNvs(nvsPtr);
+    srv->send(ok ? 200 : 500, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false}");
+}
+
+void handleTeachNvsLoad() {
+    if (armPtr == nullptr || nvsPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
+    const bool ok = armPtr->teachManager()->loadFromNvs(nvsPtr);
+    if (ok) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "{\"ok\":true,\"count\":%u}",
+                 static_cast<unsigned>(armPtr->teachManager()->pointCount()));
+        srv->send(200, "application/json", buf);
     } else {
-        srv->send(503, "text/plain", "busy");
+        srv->send(400, "application/json", "{\"ok\":false,\"msg\":\"Khong co quy dao hop le\"}");
     }
+}
+
+void handleTeachPress() {
+    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    if (srv->hasArg("deg")) {
+        float deg = 0.0f;
+        if (webval::parseFiniteFloat(srv->arg("deg").c_str(), deg) && deg >= 0.0f && deg <= 4.0f) {
+            armPtr->teachManager()->setPenPressDeg(deg);
+            srv->send(200, "application/json", String("{\"ok\":true,\"pressDeg\":") + String(deg, 2) + "}");
+            return;
+        }
+        srv->send(400, "text/plain", "invalid deg 0..4.0");
+        return;
+    }
+    srv->send(200, "application/json", String("{\"pressDeg\":") + String(armPtr->teachManager()->penPressDeg(), 2) + "}");
+}
+
+void handleWristLock() {
+    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    if (srv->hasArg("lock")) {
+        const bool lock = (srv->arg("lock") == "1" || srv->arg("lock") == "true");
+        armPtr->setWristLocked(lock);
+        srv->send(200, "application/json", String("{\"ok\":true,\"wristLocked\":") + (lock ? "true" : "false") + "}");
+    } else {
+        srv->send(200, "application/json", String("{\"wristLocked\":") + (armPtr->isWristLocked() ? "true" : "false") + "}");
+    }
+}
+
+void handleActiveHold() {
+    if (armPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    if (srv->hasArg("enable")) {
+        const bool en = (srv->arg("enable") == "1" || srv->arg("enable") == "true");
+        armPtr->setActiveHold(en);
+        srv->send(200, "application/json", String("{\"ok\":true,\"activeHold\":") + (en ? "true" : "false") + "}");
+    } else {
+        srv->send(200, "application/json", String("{\"activeHold\":") + (armPtr->isActiveHoldEnabled() ? "true" : "false") + "}");
+    }
+}
+
+void handleToolLength() {
+    if (srv->hasArg("len")) {
+        float len = 0.0f;
+        if (webval::parseFiniteFloat(srv->arg("len").c_str(), len) && len >= 0.0f && len <= 300.0f) {
+            kin::setToolLength(len);
+            srv->send(200, "application/json", String("{\"ok\":true,\"toolLength\":") + String(len, 1) + "}");
+            return;
+        }
+        srv->send(400, "text/plain", "invalid len 0..300");
+        return;
+    }
+    srv->send(200, "application/json", String("{\"toolLength\":") + String(kin::getToolLength(), 1) + "}");
+}
+
+void handleMoveTo() {
+    if (armPtr == nullptr || jointsPtr == nullptr) { srv->send(500, "text/plain", "not ready"); return; }
+    if (!srv->hasArg("axis") || !srv->hasArg("deg")) {
+        srv->send(400, "text/plain", "missing axis or deg"); return;
+    }
+    int axis = 0;
+    float targetDeg = 0.0f;
+    if (!webval::parseInt(srv->arg("axis").c_str(), axis) || axis < 0 || axis >= NUM_MOTORS) {
+        srv->send(400, "text/plain", "bad axis"); return;
+    }
+    if (armPtr->isWristLocked() && axis >= 3) {
+        srv->send(400, "text/plain", "J4..J6 is locked"); return;
+    }
+    if (!webval::parseFiniteFloat(srv->arg("deg").c_str(), targetDeg)) {
+        srv->send(400, "text/plain", "bad deg"); return;
+    }
+    if (armPtr->busy()) { srv->send(409, "text/plain", "busy"); return; }
+
+    const float cur = (jointsPtr->isHomed(axis) && jointsPtr->encOK(axis))
+        ? jointsPtr->angleFromEncoder(axis)
+        : jointsPtr->angleFromSteps(axis);
+    const float delta = targetDeg - cur;
+    if (fabsf(delta) < 0.05f) {
+        armPtr->setTargetHoldAngle(axis, targetDeg);
+        srv->send(200, "text/plain", "already at angle");
+        return;
+    }
+
+    ArmCommand c;
+    c.type = ArmCommand::JOG_REL;
+    c.axis = static_cast<uint8_t>(axis);
+    c.value = delta;
+    const bool ok = armPtr->submit(c, 20);
+    if (ok) armPtr->setTargetHoldAngle(axis, targetDeg);
+    srv->send(ok ? 200 : 503, "text/plain", ok ? "OK" : "busy");
 }
 
 } // namespace
 
 void webBegin(WebServer& server, ArmController* arm, WifiManager* wifi,
-              JointModel* joints, NvsStore* nvs, WorkPlane* workPlane) {
+              JointModel* joints, NvsStore* nvs) {
     srv = &server;
     armPtr = arm;
     wifiPtr = wifi;
     jointsPtr = joints;
     nvsPtr = nvs;
-    workPlanePtr = workPlane;
 
     server.on("/", HTTP_GET, handleRoot);
     server.on("/api/status", HTTP_GET, handleStatus);
     server.on("/api/jog", HTTP_POST, handleJog);
     server.on("/api/stop", HTTP_POST, handleStop);
     server.on("/api/gripper", HTTP_POST, handleGripper);
-    server.on("/api/move", HTTP_POST, handleMove);
-    server.on("/api/draw", HTTP_POST, handleDraw);
-    server.on("/api/draw/presets", HTTP_GET, handleDrawProfiles);
-    server.on("/api/draw/preset", HTTP_POST, handleDrawPreset);
     server.on("/api/home/all", HTTP_POST, handleHomeAll);
     server.on("/api/home/axis", HTTP_POST, handleHomeAxis);
     server.on("/api/sethome", HTTP_POST, handleSetHome);
-    server.on("/api/release/j1-j4", HTTP_POST, handleReleaseJ1J4);
-    server.on("/api/enable/j1-j4", HTTP_POST, handleEnableJ1J4);
     server.on("/api/showoff", HTTP_POST, handleShowOff);
-    server.on("/api/teach/save", HTTP_POST, handleTeachSave);
-    server.on("/api/teach/play", HTTP_POST, handleTeachPlay);
+    server.on("/api/teach/play", HTTP_POST, handleTeachTrajPlay);
     server.on("/api/teach/clear", HTTP_POST, handleTeachClear);
+    server.on("/api/teach/free", HTTP_POST, handleTeachFree);
+    server.on("/api/teach/record", HTTP_POST, handleTeachRecord);
+    server.on("/api/teach/undo", HTTP_POST, handleTeachUndo);
+    server.on("/api/teach/points", HTTP_GET, handleTeachGetPoints);
+    server.on("/api/teach/load", HTTP_POST, handleTeachLoadPoints);
+    server.on("/api/teach/stop", HTTP_POST, handleTeachStop);
+    server.on("/api/teach/nvs/save", HTTP_POST, handleTeachNvsSave);
+    server.on("/api/teach/nvs/load", HTTP_POST, handleTeachNvsLoad);
+    server.on("/api/teach/press", HTTP_ANY, handleTeachPress);
     server.on("/api/clearcalib", HTTP_POST, handleClearCalib);
     server.on("/api/wifi", HTTP_POST, handleWifiSave);
-    server.on("/api/workplane/calib", HTTP_POST, handleWorkPlaneCalib);
-    server.on("/api/workplane/toggle", HTTP_POST, handleWorkPlaneToggle);
-    server.on("/api/workplane/status", HTTP_GET, handleWorkPlaneStatus);
+    server.on("/api/wristlock", HTTP_ANY, handleWristLock);
+    server.on("/api/activehold", HTTP_ANY, handleActiveHold);
+    server.on("/api/toollength", HTTP_ANY, handleToolLength);
+    server.on("/api/moveto", HTTP_POST, handleMoveTo);
 
     server.begin();
     Serial.printf("[WEB] HTTP server on port %u\n", WEB_SERVER_PORT);

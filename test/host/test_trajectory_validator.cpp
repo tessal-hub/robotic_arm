@@ -152,18 +152,17 @@ static void test_fixed_draw_plane() {
     Planner::Job job;
     job.shape = Planner::Shape::LINE;
     job.x1 = 100; job.y1 = 0; job.x2 = 150; job.y2 = 0;
-    job.z = DRAW_PLANE_Z_MM + 2.0f;
+    job.z = -5.0f; // Outside safe range [0.0, 150.0]
     const auto wrongZ = validateTrajectory(job);
     CHECK(!wrongZ.ok && std::strcmp(wrongZ.reason.c_str(), "WRONG_DRAW_PLANE") == 0,
-          "draw rejects every base Z except the fixed plane");
+          "draw rejects base Z outside safe range [0.0, 150.0]");
 
     WorkPlane wp;
     CHECK(wp.setThreePointCalibration({0, 0, DRAW_PLANE_Z_MM}, {100, 0, DRAW_PLANE_Z_MM},
                                       {0, 100, DRAW_PLANE_Z_MM}), "workplane setup");
     job.z = DRAW_PLANE_Z_MM;
     const auto transformed = validateTrajectory(job, &wp);
-    CHECK(!transformed.ok && std::strcmp(transformed.reason.c_str(), "WORKPLANE_ENABLED") == 0,
-          "draw rejects UCS so only the fixed base plane remains");
+    CHECK(transformed.ok, "draw accepts UCS when points are reachable on calibrated plane");
     if (g_fail == 0) PASS("fixed_draw_plane");
 }
 

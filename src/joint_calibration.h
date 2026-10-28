@@ -20,19 +20,23 @@ inline float configuredStepsPerDegree(uint8_t axis) {
     return stepsPerRev / 360.0f;
 }
 
+inline float normalizedSign(float encSign) {
+    return encSign < 0.0f ? -1.0f : 1.0f;
+}
+
 inline bool isPlausible(uint8_t axis, float encSign, float stepsPerDeg) {
     if (axis >= NUM_MOTORS || !std::isfinite(encSign) || !std::isfinite(stepsPerDeg)) {
         return false;
     }
     if (fabsf(fabsf(encSign) - 1.0f) > 0.01f) return false;
+    // BẮT BUỘC: Dấu encoder trong NVS phải trùng khớp với phần cứng trong config.h!
+    if (normalizedSign(encSign) != static_cast<float>(AXIS_ENC_SIGN[axis])) {
+        return false;
+    }
 
     const float configured = configuredStepsPerDegree(axis);
     const float ratio = stepsPerDeg / configured;
     return ratio >= MIN_STEPS_PER_DEGREE_RATIO && ratio <= MAX_STEPS_PER_DEGREE_RATIO;
-}
-
-inline float normalizedSign(float encSign) {
-    return encSign < 0.0f ? -1.0f : 1.0f;
 }
 
 } // namespace jointcal

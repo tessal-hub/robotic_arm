@@ -66,10 +66,13 @@ constexpr uint8_t CARTESIAN_AXIS_COUNT          = 5;    // J1..J5; J6 roll khôn
 
 // Chiều quay logic: +1 nếu step CW ứng với góc khớp tăng dương (hiệu chỉnh lúc lắp).
 // J2 và J3: góc dương là hướng vươn ra ngoài.
-constexpr int8_t AXIS_STEP_SIGN[NUM_MOTORS]     = { +1, +1, -1, -1, +1, +1 };
+constexpr int8_t AXIS_STEP_SIGN[NUM_MOTORS]     = { +1, -1, -1, -1, +1, +1 };
 // Chiều đo AS5600: +1 nếu raw encoder tăng khi góc khớp tăng dương (đo thực tế).
 // J5: encoder cùng chiều chuyển động motor (step CW / góc tăng) → +1 (xác nhận người dùng 2026-09-09).
-constexpr int8_t AXIS_ENC_SIGN[NUM_MOTORS]      = { -1, -1, 1, -1, 1, -1 };
+constexpr int8_t AXIS_ENC_SIGN[NUM_MOTORS]      = { -1, +1, -1, -1, 1, -1 };
+// Tỉ lệ scale góc encoder về độ khớp thực tế:
+// J1: homing span 8879 steps (166.48° khớp) ứng với 67.7° encoder => scale = 2.459f
+constexpr float  AXIS_ENC_SCALE[NUM_MOTORS]     = { 2.459f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
 
 // ==============================================================================
 // 3. I2C SENSOR BUS (PCA9548A Multiplexer + AS5600 Magnetic Encoders)
@@ -99,10 +102,10 @@ constexpr uint8_t ENDSTOP_ACTIVE_STATE          = LOW;    // Pull-up active low
 // Endstop pins (nhãn MIN/MAX tương ứng với hướng góc - và +)
 constexpr int8_t J1_MIN_PIN                     = 6;
 constexpr int8_t J1_MAX_PIN                     = 5;
-constexpr int8_t J2_MIN_PIN                     = 7;
-constexpr int8_t J2_MAX_PIN                     = 10;
-constexpr int8_t J3_MIN_PIN                     = 12;
-constexpr int8_t J3_MAX_PIN                     = 11;
+constexpr int8_t J2_MIN_PIN                     = 10;
+constexpr int8_t J2_MAX_PIN                     = 7;
+constexpr int8_t J3_MIN_PIN                     = 11;
+constexpr int8_t J3_MAX_PIN                     = 12;
 
 constexpr int AXIS_MIN_PINS[NUM_MOTORS] = { J1_MIN_PIN, J2_MIN_PIN, J3_MIN_PIN, -1, -1, -1 };
 constexpr int AXIS_MAX_PINS[NUM_MOTORS] = { J1_MAX_PIN, J2_MAX_PIN, J3_MAX_PIN, -1, -1, -1 };
@@ -134,7 +137,7 @@ constexpr uint16_t DEFAULT_NORMAL_CURRENT       = 800;    // Normal running curr
 constexpr uint16_t NORMAL_CURRENT_J1            = 1000;    // Base Yaw (mA)
 constexpr uint16_t NORMAL_CURRENT_J2            = 1700;   // Shoulder Pitch (mA) — nâng cánh tay trên
 constexpr uint16_t NORMAL_CURRENT_J3            = 1700;   // Elbow Pitch (mA) — nâng khuỷu tay
-constexpr uint16_t NORMAL_CURRENT_J4            = 500;    // Wrist Pan (mA)
+constexpr uint16_t NORMAL_CURRENT_J4            = 550;    // Wrist Pan (mA) - đủ mô-men vượt ma sát/cáp trong StealthChop
 constexpr uint16_t NORMAL_CURRENT_J5            = 0;      // A4988 - VREF cứng
 constexpr uint16_t NORMAL_CURRENT_J6            = 0;      // A4988 - VREF cứng
 
@@ -165,7 +168,7 @@ constexpr uint16_t DEFAULT_AXIS_HOMING_CURRENTS[NUM_MOTORS] = {
 
 constexpr uint32_t HOMING_STEP_INTERVAL_J1      = 1100;   // 909 steps/s
 constexpr uint32_t HOMING_STEP_INTERVAL_J2      = 1200;   // 833 steps/s; giảm riêng J2 để giữ torque/giảm EMI
-constexpr uint32_t HOMING_STEP_INTERVAL_J3      = 900;    // 1111 steps/s
+constexpr uint32_t HOMING_STEP_INTERVAL_J3      = 1200;   // 833 steps/s; giảm tốc độ J3 tăng mô-men và giảm nhiễu EMI
 constexpr uint32_t HOMING_STEP_INTERVAL_J4      = 1200;   // 833 steps/s
 constexpr uint32_t HOMING_STEP_INTERVAL_J5      = 1500;   // 667 steps/s
 constexpr uint32_t HOMING_STEP_INTERVAL_J6      = 1500;   // 667 steps/s
@@ -184,7 +187,8 @@ constexpr uint16_t DEFAULT_STALL_THRESHOLD      = 135;    // StallGuard4 SGTHRS 
 
 // Homing fusion: endstop + StallGuard + encoder + step counting
 constexpr float HOME_BACKOFF_DEG                = 2.0f;   // Lùi ra sau khi chạm endstop/stall
-constexpr uint16_t STALL_SG_LEVEL               = 70;     // SG_RESULT < 70 khi tải tăng (nhạy hơn, ngắt sớm)
+constexpr float J3_HOME_OFFSET_DEG              = 10.0f;  // Khoảng lùi từ cữ MIN để J3 đạt mốc 0 độ (10 độ theo yêu cầu)
+constexpr uint16_t STALL_SG_LEVEL               = 30;     // SG_RESULT < 30 khi tải tăng (chặn chạm cứng thực sự, không ngắt nhầm khi chạy tự do)
 constexpr uint8_t STALL_CONSECUTIVE_POLLS       = 2;      // Poll liên tiếp xác nhận stall
 constexpr uint32_t HOMING_JOINT_TIMEOUT_MS      = 30000;  // Timeout tối đa cho 1 khớp
 constexpr uint32_t HOMING_POLL_MS               = 20;     // Chu kỳ giám sát endstop/stall trong FSM (20ms giảm tải UART)
@@ -195,9 +199,9 @@ constexpr uint32_t HOMING_SLOW_SCAN_INTERVAL_US = 1800;   // 556 steps/s, vẫn 
 constexpr uint8_t  HOMING_MAX_ATTEMPTS          = 2;      // Số lần thử tối đa mỗi khớp trước khi hủy chuỗi
 constexpr float    HOMING_VERIFY_TOL_BASE_DEG   = 0.5f;   // Verify tại home: dung sai gốc (độ raw encoder)
 constexpr float    HOMING_VERIFY_TOL_SPAN_PCT   = 1.0f;   // Verify: + % của nửa span (chịu sai số steps/deg đo được)
-constexpr float    HOMING_STALL_WINDOW_MIN_DEG  = 1.2f;   // Cửa sổ step-lag tối thiểu (độ) — phải > 2x ngưỡng dưới
-constexpr float    HOMING_STALL_ENC_DELTA_DEG   = 2.5f;   // Encoder dịch < ngưỡng trong cửa sổ => stall (nhạy, dừng ngay khi chạm)
-constexpr int32_t  HOMING_STALL_WINDOW_MIN_STEPS = 120;   // Sàn cửa sổ (120 bước ~ 0.24s) — phát hiện kẹt nhanh chóng
+constexpr float    HOMING_STALL_WINDOW_MIN_DEG  = 4.0f;   // Cửa sổ step-lag tối thiểu (độ) — phải > 2x ngưỡng dưới
+constexpr float    HOMING_STALL_ENC_DELTA_DEG   = 1.0f;   // Encoder dịch < ngưỡng trong cửa sổ => stall (nhạy, dừng ngay khi chạm)
+constexpr int32_t  HOMING_STALL_WINDOW_MIN_STEPS = 180;   // Sàn cửa sổ (180 bước ~ 0.36s) — phát hiện kẹt nhanh chóng
 // Span encoder tối thiểu sau khi quét đủ 2 cữ: thấp hơn ngưỡng này (motor đã đi hàng trăm
 // bước) chứng tỏ encoder đóng băng/đọc lỗi → HỦY khớp, không home ảo.
 constexpr float    HOMING_MIN_ENC_SPAN_DEG[NUM_MOTORS] = { 30.0f, 30.0f, 30.0f, 15.0f, 10.0f, 10.0f };
@@ -206,20 +210,20 @@ constexpr float    HOMING_MIN_ENC_SPAN_DEG[NUM_MOTORS] = { 30.0f, 30.0f, 30.0f, 
 constexpr float    HOMING_MIN_MECHANICAL_SPAN_DEG = 15.0f;
 // J4 commissioning mới cần quét tới 150° để tìm cữ; vẫn bị chặn bởi timeout 60s.
 constexpr float    HOMING_J4_MAX_MECHANICAL_SPAN_DEG = 150.0f;
-constexpr float    HOMING_TRIM_MAX_TRAVEL_DEG  = 5.0f;    // Giới hạn hành trình mỗi lần trim VERIFY (chống trim chạy loạn đâm endstop)
+constexpr float    HOMING_TRIM_MAX_TRAVEL_DEG  = 15.0f;   // Giới hạn hành trình mỗi lần trim VERIFY (chống trim chạy loạn đâm endstop)
 constexpr uint8_t  HOMING_BACKOFF_MAX_EXTEND    = 3;      // Số lần nới rộng backoff (2.5°→5°→10°→20°) khi công tắc chưa nhả (hysteresis đòn bẩy)
 constexpr uint32_t HOMING_BACKOFF_SETTLE_MS    = 30;     // Settle cơ khí & tiếp điểm sau khi dừng đột ngột từ pha quét (non-blocking)
 
 // Speed & Acceleration Timing (microseconds per step pulse)
 constexpr uint32_t DEFAULT_STEP_INTERVAL_US     = 720;    // Target step interval -> 1389 steps/sec
 constexpr uint32_t MIN_STEP_INTERVAL_US         = 120;    // Max speed limit -> ~8333 steps/sec
-constexpr uint32_t MAX_STEP_INTERVAL_US         = 3500;   // Starting speed interval (~285 steps/sec, max static torque)
+constexpr uint32_t MAX_STEP_INTERVAL_US         = 2400;   // Starting speed interval (~416 steps/sec, khởi động nhanh nhạy hơn)
 
 // Tốc độ Jog độc lập từng khớp (us/step) — tối ưu mô-men xoắn cao tuyệt đối, không trượt bước:
 constexpr uint32_t DEFAULT_AXIS_JOG_SPEEDS[NUM_MOTORS] = {
-    720,   // J1 (6:1):  1389 steps/s -> 26.04 deg/s
-    1100,  // J2 (20:1): 909 steps/s  -> 5.11 deg/s
-    1100,  // J3 (20:1): 909 steps/s  -> 5.11 deg/s
+    400,   // J1 (6:1):  2500 steps/s -> 46.88 deg/s (tăng tốc độ xoay đế, không còn chậm)
+    550,   // J2 (20:1): 1818 steps/s -> 10.23 deg/s (nhanh gấp đôi mức cũ 1100us, vẫn khỏe với 1700mA)
+    1100,  // J3 (20:1): 909 steps/s  -> 5.11 deg/s  (giữ nguyên mức ổn định: "j3 thì ok rồi")
     900,   // J4 (4:1):  1111 steps/s -> 31.25 deg/s
     1500,  // J5 (3:1):  667 steps/s  -> 25.00 deg/s
     1500   // J6 (1:1):  667 steps/s  -> 75.00 deg/s
@@ -267,9 +271,10 @@ constexpr float J1_MIN_LIMIT                    = -90.0f; // 270 deg total strok
 constexpr float J1_MAX_LIMIT                    = +90.0f;
 constexpr float J2_MIN_LIMIT                    = -90.0f;  // 180 deg total stroke
 constexpr float J2_MAX_LIMIT                    = +90.0f;
-// Mở giới hạn âm J3 (-90..+90 deg) cho phép jog âm bình thường sau homing / khôi phục NVS
-constexpr float J3_MIN_LIMIT                    = -90.0f;
-constexpr float J3_MAX_LIMIT                    = +90.0f;  // 180 deg total stroke (-90..+90)
+// Owner-locked mechanical envelope: J3 home is straight/aligned (MIN + 2.5 deg offset).
+// Negative elbow motion past home is not permitted, aligning with kin::J3_MIN/MAX.
+constexpr float J3_MIN_LIMIT                    = -20.0f; // Cho phep vuot qua thang dung -20 do
+constexpr float J3_MAX_LIMIT                    = +90.0f;  // 110 deg total stroke (-20..+90)
 constexpr float J4_MIN_LIMIT                    = -75.0f;  // 150 deg total stroke
 constexpr float J4_MAX_LIMIT                    = +75.0f;
 constexpr float J5_MIN_LIMIT                    = -90.0f;
@@ -293,6 +298,11 @@ constexpr float DEFAULT_AXIS_CALIB_RANGE[NUM_MOTORS] = {
     (J5_MAX_LIMIT - J5_MIN_LIMIT),
     (J6_MAX_LIMIT - J6_MIN_LIMIT)
 };
+
+// Khóa cứng hoàn toàn cụm cổ tay J4, J5, J6 (true = không cho phép Jog/Home/ShowOff xoay J4..J6, không bù góc)
+constexpr bool LOCK_WRIST_J4_J6                 = true;
+// Dòng giữ tĩnh (ihold scale 0..31) cho J4 (TMC2209) để khóa cứng cổ tay
+constexpr uint8_t WRIST_J4_HOLD_SCALE           = 28;
 
 // ==============================================================================
 // 7. NETWORKING & SYSTEM CONFIGURATION

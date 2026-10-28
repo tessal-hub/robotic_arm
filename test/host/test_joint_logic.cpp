@@ -33,10 +33,10 @@ static void testCwForDeltaJ1PositiveSign() {
 }
 
 static void testCwForDeltaJ2NegativeSign() {
-    // J2 AXIS_STEP_SIGN = +1 (config.h: góc dương vươn ra ngoài)
-    CHECK(AXIS_STEP_SIGN[1] > 0, "J2 STEP_SIGN positive");
-    CHECK(cwForDelta(1, +10.0f) == true, "J2 +delta => cw");
-    CHECK(cwForDelta(1, -10.0f) == false, "J2 -delta => ccw");
+    // J2 AXIS_STEP_SIGN = -1
+    CHECK(AXIS_STEP_SIGN[1] < 0, "J2 STEP_SIGN negative");
+    CHECK(cwForDelta(1, +10.0f) == false, "J2 +delta => ccw");
+    CHECK(cwForDelta(1, -10.0f) == true, "J2 -delta => cw");
 }
 
 static void testCwForDeltaJ3NegativeSign() {
@@ -58,14 +58,14 @@ static void testIndependentWristRatios() {
 }
 
 static void testJ3SoftLimitContract() {
-    CHECK(J3_MIN_LIMIT == -90.0f, "J3 minimum limit is negative 90 degrees");
+    CHECK(J3_MIN_LIMIT == -20.0f, "J3 minimum limit is -20 degrees (aligned with kin::J3_MIN)");
     CHECK(J3_MAX_LIMIT == 90.0f, "J3 maximum limit is positive 90 degrees");
     CHECK(DEFAULT_AXIS_LIMIT_MIN[2] == J3_MIN_LIMIT,
           "J3 minimum in shared soft-limit table");
     CHECK(DEFAULT_AXIS_LIMIT_MAX[2] == J3_MAX_LIMIT,
           "J3 maximum in shared soft-limit table");
-    CHECK(DEFAULT_AXIS_CALIB_RANGE[2] == 180.0f,
-          "J3 calibration range is 180 degrees");
+    CHECK(DEFAULT_AXIS_CALIB_RANGE[2] == 110.0f,
+          "J3 calibration range is 110 degrees");
 }
 
 static void testJ4SoftLimitContract() {

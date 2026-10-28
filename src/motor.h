@@ -24,7 +24,7 @@ private:
     const char* label;
 
     std::atomic<bool> running{false};
-    std::atomic<bool> dirCW{true};
+    std::atomic<int8_t> dirCW{-1}; // -1 = chua khoi tao, 0 = CCW (false), 1 = CW (true)
     std::atomic<uint32_t> targetSpeedUs{DEFAULT_STEP_INTERVAL_US};
     std::atomic<uint32_t> currentSpeedUs{MAX_STEP_INTERVAL_US};
     uint32_t startSpeedUs{MAX_STEP_INTERVAL_US};
@@ -95,6 +95,7 @@ public:
 
     void setSpeed(uint32_t intervalUs);
     void setCurrent(uint16_t mA);
+    void setHoldCurrentScale(uint8_t iholdVal);
     void setChopperMode(bool spreadCycle);
     uint16_t getSGResult();
 
@@ -103,7 +104,7 @@ public:
     TMC2209Stepper* getDriver() noexcept { return driver.get(); }
 
     [[nodiscard]] bool isRunning() const noexcept { return running.load(std::memory_order_relaxed); }
-    [[nodiscard]] bool getDirCW() const noexcept { return dirCW.load(std::memory_order_relaxed); }
+    [[nodiscard]] bool getDirCW() const noexcept { return dirCW.load(std::memory_order_relaxed) > 0; }
     [[nodiscard]] uint32_t getTargetSteps() const noexcept { return targetSteps.load(std::memory_order_relaxed); }
     [[nodiscard]] uint32_t getStepCounter() const noexcept { return stepCounter.load(std::memory_order_relaxed); }
     // Vị trí tuyệt đối tính bằng microstep. Chỉ set khi motor KHÔNG chạy (homing/calib).

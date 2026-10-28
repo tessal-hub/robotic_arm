@@ -127,56 +127,22 @@ void NvsStore::clearCalib(uint8_t axis) {
     prefs_.putBool(key, false);
 }
 
-NvsStore::TeachPoint NvsStore::loadTeachPoint(uint8_t slot) const {
-    TeachPoint point;
-    if (!ok_ || slot >= 3) return point;
-    char key[12];
-    snprintf(key, sizeof(key), "tp%u_valid", slot);
-    if (!prefs_.getBool(key, false)) return point;
-    // New payload includes the coordinate frame. Legacy tp*_deg has no frame
-    // identity and must be taught again rather than silently replayed.
-    snprintf(key, sizeof(key), "tp%u_pose", slot);
-    if (prefs_.getBytesLength(key) != sizeof(point.axes) ||
-        prefs_.getBytes(key, point.axes, sizeof(point.axes)) != sizeof(point.axes)) return point;
-    for (const auto& axis : point.axes) {
-        if (!std::isfinite(axis.deg) || !std::isfinite(axis.homeRawDeg) ||
-            axis.homeRawDeg < 0.0f || axis.homeRawDeg >= 360.0f ||
-            (axis.encSign != -1.0f && axis.encSign != 1.0f)) return TeachPoint{};
-    }
-    point.valid = true;
-    return point;
+bool NvsStore::saveTeachTrajectory(const void* data, size_t size) {
+    if (!ok_ || data == nullptr || size == 0) return false;
+    if (prefs_.putBytes("teach_traj", data, size) != size) return false;
+    return prefs_.putUInt("teach_len", static_cast<uint32_t>(size)) > 0;
 }
 
-bool NvsStore::saveTeachPoint(uint8_t slot, const TeachPoint& point) {
-    if (!ok_ || slot >= 3) return false;
-    for (const auto& axis : point.axes) {
-        if (!std::isfinite(axis.deg) || !std::isfinite(axis.homeRawDeg) ||
-            axis.homeRawDeg < 0.0f || axis.homeRawDeg >= 360.0f ||
-            (axis.encSign != -1.0f && axis.encSign != 1.0f)) return false;
-    }
-    char dataKey[12], validKey[12];
-    snprintf(dataKey, sizeof(dataKey), "tp%u_pose", slot);
-    snprintf(validKey, sizeof(validKey), "tp%u_valid", slot);
-    if (prefs_.putBool(validKey, false) != 1) return false;
-    if (prefs_.putBytes(dataKey, point.axes, sizeof(point.axes)) != sizeof(point.axes)) return false;
-    if (prefs_.putBool(validKey, true) != 1) return false;
-    const TeachPoint stored = loadTeachPoint(slot);
-    if (!stored.valid) return false;
-    for (uint8_t i = 0; i < NUM_MOTORS; ++i) {
-        if (stored.axes[i].deg != point.axes[i].deg ||
-            stored.axes[i].homeRawDeg != point.axes[i].homeRawDeg ||
-            stored.axes[i].encSign != point.axes[i].encSign) return false;
-    }
-    return true;
+size_t NvsStore::loadTeachTrajectory(void* data, size_t maxSize) const {
+    if (!ok_ || data == nullptr || maxSize == 0) return 0;
+    const uint32_t len = prefs_.getUInt("teach_len", 0);
+    if (len == 0 || len > maxSize) return 0;
+    return prefs_.getBytes("teach_traj", data, len);
 }
 
-bool NvsStore::clearTeachPoints() {
+bool NvsStore::clearTeachTrajectory() {
     if (!ok_) return false;
-    bool ok = true;
-    for (uint8_t slot = 0; slot < 3; ++slot) {
-        char key[12];
-        snprintf(key, sizeof(key), "tp%u_valid", slot);
-        if (prefs_.putBool(key, false) != 1 || prefs_.getBool(key, true)) ok = false;
-    }
-    return ok;
+    prefs_.remove("teach_len");
+    prefs_.remove("teach_traj");
+    return true;
 }

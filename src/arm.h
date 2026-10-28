@@ -4,22 +4,24 @@
 #include <Arduino.h>
 #include <atomic>
 #include <memory>
+#include <mutex>
+#include <cstring>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
 #include "config.h"
 #include "safety_manager.h"
 #include "nvs_store.h"
+#include "teach_manager.h"
 
 class Motor;
 class Sensor;
 class Endstops;
 class JointModel;
 class HomingController;
-class Planner;
 class NvsStore;
 
-enum class ArmMode : uint8_t { IDLE = 0, RELEASE, HOMING, JOG, CART, DRAW, SHOW_OFF, FAULT };
+enum class ArmMode : uint8_t { IDLE = 0, RELEASE, HOMING, JOG, DRAW, SHOW_OFF, FAULT };
 
 class WifiManager;
 void armSetWifiProvider(WifiManager* w); // inject provider cho statusJson (tránh vòng include)
@@ -28,22 +30,20 @@ struct ArmCommand {
     enum Type : uint8_t {
         NONE = 0,
         JOG_REL,     // axis di chuyển tương đối value (độ)
-        STOP_ALL,    // dừng mọi chuyển động + huỷ homing/planner
+        STOP_ALL,    // dừng mọi chuyển động + huỷ homing
         HOME_ALL,    // homing chuỗi J1..J4
         HOME_AXIS,   // homing 1 khớp (axis)
         SET_HOME,    // đặt home thủ công tại vị trí hiện tại (axis)
-        RELEASE_J1_J4,
-        ENABLE_J1_J4,
         CLEAR_FAULT, // thoát trạng thái FAULT
-        MOVE_CART,   // p[0..2]=x,y,z — di chuyển TCP tới điểm (bút xuống)
-        DRAW_LINE,   // p[0..4]=x1,y1,x2,y2,z ; p[5]=feed
-        DRAW_CIRCLE, // p[0..2]=cx,cy,z ; p[3]=r ; p[5]=feed
-        DRAW_SQUARE, // p[0..2]=cx,cy,z ; p[3]=side ; p[5]=feed
         SHOW_OFF,    // trình diễn đồng bộ 6 khớp múa nhẹ nhàng trong khoảng an toàn
-        SAVE_TEACH_POINT,
-        PLAY_TEACH_POINTS,
-        CLEAR_TEACH_POINTS,
-        SET_GRIPPER // value: commanded servo angle, independent of J1..J6/Teach
+        TEACH_FREE,  // thả lỏng J1..J3 để kéo tay, khóa cứng J4..J6
+        TEACH_RECORD,// ghi điểm quỹ đạo (value >= 0.5f: Hạ bút; < 0.5f: Nhấc bút)
+        TEACH_UNDO,  // xóa điểm vừa ghi
+        TEACH_CLEAR, // xóa toàn bộ điểm quỹ đạo
+        TEACH_PLAY,  // chạy lại quỹ đạo dạy (p[0]=stepDeg, p[1]=speedDelayMs)
+        TEACH_STOP,  // dừng chạy lại
+        CLEAR_CALIB, // xóa calib/NVS home
+        SET_GRIPPER  // value: góc servo gripper [0..180]
     };
     Type type{Type::NONE};
     uint8_t axis{0};
@@ -65,7 +65,7 @@ public:
     ArmController& operator=(const ArmController&) = delete;
 
     void begin(Motor** motors, Sensor* sensor, Endstops* endstops,
-               JointModel* joints, HomingController* homing, Planner* planner, NvsStore* nvs);
+               JointModel* joints, HomingController* homing, NvsStore* nvs);
 
     // Đưa lệnh vào hàng đợi. Trả false nếu đầy/đang bận với lệnh không thể trộn.
     [[nodiscard]] bool submit(const ArmCommand& cmd, uint32_t timeoutMs = 10);
@@ -74,9 +74,21 @@ public:
 
     [[nodiscard]] ArmMode mode() const;
     [[nodiscard]] SafetyManager* safety() noexcept { return safety_.get(); }
-    [[nodiscard]] const String& lastPlannerError() const noexcept { return lastPlannerError_; }
-    [[nodiscard]] int lastPlannerFailIndex() const noexcept { return lastPlannerFailIndex_; }
+    [[nodiscard]] TeachManager* teachManager() noexcept { return &teachMgr_; }
     String statusJson();
+
+    [[nodiscard]] bool isWristLocked() const noexcept { return wristLocked_.load(std::memory_order_relaxed); }
+    void setWristLocked(bool lock);
+
+    [[nodiscard]] bool isActiveHoldEnabled() const noexcept { return activeHold_.load(std::memory_order_relaxed); }
+    void setActiveHold(bool en) noexcept { activeHold_.store(en, std::memory_order_relaxed); }
+
+    void setTargetHoldAngle(uint8_t axis, float deg) noexcept {
+        if (axis < NUM_MOTORS) targetHoldAngle_[axis] = deg;
+    }
+    [[nodiscard]] float getTargetHoldAngle(uint8_t axis) const noexcept {
+        return (axis < NUM_MOTORS) ? targetHoldAngle_[axis] : 0.0f;
+    }
 
 private:
     static void taskEntry(void* param);
@@ -93,16 +105,12 @@ private:
     void updateShowOff();
     void stopShowOff();
     void executeShowOffStep(uint8_t step);
-    void updateTeachPlayback();
-    bool moveToTeachPoint(uint8_t slot);
-    void refreshTeachPoints();
 
     Motor* motors[NUM_MOTORS]{};
     Sensor* sensor{nullptr};
     Endstops* es{nullptr};
     JointModel* jm{nullptr};
     HomingController* hc{nullptr};
-    Planner* pl{nullptr};
     NvsStore* nvs{nullptr};
 
     QueueHandle_t queue{nullptr};
@@ -117,20 +125,17 @@ private:
     std::atomic<uint32_t> lastCommandLatencyUs_{0};
     uint8_t recoveryJogAxis_{NUM_MOTORS};
     EndstopWhich recoveryJogSide_{EndstopWhich::MIN};
-    String lastPlannerError_{"OK"};
-    int lastPlannerFailIndex_{-1};
 
     // Trạng thái Show Off
-    bool showOffActive_{false};
+    std::atomic<bool> showOffActive_{false};
     uint8_t showOffStep_{0};
     float showOffBaseAngles_[NUM_MOTORS]{};
-    static constexpr uint8_t TEACH_POINT_COUNT = 3;
-    NvsStore::TeachPoint teachPoints_[TEACH_POINT_COUNT]{};
-    std::atomic<uint8_t> teachValidMask_{0};
-    enum class TeachError : uint8_t { NONE, NVS, HOME, FRAME, INVALID };
-    std::atomic<TeachError> teachError_{TeachError::NONE};
-    bool teachPlaybackActive_{false};
-    uint8_t teachPlaybackSlot_{0};
+
+    TeachManager teachMgr_;
+
+    std::atomic<bool> wristLocked_{true};
+    std::atomic<bool> activeHold_{true};
+    float targetHoldAngle_[NUM_MOTORS]{};
 };
 
 #endif // ARM_H

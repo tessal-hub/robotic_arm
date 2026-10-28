@@ -129,6 +129,16 @@ float Sensor::filter(uint8_t ch, uint16_t raw) {
     if (shortestDelta > 180.0f) shortestDelta -= 360.0f;
     if (shortestDelta < -180.0f) shortestDelta += 360.0f;
 
+    // AS5600 không shadow-latch cặp byte ANGLE: đọc MSB/LSB rời rạc bị tear
+    // khi rollover biên 12-bit đúng giữa 2 byte (cửa sổ rộng thêm ở I2C 20kHz).
+    // Torn read cho |shortestDelta| ≈ 330°+, trong khi vận tốc khớp tối đa
+    // (~75°/s @ chu kỳ quét 35ms) chỉ đạt ~2.6°/sample — vượt 90° là bất khả
+    // về mặt vật lý: bỏ sample này, giữ nguyên last_raw/accumulated/turn_counts
+    // (sample kế tiếp tự chữa vì delta được tính lại từ last_raw cũ).
+    if (fabsf(shortestDelta) > 90.0f) {
+        return filtered_angles[ch];
+    }
+
     if (rawDelta > 180.0f) {
         turn_counts[ch]--;
     } else if (rawDelta < -180.0f) {
@@ -171,10 +181,25 @@ void Sensor::scanOnce() {
         }
 
         read_fail_counts[i] = 0;
+        const bool wasOutage = sensor_error[i].load(std::memory_order_relaxed);
 
         auto dataLock = makeTimedLock(dataMutex, SENSOR_I2C_MUTEX_TIMEOUT_MS);
         if (dataLock) {
-            filter(i, raw);
+            if (wasOutage && initialized[i]) {
+                // Khôi phục mượt sau lỗi I2C: cập nhật góc quanh vòng quay hiện tại
+                // thay vì đặt initialized[i] = false (làm mất turn_counts gây nhảy bội số 360°).
+                const float new_angle = (static_cast<float>(raw) / 4096.0f) * 360.0f;
+                float diff = new_angle - last_raw_angles[i];
+                if (diff > 180.0f) diff -= 360.0f;
+                if (diff < -180.0f) diff += 360.0f;
+                if (new_angle - last_raw_angles[i] > 180.0f) turn_counts[i]--;
+                else if (new_angle - last_raw_angles[i] < -180.0f) turn_counts[i]++;
+                last_raw_angles[i] = new_angle;
+                accumulated_angles[i] += diff;
+                filtered_angles[i] = new_angle;
+            } else {
+                filter(i, raw);
+            }
             publishSample(i);
             sensor_error[i].store(false, std::memory_order_release);
         }

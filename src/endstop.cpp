@@ -3,6 +3,9 @@
 #ifdef ARDUINO
 #include "safety_manager.h"
 #include <esp_timer.h>
+#if defined(ESP_PLATFORM)
+#include <esp_rom_sys.h>
+#endif
 #else
 class SafetyManager;
 #endif
@@ -98,9 +101,6 @@ void IRAM_ATTR Endstops::isrHandler(void* arg) {
     if (!c->enabled.load(std::memory_order_relaxed)) return;
 
 #ifdef ARDUINO
-#if defined(ESP_PLATFORM)
-#include <esp_rom_sys.h>
-#endif
     // Khử nhiễu phần cứng (Hardware EMI Glitch Rejection):
     // Xung nhiễu cảm ứng từ motor PWM chỉ tồn tại vài chục ns đến vài µs.
     // Kiểm tra nhiều mẫu liên tiếp (cách nhau 10µs, tổng ~30µs) để đảm bảo
@@ -165,7 +165,16 @@ bool Endstops::isPressed(uint8_t axis, EndstopWhich w) const noexcept {
 bool Endstops::isPhysicallyPressed(uint8_t axis, EndstopWhich w) const noexcept {
     if (!hasPin(axis, w)) return false;
 #ifdef ARDUINO
-    return digitalRead(ch(axis, w).pin) == ENDSTOP_ACTIVE_STATE;
+    const int pin = ch(axis, w).pin;
+    if (pin < 0) return false;
+    // Hardware glitch filter: đọc 3 mẫu liên tiếp cách nhau 10µs.
+    // Xung cảm ứng EMI từ dây động lực stepper chỉ tồn tại < 2µs;
+    // tiếp xúc cơ khí thật giữ mức LOW ổn định.
+    for (int sample = 0; sample < 3; ++sample) {
+        if (digitalRead(pin) != ENDSTOP_ACTIVE_STATE) return false;
+        esp_rom_delay_us(10);
+    }
+    return true;
 #else
     return false;
 #endif
